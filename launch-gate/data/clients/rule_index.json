@@ -1,0 +1,50 @@
+{
+  "_note": "SYNTHETIC. All valid citation IDs per client. Any other ID is invented.",
+  "brightleaf": {
+    "brand_book": [
+      "BL-BB-1.1",
+      "BL-BB-2.1",
+      "BL-BB-2.3",
+      "BL-BB-3.1"
+    ],
+    "register": [
+      "BL-C-01",
+      "BL-C-02",
+      "BL-C-03",
+      "BL-C-04",
+      "BL-C-05",
+      "BL-C-06",
+      "BL-C-07"
+    ]
+  },
+  "calmleaf": {
+    "brand_book": [
+      "CL-BB-1.1",
+      "CL-BB-2.2",
+      "CL-BB-3.1"
+    ],
+    "register": [
+      "CL-C-01",
+      "CL-C-02",
+      "CL-C-03",
+      "CL-C-04",
+      "CL-C-05",
+      "CL-C-06"
+    ]
+  },
+  "oakandhome": {
+    "brand_book": [
+      "OH-BB-1.1",
+      "OH-BB-2.4",
+      "OH-BB-3.1"
+    ],
+    "register": [
+      "OH-C-01",
+      "OH-C-02",
+      "OH-C-03",
+      "OH-C-04",
+      "OH-C-05",
+      "OH-C-06"
+    ]
+  }
+}

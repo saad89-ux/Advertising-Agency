@@ -1,0 +1,37 @@
+{
+  "_note": "SYNTHETIC. Deterministic first-review rejections with fortune-cookie reasons.",
+  "rules": [
+    {
+      "pattern": "clinically proven",
+      "reason": "Policy 4.2: substantiation required"
+    },
+    {
+      "pattern": "doctors love it",
+      "reason": "Policy 7.1: endorsement not verifiable"
+    },
+    {
+      "pattern": "lowest price",
+      "reason": "Policy 3.5: comparative claim"
+    },
+    {
+      "pattern": "miracle",
+      "reason": "Policy 4.1: exaggerated outcome"
+    },
+    {
+      "link_contains": "/moisturiser",
+      "reason": "Policy 9.3: landing page does not match ad"
+    },
+    {
+      "link_contains": "/rugs",
+      "reason": "Policy 9.3: landing page does not match ad"
+    },
+    {
+      "link_contains": "/magnesium",
+      "reason": "Policy 9.3: landing page does not match ad"
+    },
+    {
+      "link_contains": "/old-mask",
+      "reason": "Policy 9.1: landing page unavailable"
+    }
+  ]
+}

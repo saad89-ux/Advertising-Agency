@@ -1,0 +1,8 @@
+{
+  "cutoff": "2025-10-10",
+  "expected_stale": [
+    "instagram.text_max",
+    "linkedin.headline_max",
+    "tiktok.text_max"
+  ]
+}

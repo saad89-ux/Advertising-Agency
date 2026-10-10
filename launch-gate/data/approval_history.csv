@@ -1,0 +1,121 @@
+approval_id,client,platform,approved_headline,launched_headline,approved_hash,launched_hash,hashes_match,approved_by,channel,evidence_ref,approved_at
+AP-0001,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale,49a1b24454f83e8f,49a1b24454f83e8f,yes,Sam Ortiz,email,approval_001.png,2026-09-14T11:10:00Z
+AP-0002,oakandhome,facebook,Shop Oak Furniture,Shop Oak Furniture,280b4f705300137c,280b4f705300137c,yes,Tom Reyes,call,approval_002.png,2026-08-28T15:56:00Z
+AP-0003,brightleaf,facebook,Claim Yours,Claim Yours,e61101dcc497aa52,e61101dcc497aa52,yes,Owen Hart,text,approval_003.png,2026-07-18T11:28:00Z
+AP-0004,brightleaf,instagram,Claim Yours,Claim Yours Today,b142906192db9f7b,a2eb1b97fea1884d,NO,Owen Hart,text,approval_004.png,2026-07-27T11:24:00Z
+AP-0005,calmleaf,facebook,Try Sleep Gummies,Try Sleep Gummies Today,2debad86e1a288f7,7c5acfcbff91e410,NO,Priya Nair,email,approval_005.png,2026-08-14T14:52:00Z
+AP-0006,brightleaf,facebook,Shop the Bundle,Shop the Bundle,a0018ea321d84dc8,a0018ea321d84dc8,yes,Owen Hart,text,approval_006.png,2026-07-12T14:46:00Z
+AP-0007,calmleaf,instagram,Try Sleep Gummies,Try Sleep Gummies,1d71e8a5af3c0c40,1d71e8a5af3c0c40,yes,Sam Ortiz,email,approval_007.png,2026-07-11T18:39:00Z
+AP-0008,oakandhome,instagram,Free Delivery Offer,Free Delivery Offer,8628e40031b3365e,8628e40031b3365e,yes,Lena Fischer,email,approval_008.png,2026-07-24T18:19:00Z
+AP-0009,calmleaf,instagram,Wind Down Offer,Wind Down Offer,4c034ec5c8ad7a90,4c034ec5c8ad7a90,yes,Sam Ortiz,email,approval_009.png,2026-09-27T13:37:00Z
+AP-0010,oakandhome,instagram,Shop Oak Furniture,Shop Oak Furniture,90d6f2ae12087da7,90d6f2ae12087da7,yes,Tom Reyes,email,approval_010.png,2026-09-10T18:30:00Z
+AP-0011,calmleaf,instagram,Sleep Well Offer,Sleep Well Offer,fa43d00712f74571,fa43d00712f74571,yes,Priya Nair,text,approval_011.png,2026-08-22T19:58:00Z
+AP-0012,brightleaf,facebook,Weekend Glow Offer,Weekend Glow Offer,8a150e093bc9ba73,8a150e093bc9ba73,yes,Owen Hart,text,approval_012.png,2026-09-23T18:55:00Z
+AP-0013,oakandhome,facebook,Home Refresh Sale,Home Refresh Sale,cd38e33719b09c3c,cd38e33719b09c3c,yes,Lena Fischer,call,,2026-08-18T16:36:00Z
+AP-0014,calmleaf,facebook,Sleep Well Offer,Sleep Well Offer,7035f4a4cf1920fd,7035f4a4cf1920fd,yes,Sam Ortiz,email,approval_014.png,2026-09-22T11:44:00Z
+AP-0015,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Owen Hart,text,approval_015.png,2026-09-26T18:40:00Z
+AP-0016,oakandhome,instagram,Free Delivery Offer,Free Delivery Offer,8628e40031b3365e,8628e40031b3365e,yes,Tom Reyes,call,,2026-07-26T16:49:00Z
+AP-0017,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Tom Reyes,email,approval_017.png,2026-08-11T18:44:00Z
+AP-0018,brightleaf,facebook,Shop the Bundle,Shop the Bundle,a0018ea321d84dc8,a0018ea321d84dc8,yes,Maya Chen,email,approval_018.png,2026-07-22T19:57:00Z
+AP-0019,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Maya Chen,email,approval_019.png,2026-09-16T17:41:00Z
+AP-0020,oakandhome,facebook,Shop Oak Furniture,Shop Oak Furniture,280b4f705300137c,280b4f705300137c,yes,Lena Fischer,text,approval_020.png,2026-07-22T13:16:00Z
+AP-0021,oakandhome,facebook,See the Range,See the Range Today,f58564da04093ac4,66c0ae77cd6d9c34,NO,Lena Fischer,email,approval_021.png,2026-07-28T11:33:00Z
+AP-0022,brightleaf,facebook,Glow Sale,Glow Sale,46a69bb3d2ca0e92,46a69bb3d2ca0e92,yes,Maya Chen,email,approval_022.png,2026-09-12T14:59:00Z
+AP-0023,brightleaf,facebook,Shop the Bundle,Shop the Bundle,a0018ea321d84dc8,a0018ea321d84dc8,yes,Maya Chen,email,approval_023.png,2026-07-17T11:45:00Z
+AP-0024,oakandhome,instagram,See the Range,See the Range Today,c52a9c1414974634,a7f2a3c14bbadf4c,NO,Lena Fischer,text,approval_024.png,2026-07-21T19:11:00Z
+AP-0025,brightleaf,instagram,Shop the Sale,Shop the Sale,5fc67af97901ce51,5fc67af97901ce51,yes,Maya Chen,call,approval_025.png,2026-07-10T11:51:00Z
+AP-0026,oakandhome,facebook,Shop the Sale,Shop the Sale,29654482abf778eb,29654482abf778eb,yes,Lena Fischer,call,,2026-08-19T18:25:00Z
+AP-0027,calmleaf,instagram,Try Sleep Gummies,Try Sleep Gummies,1d71e8a5af3c0c40,1d71e8a5af3c0c40,yes,Sam Ortiz,call,,2026-08-23T19:17:00Z
+AP-0028,brightleaf,facebook,Claim Yours,Claim Yours Today,e61101dcc497aa52,a9d6606f516f2236,NO,Owen Hart,email,approval_028.png,2026-07-27T12:12:00Z
+AP-0029,calmleaf,facebook,Try Sleep Gummies,Try Sleep Gummies,2debad86e1a288f7,2debad86e1a288f7,yes,Priya Nair,email,approval_029.png,2026-08-28T11:21:00Z
+AP-0030,brightleaf,facebook,Shop the Sale,Shop the Sale Today,688573c776ce2579,1050c7b3910f28ea,NO,Maya Chen,email,approval_030.png,2026-07-18T11:44:00Z
+AP-0031,brightleaf,instagram,Shop the Sale,Shop the Sale,a2eced01b3451988,a2eced01b3451988,yes,Owen Hart,email,approval_031.png,2026-07-11T12:15:00Z
+AP-0032,brightleaf,facebook,Weekend Glow Offer,Weekend Glow Offer,8a150e093bc9ba73,8a150e093bc9ba73,yes,Maya Chen,call,,2026-07-22T17:53:00Z
+AP-0033,brightleaf,facebook,Weekend Glow Offer,Weekend Glow Offer,8a150e093bc9ba73,8a150e093bc9ba73,yes,Owen Hart,email,approval_033.png,2026-08-27T16:57:00Z
+AP-0034,brightleaf,facebook,Shop the Bundle,Shop the Bundle,a0018ea321d84dc8,a0018ea321d84dc8,yes,Owen Hart,text,approval_034.png,2026-07-26T16:26:00Z
+AP-0035,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Maya Chen,text,approval_035.png,2026-07-11T19:46:00Z
+AP-0036,calmleaf,instagram,Sleep Well Offer,Sleep Well Offer,fa43d00712f74571,fa43d00712f74571,yes,Priya Nair,text,approval_036.png,2026-08-10T15:22:00Z
+AP-0037,brightleaf,instagram,Shop the Bundle,Shop the Bundle Today,dc4b466fedcda764,ce3f331c66a3d91e,NO,Owen Hart,email,approval_037.png,2026-07-24T15:30:00Z
+AP-0038,brightleaf,instagram,Shop the Bundle,Shop the Bundle,dc4b466fedcda764,dc4b466fedcda764,yes,Owen Hart,call,approval_038.png,2026-08-11T13:41:00Z
+AP-0039,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Lena Fischer,email,approval_039.png,2026-09-10T18:51:00Z
+AP-0040,oakandhome,facebook,Free Delivery Offer,Free Delivery Offer,8159a27db7bd2ae3,8159a27db7bd2ae3,yes,Tom Reyes,email,approval_040.png,2026-07-20T18:24:00Z
+AP-0041,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale,49a1b24454f83e8f,49a1b24454f83e8f,yes,Sam Ortiz,email,approval_041.png,2026-07-24T19:38:00Z
+AP-0042,brightleaf,facebook,Shop the Bundle,Shop the Bundle,a0018ea321d84dc8,a0018ea321d84dc8,yes,Maya Chen,text,approval_042.png,2026-09-27T13:18:00Z
+AP-0043,brightleaf,facebook,Claim Yours,Claim Yours,e61101dcc497aa52,e61101dcc497aa52,yes,Maya Chen,email,approval_043.png,2026-07-18T10:37:00Z
+AP-0044,brightleaf,facebook,Claim Yours,Claim Yours,e61101dcc497aa52,e61101dcc497aa52,yes,Maya Chen,email,approval_044.png,2026-08-10T12:29:00Z
+AP-0045,brightleaf,instagram,Claim Yours,Claim Yours Today,b142906192db9f7b,a2eb1b97fea1884d,NO,Owen Hart,email,approval_045.png,2026-09-18T17:14:00Z
+AP-0046,oakandhome,instagram,Shop Oak Furniture,Shop Oak Furniture,90d6f2ae12087da7,90d6f2ae12087da7,yes,Tom Reyes,email,approval_046.png,2026-08-28T16:42:00Z
+AP-0047,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Tom Reyes,email,approval_047.png,2026-07-24T19:11:00Z
+AP-0048,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale,49a1b24454f83e8f,49a1b24454f83e8f,yes,Priya Nair,email,approval_048.png,2026-07-18T15:54:00Z
+AP-0049,calmleaf,instagram,Wind Down Offer,Wind Down Offer,4c034ec5c8ad7a90,4c034ec5c8ad7a90,yes,Priya Nair,email,approval_049.png,2026-09-20T12:27:00Z
+AP-0050,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Lena Fischer,email,approval_050.png,2026-07-24T16:29:00Z
+AP-0051,calmleaf,instagram,Sleep Well Offer,Sleep Well Offer,fa43d00712f74571,fa43d00712f74571,yes,Priya Nair,email,approval_051.png,2026-09-16T18:10:00Z
+AP-0052,calmleaf,facebook,Wind Down Offer,Wind Down Offer,dd7822da0326278f,dd7822da0326278f,yes,Priya Nair,email,approval_052.png,2026-08-24T12:30:00Z
+AP-0053,brightleaf,facebook,Shop the Bundle,Shop the Bundle,a0018ea321d84dc8,a0018ea321d84dc8,yes,Owen Hart,email,approval_053.png,2026-09-28T12:44:00Z
+AP-0054,calmleaf,facebook,Wind Down Offer,Wind Down Offer,dd7822da0326278f,dd7822da0326278f,yes,Sam Ortiz,email,approval_054.png,2026-07-16T13:50:00Z
+AP-0055,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Tom Reyes,email,approval_055.png,2026-07-17T19:42:00Z
+AP-0056,calmleaf,facebook,Wind Down Offer,Wind Down Offer,dd7822da0326278f,dd7822da0326278f,yes,Sam Ortiz,email,approval_056.png,2026-08-14T17:25:00Z
+AP-0057,oakandhome,facebook,Shop the Sale,Shop the Sale,29654482abf778eb,29654482abf778eb,yes,Lena Fischer,call,approval_057.png,2026-09-27T16:52:00Z
+AP-0058,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale,49a1b24454f83e8f,49a1b24454f83e8f,yes,Priya Nair,email,approval_058.png,2026-07-19T10:34:00Z
+AP-0059,oakandhome,facebook,Shop Oak Furniture,Shop Oak Furniture,280b4f705300137c,280b4f705300137c,yes,Lena Fischer,email,approval_059.png,2026-08-11T11:26:00Z
+AP-0060,oakandhome,facebook,Free Delivery Offer,Free Delivery Offer,8159a27db7bd2ae3,8159a27db7bd2ae3,yes,Tom Reyes,email,approval_060.png,2026-09-20T12:36:00Z
+AP-0061,brightleaf,facebook,Claim Yours,Claim Yours,e61101dcc497aa52,e61101dcc497aa52,yes,Maya Chen,email,approval_061.png,2026-07-21T17:12:00Z
+AP-0062,calmleaf,instagram,Wind Down Offer,Wind Down Offer,4c034ec5c8ad7a90,4c034ec5c8ad7a90,yes,Sam Ortiz,call,,2026-07-18T14:19:00Z
+AP-0063,brightleaf,facebook,Weekend Glow Offer,Weekend Glow Offer,8a150e093bc9ba73,8a150e093bc9ba73,yes,Owen Hart,call,,2026-08-19T12:58:00Z
+AP-0064,brightleaf,instagram,Shop the Bundle,Shop the Bundle,dc4b466fedcda764,dc4b466fedcda764,yes,Owen Hart,text,approval_064.png,2026-08-17T18:17:00Z
+AP-0065,calmleaf,facebook,Try Sleep Gummies,Try Sleep Gummies,2debad86e1a288f7,2debad86e1a288f7,yes,Sam Ortiz,email,approval_065.png,2026-08-25T19:21:00Z
+AP-0066,calmleaf,instagram,Sleep Well Sale,Sleep Well Sale,a0d6eae5a0df6ea0,a0d6eae5a0df6ea0,yes,Sam Ortiz,email,approval_066.png,2026-09-16T15:23:00Z
+AP-0067,oakandhome,instagram,Home Refresh Sale,Home Refresh Sale Today,33263e90e4baecc6,3a037380aad4fb87,NO,Tom Reyes,call,approval_067.png,2026-08-13T14:33:00Z
+AP-0068,oakandhome,facebook,Free Delivery Offer,Free Delivery Offer,8159a27db7bd2ae3,8159a27db7bd2ae3,yes,Lena Fischer,email,approval_068.png,2026-09-17T10:31:00Z
+AP-0069,calmleaf,instagram,Sleep Well Offer,Sleep Well Offer,fa43d00712f74571,fa43d00712f74571,yes,Priya Nair,text,approval_069.png,2026-09-26T11:18:00Z
+AP-0070,calmleaf,instagram,Sleep Well Sale,Sleep Well Sale,a0d6eae5a0df6ea0,a0d6eae5a0df6ea0,yes,Sam Ortiz,email,approval_070.png,2026-07-19T13:57:00Z
+AP-0071,brightleaf,facebook,Shop the Bundle,Shop the Bundle Today,a0018ea321d84dc8,12a7d4e1577544f7,NO,Owen Hart,call,,2026-09-28T16:17:00Z
+AP-0072,oakandhome,instagram,Free Delivery Offer,Free Delivery Offer,8628e40031b3365e,8628e40031b3365e,yes,Tom Reyes,text,approval_072.png,2026-09-13T12:14:00Z
+AP-0073,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Tom Reyes,email,approval_073.png,2026-07-18T17:15:00Z
+AP-0074,calmleaf,facebook,Try Sleep Gummies,Try Sleep Gummies,2debad86e1a288f7,2debad86e1a288f7,yes,Priya Nair,text,approval_074.png,2026-09-16T11:36:00Z
+AP-0075,brightleaf,instagram,Glow Sale,Glow Sale,3199e7b6501e5fd3,3199e7b6501e5fd3,yes,Owen Hart,email,approval_075.png,2026-09-17T12:17:00Z
+AP-0076,brightleaf,instagram,Weekend Glow Offer,Weekend Glow Offer Today,92953d66fb894c7d,d5829a502c7a77d7,NO,Owen Hart,call,approval_076.png,2026-09-22T16:49:00Z
+AP-0077,oakandhome,instagram,Home Refresh Sale,Home Refresh Sale,33263e90e4baecc6,33263e90e4baecc6,yes,Lena Fischer,email,approval_077.png,2026-08-12T14:27:00Z
+AP-0078,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Maya Chen,email,approval_078.png,2026-08-15T13:55:00Z
+AP-0079,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Tom Reyes,call,,2026-09-18T17:30:00Z
+AP-0080,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Tom Reyes,text,approval_080.png,2026-09-26T12:47:00Z
+AP-0081,brightleaf,instagram,Weekend Glow Offer,Weekend Glow Offer,19c0ef67ceee898d,19c0ef67ceee898d,yes,Maya Chen,email,approval_081.png,2026-08-24T16:11:00Z
+AP-0082,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale,49a1b24454f83e8f,49a1b24454f83e8f,yes,Priya Nair,call,,2026-08-10T14:24:00Z
+AP-0083,oakandhome,facebook,Free Delivery Offer,Free Delivery Offer,8159a27db7bd2ae3,8159a27db7bd2ae3,yes,Lena Fischer,email,approval_083.png,2026-09-21T18:50:00Z
+AP-0084,calmleaf,instagram,Sleep Well Sale,Sleep Well Sale,a0d6eae5a0df6ea0,a0d6eae5a0df6ea0,yes,Sam Ortiz,email,approval_084.png,2026-09-24T16:11:00Z
+AP-0085,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale Today,49a1b24454f83e8f,2ea78ad890ba26f2,NO,Sam Ortiz,email,approval_085.png,2026-07-22T12:52:00Z
+AP-0086,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Maya Chen,call,,2026-08-21T19:28:00Z
+AP-0087,brightleaf,instagram,Shop the Bundle,Shop the Bundle,dc4b466fedcda764,dc4b466fedcda764,yes,Owen Hart,text,approval_087.png,2026-07-20T12:27:00Z
+AP-0088,oakandhome,instagram,Free Delivery Offer,Free Delivery Offer,8628e40031b3365e,8628e40031b3365e,yes,Tom Reyes,call,approval_088.png,2026-09-21T15:39:00Z
+AP-0089,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Owen Hart,call,,2026-07-15T12:31:00Z
+AP-0090,oakandhome,instagram,Shop the Sale,Shop the Sale,e215ac77ef20e8b1,e215ac77ef20e8b1,yes,Tom Reyes,email,approval_090.png,2026-08-15T12:40:00Z
+AP-0091,oakandhome,facebook,Shop the Sale,Shop the Sale,29654482abf778eb,29654482abf778eb,yes,Tom Reyes,call,,2026-08-18T19:46:00Z
+AP-0092,oakandhome,facebook,Shop Oak Furniture,Shop Oak Furniture,280b4f705300137c,280b4f705300137c,yes,Tom Reyes,text,approval_092.png,2026-08-11T17:10:00Z
+AP-0093,brightleaf,instagram,Shop the Bundle,Shop the Bundle,dc4b466fedcda764,dc4b466fedcda764,yes,Maya Chen,email,approval_093.png,2026-07-19T12:36:00Z
+AP-0094,oakandhome,instagram,Shop the Sale,Shop the Sale,e215ac77ef20e8b1,e215ac77ef20e8b1,yes,Tom Reyes,text,approval_094.png,2026-07-16T19:40:00Z
+AP-0095,calmleaf,instagram,Try Sleep Gummies,Try Sleep Gummies,1d71e8a5af3c0c40,1d71e8a5af3c0c40,yes,Sam Ortiz,call,,2026-09-15T10:27:00Z
+AP-0096,brightleaf,instagram,Shop the Bundle,Shop the Bundle Today,dc4b466fedcda764,ce3f331c66a3d91e,NO,Maya Chen,text,approval_096.png,2026-07-18T16:14:00Z
+AP-0097,brightleaf,instagram,Shop the Bundle,Shop the Bundle,dc4b466fedcda764,dc4b466fedcda764,yes,Maya Chen,email,approval_097.png,2026-09-15T16:32:00Z
+AP-0098,oakandhome,facebook,Shop Oak Furniture,Shop Oak Furniture,280b4f705300137c,280b4f705300137c,yes,Lena Fischer,call,approval_098.png,2026-08-12T16:13:00Z
+AP-0099,brightleaf,facebook,Shop the Sale,Shop the Sale,84cd216fff21589c,84cd216fff21589c,yes,Owen Hart,call,approval_099.png,2026-07-23T16:13:00Z
+AP-0100,oakandhome,facebook,Shop Oak Furniture,Shop Oak Furniture,280b4f705300137c,280b4f705300137c,yes,Lena Fischer,email,approval_100.png,2026-09-15T11:12:00Z
+AP-0101,oakandhome,instagram,Free Delivery Offer,Free Delivery Offer,8628e40031b3365e,8628e40031b3365e,yes,Tom Reyes,email,approval_101.png,2026-08-24T13:36:00Z
+AP-0102,calmleaf,instagram,Wind Down Offer,Wind Down Offer,4c034ec5c8ad7a90,4c034ec5c8ad7a90,yes,Priya Nair,call,approval_102.png,2026-07-18T18:17:00Z
+AP-0103,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Lena Fischer,text,approval_103.png,2026-07-11T12:34:00Z
+AP-0104,oakandhome,instagram,Free Delivery Offer,Free Delivery Offer,8628e40031b3365e,8628e40031b3365e,yes,Lena Fischer,text,approval_104.png,2026-09-14T13:54:00Z
+AP-0105,brightleaf,facebook,Weekend Glow Offer,Weekend Glow Offer,97b0b584de7ec94d,97b0b584de7ec94d,yes,Owen Hart,email,approval_105.png,2026-08-10T17:11:00Z
+AP-0106,brightleaf,instagram,Claim Yours,Claim Yours,b142906192db9f7b,b142906192db9f7b,yes,Owen Hart,email,approval_106.png,2026-07-22T17:28:00Z
+AP-0107,oakandhome,instagram,Shop Oak Furniture,Shop Oak Furniture,90d6f2ae12087da7,90d6f2ae12087da7,yes,Tom Reyes,call,approval_107.png,2026-07-13T16:28:00Z
+AP-0108,oakandhome,instagram,Shop Oak Furniture,Shop Oak Furniture,90d6f2ae12087da7,90d6f2ae12087da7,yes,Tom Reyes,email,approval_108.png,2026-07-11T12:47:00Z
+AP-0109,calmleaf,instagram,Sleep Well Offer,Sleep Well Offer,fa43d00712f74571,fa43d00712f74571,yes,Sam Ortiz,email,approval_109.png,2026-07-11T12:24:00Z
+AP-0110,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Lena Fischer,email,approval_110.png,2026-07-21T18:21:00Z
+AP-0111,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Lena Fischer,call,,2026-08-20T19:47:00Z
+AP-0112,brightleaf,instagram,Shop the Bundle,Shop the Bundle,dc4b466fedcda764,dc4b466fedcda764,yes,Owen Hart,call,,2026-08-23T14:59:00Z
+AP-0113,calmleaf,facebook,Try Sleep Gummies,Try Sleep Gummies,2debad86e1a288f7,2debad86e1a288f7,yes,Sam Ortiz,email,approval_113.png,2026-07-19T12:57:00Z
+AP-0114,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Lena Fischer,call,approval_114.png,2026-07-26T19:40:00Z
+AP-0115,calmleaf,facebook,Sleep Well Sale,Sleep Well Sale,49a1b24454f83e8f,49a1b24454f83e8f,yes,Priya Nair,call,approval_115.png,2026-08-25T12:58:00Z
+AP-0116,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Lena Fischer,text,approval_116.png,2026-07-19T11:39:00Z
+AP-0117,calmleaf,instagram,Try Sleep Gummies,Try Sleep Gummies,1d71e8a5af3c0c40,1d71e8a5af3c0c40,yes,Priya Nair,call,,2026-07-23T11:24:00Z
+AP-0118,oakandhome,facebook,See the Range,See the Range,f58564da04093ac4,f58564da04093ac4,yes,Lena Fischer,email,approval_118.png,2026-09-12T16:27:00Z
+AP-0119,calmleaf,instagram,Sleep Well Sale,Sleep Well Sale,a0d6eae5a0df6ea0,a0d6eae5a0df6ea0,yes,Priya Nair,email,approval_119.png,2026-09-26T13:18:00Z
+AP-0120,oakandhome,instagram,See the Range,See the Range,c52a9c1414974634,c52a9c1414974634,yes,Lena Fischer,call,,2026-08-22T18:42:00Z

@@ -1,0 +1,90 @@
+{
+  "_note": "SYNTHETIC. Each value has its own last_verified date. Entries older than stale_if_last_verified_before are stale and must be flagged for a person.",
+  "stale_if_last_verified_before": "2025-10-10",
+  "platforms": {
+    "facebook": {
+      "headline_max": {
+        "value": 40,
+        "last_verified": "2026-03-02"
+      },
+      "text_max": {
+        "value": 125,
+        "last_verified": "2026-03-02"
+      },
+      "ratios": {
+        "value": [
+          "1:1",
+          "4:5",
+          "9:16",
+          "1.91:1"
+        ],
+        "last_verified": "2026-03-02"
+      }
+    },
+    "instagram": {
+      "headline_max": {
+        "value": 40,
+        "last_verified": "2026-03-02"
+      },
+      "text_max": {
+        "value": 125,
+        "last_verified": "2024-11-03"
+      },
+      "ratios": {
+        "value": [
+          "1:1",
+          "4:5",
+          "9:16"
+        ],
+        "last_verified": "2026-03-02"
+      }
+    },
+    "tiktok": {
+      "headline_max": {
+        "value": 40,
+        "last_verified": "2026-02-11"
+      },
+      "text_max": {
+        "value": 100,
+        "last_verified": "2024-06-14"
+      },
+      "ratios": {
+        "value": [
+          "9:16"
+        ],
+        "last_verified": "2026-02-11"
+      }
+    },
+    "google": {
+      "headline_max": {
+        "value": 30,
+        "last_verified": "2026-01-20"
+      },
+      "text_max": {
+        "value": 90,
+        "last_verified": "2026-01-20"
+      },
+      "ratios": {
+        "value": [],
+        "last_verified": "2026-01-20"
+      }
+    },
+    "linkedin": {
+      "headline_max": {
+        "value": 70,
+        "last_verified": "2024-02-08"
+      },
+      "text_max": {
+        "value": 150,
+        "last_verified": "2026-01-20"
+      },
+      "ratios": {
+        "value": [
+          "1.91:1",
+          "1:1"
+        ],
+        "last_verified": "2026-01-20"
+      }
+    }
+  }
+}

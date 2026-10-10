@@ -1,0 +1,989 @@
+{
+  "_note": "SYNTHETIC ground truth",
+  "sheet": "sheet_03.csv",
+  "sheet_sha256": "8a7e2ea60694e2e3aee3dbd8e9f627ff380881c6f573973ac75afae56d4a60e4",
+  "split": "held_out",
+  "header_variant": [
+    "ad no",
+    "network",
+    "copy",
+    "landing page",
+    "creative"
+  ],
+  "data_rows": 46,
+  "clients_in_sheet": [
+    "brightleaf",
+    "calmleaf",
+    "oakandhome"
+  ],
+  "rows": [
+    {
+      "row_id": 2,
+      "client": "calmleaf",
+      "platform": "facebook",
+      "page": "gummies",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "wording",
+          "type": "brand_book_violation",
+          "field": "headline",
+          "expected_fix": "no ALL-CAPS words of 4+ letters",
+          "rule_ref": "CL-BB-2.2",
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Buy 2 save 10% on sleep gummies. Supports better sleep. *Not evaluated by the FDA.",
+        "headline": "SLEEP BETTER TONIGHT",
+        "link": "calmleaf.example/gummies?utm_source=facebook&utm_medium=paid_social&utm_campaign=sleep_oct",
+        "creative": "sleep_v2_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 3,
+      "client": "calmleaf",
+      "platform": "tiktok",
+      "page": "sleep-bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "headline_too_long",
+          "field": "headline",
+          "expected_fix": "shorten to 40 characters or fewer",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Wind down tonight. Supports a restful night. 25% OFF *Not evaluated by the FDA.",
+        "headline": "Sleep Well Sale Limited Time Offer Today Only",
+        "link": "calmleaf.example/sleep-bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=sleep_bundle_oct",
+        "creative": "sleep_bundle_v2_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 4,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "headline_too_long",
+          "field": "headline",
+          "expected_fix": "shorten to 40 characters or fewer",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Free Delivery Offer Limited Time Offer Today Only",
+        "link": "oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v2_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 5,
+      "client": "brightleaf",
+      "platform": "tiktok",
+      "page": "serum",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.",
+        "headline": "Weekend Glow Offer",
+        "link": "https://shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct",
+        "creative": "glow_sale_v1_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 6,
+      "client": "brightleaf",
+      "platform": "tiktok",
+      "page": "bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Bundle and save 15% on our skincare favourites.",
+        "headline": "Shop the Bundle",
+        "link": "https://shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct",
+        "creative": "bundle_v1_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 7,
+      "client": "calmleaf",
+      "platform": "instagram",
+      "page": "sleep-bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Wind down tonight. Supports a restful night. 25% OFF *Not evaluated by the FDA.",
+        "headline": "Wind Down Offer",
+        "link": "calmleaf.example/sleep-bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=sleep_bundle_oct",
+        "creative": "sleep_bundle_v2_1080x1080.png"
+      }
+    },
+    {
+      "row_id": 8,
+      "client": "calmleaf",
+      "platform": "tiktok",
+      "page": "focus",
+      "hard": true,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "page",
+          "type": "page_discount_mismatch",
+          "field": "offer",
+          "expected_fix": "change ad to 10% OFF",
+          "rule_ref": "CL-C-06",
+          "severity": "fix_needed",
+          "hard": true,
+          "evidence": "ad says 15% OFF, page shows 10% OFF"
+        },
+        {
+          "id": "E2",
+          "check": "mechanical",
+          "type": "utm_misspelled",
+          "field": "utm_source",
+          "expected_fix": "tiktok",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Wind down tonight. Supports a restful night. 15% OFF *Not evaluated by the FDA.",
+        "headline": "Wind Down Offer",
+        "link": "https://calmleaf.example/focus?utm_source=tt&utm_medium=paid_social&utm_campaign=focus_oct",
+        "creative": "focus_v2_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 9,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_missing",
+          "field": "utm_source",
+          "expected_fix": "instagram",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        },
+        {
+          "id": "E2",
+          "check": "mechanical",
+          "type": "utm_missing",
+          "field": "utm_medium",
+          "expected_fix": "paid_social",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        },
+        {
+          "id": "E3",
+          "check": "mechanical",
+          "type": "utm_missing",
+          "field": "utm_campaign",
+          "expected_fix": "bundle_oct",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Bundle and save 15% on our skincare favourites.",
+        "headline": "Shop the Bundle",
+        "link": "shop.brightleaf.example/bundle",
+        "creative": "bundle_v1_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 10,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "rugs",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "blocked",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "page",
+          "type": "page_expired_offer",
+          "field": "offer",
+          "expected_fix": "do not launch; offer ended 2026-09-30",
+          "rule_ref": "OH-C-06",
+          "severity": "blocked",
+          "hard": false,
+          "evidence": "page says the sale has ended"
+        }
+      ],
+      "truth": {
+        "text": "Sustainably sourced wool rugs. 20% OFF this month. *FSC certified timber.",
+        "headline": "Shop the Sale",
+        "link": "oakandhome.example/rugs?utm_source=google&utm_medium=cpc&utm_campaign=rugs_q4",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 11,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "sofas",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "creative_missing",
+          "field": "creative",
+          "expected_fix": "add a creative file",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Linen Sofas: 20% OFF this month.",
+        "headline": "Home Refresh Sale",
+        "link": "oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4",
+        "creative": ""
+      }
+    },
+    {
+      "row_id": 12,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "gift",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Last chance: free gift with every order.",
+        "headline": "Claim Yours",
+        "link": "shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct",
+        "creative": "gift_v1_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 13,
+      "client": "calmleaf",
+      "platform": "google",
+      "page": "focus",
+      "hard": true,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "page",
+          "type": "page_discount_mismatch",
+          "field": "offer",
+          "expected_fix": "change ad to 10% OFF",
+          "rule_ref": "CL-C-06",
+          "severity": "fix_needed",
+          "hard": true,
+          "evidence": "ad says 15% OFF, page shows 10% OFF"
+        }
+      ],
+      "truth": {
+        "text": "Wind down tonight. Supports a restful night. 15% OFF *Not evaluated by the FDA.",
+        "headline": "Sleep Well Sale",
+        "link": "calmleaf.example/focus?utm_source=google&utm_medium=cpc&utm_campaign=focus_oct",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 14,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "https://oakandhome.example/new?utm_source=instagram&utm_medium=paid_social&utm_campaign=newcolours_q4",
+        "creative": "newcolours_v3_1080x1350.mp4"
+      }
+    },
+    {
+      "row_id": 15,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Free Delivery Offer",
+        "link": "https://oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v3_1080x1350.mp4"
+      }
+    },
+    {
+      "row_id": 16,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Shop Oak Furniture",
+        "link": "https://oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v1_1080x1080.mp4"
+      }
+    },
+    {
+      "row_id": 17,
+      "client": "calmleaf",
+      "platform": "tiktok",
+      "page": "sleep-bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "text_too_long",
+          "field": "text",
+          "expected_fix": "shorten to 100 characters or fewer",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Wind down tonight. Supports a restful night. 25% OFF *Not evaluated by the FDA. Limited time only, shop now while this great offer lasts for everyone today.",
+        "headline": "Sleep Well Sale",
+        "link": "calmleaf.example/sleep-bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=sleep_bundle_oct",
+        "creative": "sleep_bundle_v2_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 18,
+      "client": "brightleaf",
+      "platform": "tiktok",
+      "page": "gift",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Last chance: free gift with every order.",
+        "headline": "Claim Yours",
+        "link": "shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift_oct",
+        "creative": "gift_v2_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 19,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "https://oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 20,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "sofas",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_misspelled",
+          "field": "utm_source",
+          "expected_fix": "facebook",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Linen Sofas: 20% OFF this month.",
+        "headline": "Shop the Sale",
+        "link": "https://oakandhome.example/sofas?utm_source=fb&utm_medium=paid_social&utm_campaign=sofas_q4",
+        "creative": "sofas_v3_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 21,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "moisturiser",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "blocked",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "page",
+          "type": "page_expired_offer",
+          "field": "offer",
+          "expected_fix": "do not launch; offer ended 2026-10-05",
+          "rule_ref": "BL-C-06",
+          "severity": "blocked",
+          "hard": false,
+          "evidence": "page says the sale has ended"
+        }
+      ],
+      "truth": {
+        "text": "Our bestselling daily moisturiser. 30% OFF this weekend.",
+        "headline": "Glow Sale",
+        "link": "https://shop.brightleaf.example/moisturiser?utm_source=instagram&utm_medium=paid_social&utm_campaign=moisturiser_sale_oct",
+        "creative": "moisturiser_sale_v1_1080x1350.mp4"
+      }
+    },
+    {
+      "row_id": 22,
+      "client": "calmleaf",
+      "platform": "instagram",
+      "page": "gummies",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_campaign_format",
+          "field": "utm_campaign",
+          "expected_fix": "sleep_oct",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Buy 2 save 10% on sleep gummies. Supports better sleep. *Not evaluated by the FDA.",
+        "headline": "Sleep Well Offer",
+        "link": "calmleaf.example/gummies?utm_source=instagram&utm_medium=paid_social&utm_campaign=Sleep Oct",
+        "creative": "sleep_v3_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 23,
+      "client": "calmleaf",
+      "platform": "tiktok",
+      "page": "gummies",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Buy 2 save 10% on sleep gummies. Supports better sleep. *Not evaluated by the FDA.",
+        "headline": "Sleep Well Offer",
+        "link": "https://calmleaf.example/gummies?utm_source=tiktok&utm_medium=paid_social&utm_campaign=sleep_oct",
+        "creative": "sleep_v3_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 24,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "https://oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4",
+        "creative": "newcolours_v3_1080x1080.mp4"
+      }
+    },
+    {
+      "row_id": 25,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "serum",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_campaign_format",
+          "field": "utm_campaign",
+          "expected_fix": "glow_sale_oct",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Our bestselling glow serum. 40% OFF this weekend.",
+        "headline": "Shop the Sale",
+        "link": "shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=Glow Sale Oct",
+        "creative": "glow_sale_v2_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 26,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "sofas",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Linen Sofas: 20% OFF this month.",
+        "headline": "Home Refresh Sale",
+        "link": "oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 27,
+      "client": "calmleaf",
+      "platform": "google",
+      "page": "gummies",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Buy 2 save 10% on sleep gummies. Supports better sleep. *Not evaluated by the FDA.",
+        "headline": "Sleep Well Offer",
+        "link": "calmleaf.example/gummies?utm_source=google&utm_medium=cpc&utm_campaign=sleep_oct",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 28,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Shop Oak Furniture",
+        "link": "oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v3_1080x1080.png"
+      }
+    },
+    {
+      "row_id": 29,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "sofas",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber.",
+        "headline": "Home Refresh Sale",
+        "link": "https://oakandhome.example/sofas?utm_source=facebook&utm_medium=paid_social&utm_campaign=sofas_q4",
+        "creative": "sofas_v2_1080x1080.mp4"
+      }
+    },
+    {
+      "row_id": 30,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Free Delivery Offer",
+        "link": "oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v1_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 47,
+      "client": null,
+      "platform": null,
+      "page": null,
+      "hard": false,
+      "malformed": true,
+      "expected_verdict": "malformed_isolated",
+      "planted_errors": [],
+      "truth": null
+    },
+    {
+      "row_id": 31,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "sofas",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Linen Sofas: 20% OFF this month.",
+        "headline": "Shop the Sale",
+        "link": "https://oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 32,
+      "client": "brightleaf",
+      "platform": "facebook",
+      "page": "serum",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "wording",
+          "type": "brand_book_violation",
+          "field": "headline",
+          "expected_fix": "remove the exclamation mark",
+          "rule_ref": "BL-BB-2.3",
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.",
+        "headline": "Glow Sale!",
+        "link": "shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct",
+        "creative": "glow_sale_v1_1080x1920.png"
+      }
+    },
+    {
+      "row_id": 33,
+      "client": "calmleaf",
+      "platform": "tiktok",
+      "page": "sleep-bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Wind down tonight. Supports a restful night. 25% OFF *Not evaluated by the FDA.",
+        "headline": "Wind Down Offer",
+        "link": "calmleaf.example/sleep-bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=sleep_bundle_oct",
+        "creative": "sleep_bundle_v3_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 34,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_campaign_format",
+          "field": "utm_campaign",
+          "expected_fix": "add a month or quarter suffix",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours",
+        "creative": "newcolours_v2_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 35,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Free Delivery Offer",
+        "link": "oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v3_1080x1920.mp4"
+      }
+    },
+    {
+      "row_id": 36,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "https://oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4",
+        "creative": "newcolours_v2_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 37,
+      "client": "oakandhome",
+      "platform": "instagram",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "oakandhome.example/new?utm_source=instagram&utm_medium=paid_social&utm_campaign=newcolours_q4",
+        "creative": "newcolours_v3_1080x1920.png"
+      }
+    },
+    {
+      "row_id": 38,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4",
+        "creative": "newcolours_v3_1080x1350.mp4"
+      }
+    },
+    {
+      "row_id": 39,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "gift",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Last chance: free gift with every order.",
+        "headline": "Claim Yours",
+        "link": "shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct",
+        "creative": "gift_v3_1080x1350.mp4"
+      }
+    },
+    {
+      "row_id": 40,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_misspelled",
+          "field": "utm_medium",
+          "expected_fix": "paid_social",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Bundle and save 15% on our skincare favourites.",
+        "headline": "Shop the Bundle",
+        "link": "https://shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid&utm_campaign=bundle_oct",
+        "creative": "bundle_v3_1080x1080.mp4"
+      }
+    },
+    {
+      "row_id": 41,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 42,
+      "client": "brightleaf",
+      "platform": "instagram",
+      "page": "bundle",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Bundle and save 15% on our skincare favourites.",
+        "headline": "Shop the Bundle",
+        "link": "shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct",
+        "creative": "bundle_v1_1080x1350.png"
+      }
+    },
+    {
+      "row_id": 43,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "sofas",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "fix_needed",
+      "planted_errors": [
+        {
+          "id": "E1",
+          "check": "mechanical",
+          "type": "utm_malformed_query",
+          "field": "link",
+          "expected_fix": "use a single '?'",
+          "rule_ref": null,
+          "severity": "fix_needed",
+          "hard": false,
+          "evidence": null
+        }
+      ],
+      "truth": {
+        "text": "Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber.",
+        "headline": "Home Refresh Sale",
+        "link": "https://oakandhome.example/sofas??utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4",
+        "creative": "n/a"
+      }
+    },
+    {
+      "row_id": 44,
+      "client": "oakandhome",
+      "platform": "facebook",
+      "page": "shelves",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Handmade oak pieces, free delivery over $75.",
+        "headline": "Free Delivery Offer",
+        "link": "https://oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4",
+        "creative": "shelves_v1_1080x1080.mp4"
+      }
+    },
+    {
+      "row_id": 45,
+      "client": "oakandhome",
+      "platform": "google",
+      "page": "new",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "New colours are here. See the range.",
+        "headline": "See the Range",
+        "link": "oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4",
+        "creative": ""
+      }
+    },
+    {
+      "row_id": 46,
+      "client": "calmleaf",
+      "platform": "google",
+      "page": "gummies",
+      "hard": false,
+      "malformed": false,
+      "expected_verdict": "ready",
+      "planted_errors": [],
+      "truth": {
+        "text": "Buy 2 save 10% on sleep gummies. Supports better sleep. *Not evaluated by the FDA.",
+        "headline": "Sleep Well Offer",
+        "link": "calmleaf.example/gummies?utm_source=google&utm_medium=cpc&utm_campaign=sleep_oct",
+        "creative": "n/a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "_note": "SYNTHETIC machine-readable form of naming_convention.md (document dated 2023).",
+  "required_params": [
+    "utm_source",
+    "utm_medium",
+    "utm_campaign"
+  ],
+  "source": {
+    "facebook": "facebook",
+    "instagram": "instagram",
+    "tiktok": "tiktok",
+    "google": "google",
+    "linkedin": "linkedin"
+  },
+  "source_aliases": {
+    "fb": "facebook",
+    "facebook": "facebook",
+    "meta": "facebook (confirm; use platform column)",
+    "ig": "instagram",
+    "insta": "instagram",
+    "tt": "tiktok",
+    "tik tok": "tiktok",
+    "goog": "google",
+    "adwords": "google",
+    "li": "linkedin"
+  },
+  "medium": {
+    "facebook": "paid_social",
+    "instagram": "paid_social",
+    "tiktok": "paid_social",
+    "linkedin": "paid_social",
+    "google": "cpc"
+  },
+  "medium_aliases": {
+    "paid_social": [
+      "Paid Social",
+      "paid-social",
+      "paid",
+      "social",
+      "Paid_Social"
+    ],
+    "cpc": [
+      "CPC",
+      "ppc",
+      "paid_search"
+    ]
+  },
+  "campaign_pattern": "^[a-z0-9]+(_[a-z0-9]+)*_(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$",
+  "client_overrides": {
+    "oakandhome": {
+      "campaign_pattern": "^[a-z0-9]+(_[a-z0-9]+)*_(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|q[1-4])$",
+      "note": "quarter suffix q1-q4 allowed"
+    }
+  },
+  "platform_spelling_aliases": {
+    "facebook": [
+      "Facebook",
+      "FB",
+      "fb",
+      "Meta",
+      "FaceBook",
+      "Facebook Ads"
+    ],
+    "instagram": [
+      "Instagram",
+      "IG",
+      "ig",
+      "insta",
+      "Instagram Ads"
+    ],
+    "tiktok": [
+      "TikTok",
+      "tiktok",
+      "Tik Tok",
+      "TT"
+    ],
+    "google": [
+      "Google",
+      "google ads",
+      "Google Ads",
+      "adwords"
+    ],
+    "linkedin": [
+      "LinkedIn",
+      "linkedin",
+      "LI"
+    ]
+  }
+}

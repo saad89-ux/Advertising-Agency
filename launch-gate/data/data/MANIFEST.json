@@ -1,0 +1,188 @@
+{
+  "synthetic": true,
+  "seed": 42,
+  "generated_for_date": "2026-10-10",
+  "sheets": [
+    {
+      "sheet": "sheet_01.csv",
+      "rows": 42,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_02.csv",
+      "rows": 42,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_03.csv",
+      "rows": 46,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_04.csv",
+      "rows": 51,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_05.xlsx",
+      "rows": 56,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_06.csv",
+      "rows": 61,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_07.csv",
+      "rows": 61,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_08.csv",
+      "rows": 71,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_09.csv",
+      "rows": 77,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_10.csv",
+      "rows": 82,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_11.xlsx",
+      "rows": 81,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_12.csv",
+      "rows": 92,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_13.csv",
+      "rows": 97,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_14.csv",
+      "rows": 101,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_15.csv",
+      "rows": 101,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_16.csv",
+      "rows": 101,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_17.xlsx",
+      "rows": 111,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_18.csv",
+      "rows": 121,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_19.csv",
+      "rows": 122,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_20.csv",
+      "rows": 132,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_21.csv",
+      "rows": 141,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_22.xlsx",
+      "rows": 151,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_23.csv",
+      "rows": 151,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_24.csv",
+      "rows": 162,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_25.csv",
+      "rows": 171,
+      "split": "held_out"
+    },
+    {
+      "sheet": "sheet_26.xlsx",
+      "rows": 181,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_27.csv",
+      "rows": 191,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_28.csv",
+      "rows": 202,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_29.xlsx",
+      "rows": 202,
+      "split": "dev"
+    },
+    {
+      "sheet": "sheet_30.csv",
+      "rows": 101,
+      "split": "held_out"
+    }
+  ],
+  "counts": {
+    "verdict": {
+      "blocked": 386,
+      "ready": 1667,
+      "needs_person": 106,
+      "fix_needed": 1101
+    },
+    "types": {
+      "page_expired_offer": 102,
+      "forbidden_claim": 214,
+      "unknown_claim": 66,
+      "utm_misspelled": 241,
+      "utm_campaign_format": 192,
+      "brand_book_violation": 96,
+      "text_too_long": 73,
+      "page_utm_dropped": 112,
+      "utm_missing": 233,
+      "unknown_client": 40,
+      "page_delivery_threshold_mismatch": 46,
+      "page_not_found": 58,
+      "creative_ratio_mismatch": 48,
+      "page_discount_mismatch": 145,
+      "missing_footnote": 111,
+      "headline_too_long": 61,
+      "creative_missing": 53,
+      "utm_malformed_query": 68,
+      "handmade_misuse": 12
+    },
+    "rows": 3260,
+    "malformed": 41
+  }
+}

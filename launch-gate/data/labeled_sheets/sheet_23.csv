@@ -1,0 +1,152 @@
+id,Platform,Headline,Body,Link,Creative
+2,ig,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1350.png
+3,insta,Glow Sale,Dermatologist tested. 30% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/moisturiser?utm_sorce=instagram&utm_medium=paid_social&utm_campaign=moisturiser_sale_oct ,moisturiser_sale_v3_1080x1080.mp4
+4,Facebook Ads,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1920.mp4
+5,TT,Weekend Glow Offer,Our gentle cleanser for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/cleanser?utm_source=tiktok&utm_medium=paid_social&utm_campaign=cleanser_oct,cleanser_v1_1080x1920.mp4
+6,fb,Glow Sale,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1080.png
+7,Tik Tok,Shop the Sale,Dermatologist tested. 30% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/moisturiser?utm_source=tiktok&utm_medium=paid_social&utm_campaign=moisturiser_sale_oct,moisturiser_sale_v1_1080x1920.mp4
+8,FB,Weekend Glow Offer,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1920.png
+9,IG,Shop the Sale,Dermatologist tested. 25% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/eye-cream-sale?utm_source=instagram&utm_medium=paid_social&utm_campaign=eyecream_oct,
+10,IG,Glow Sale,Our bestselling glow serum. 40% OFF this weekend., https://shop.brightleaf.example/serum?utm_source=meta&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1350.mp4
+11,Instagram,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1080.mp4
+12,Instagram,Glow Sale,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1920.mp4
+13,Meta,Shop the Bundle,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1350.mp4
+14,insta,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v2_1080x1080.mp4
+15,fb,Glow Sale,Our bestselling glow serum. 40% OFF this weekend., shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1350.mp4
+16,tiktok,Weekend Glow Offer,Our gentle cleanser for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/cleanser?utm_source=tiktok&utm_medium=paid_social&utm_campaign=cleanser_oct,cleanser_v2_1080x1920.mp4
+17,insta,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1920.mp4
+18,IG,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1920.mp4
+19,insta,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,https://shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1920.mp4
+20,FB,Weekend Glow Offer,Our bestselling clay mask. 20% OFF this weekend., shop.brightleaf.example/old-mask?utm_source=facebook&utm_medium=paid_social&utm_campaign=mask_oct ,mask_v2_1080x1920.png
+21,Instagram Ads,Shop Now,Dermatologist-loved glow for every skin type., shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1350.mp4
+22,Facebook,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct ,
+23,Tik Tok,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1920.mp4
+24,TT,Claim Yours,Last chance: free gift with every order., https://shop.brightleaf.example/gift?utm_sorce=tiktok&utm_medium=paid_social&utm_campaign=gift_oct ,gift_v2_1080x1920.mp4
+25,Instagram Ads,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1350.png
+26,IG,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1920.png
+27,TT,Glow Sale,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend., shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1920.mp4
+28,FaceBook,Glow Sale,Our bestselling glow serum. 40% OFF this weekend., https://shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1920.mp4
+29,IG,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1350.png
+30,Tik Tok,Shop the Bundle,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v3_1080x1920.mp4
+31,Instagram,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1350.png
+32,FB,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1350.png
+33,Meta,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1080.png
+34,ig,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,https://shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_q4,glow_sale_v2_1080x1920.mp4
+35,TikTok,Glow Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale,glow_sale_v2_1080x1920.mp4
+36,Facebook Ads,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend., shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v1_1080x1080.png
+37,Tik Tok,Glow Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v3_1080x1920.mp4
+38,TT,Weekend Glow Offer,Our eye cream for visibly smoother-looking skin. 25% OFF this weekend.,https://shop.brightleaf.example/eye-cream-sale?utm_source=tiktok&utm_medium=paid_social&utm_campaign=eyecream_oct,eyecream_v3_1080x1920.mp4
+39,TikTok,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1920.mp4
+40,tiktok,Glow Sale,Dermatologist tested. 30% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/moisturiser?utm_source=tiktok&utm_medium=paid_social&utm_campaign=moisturiser_sale_oct,moisturiser_sale_v3_1080x1920.mp4
+41,FB,Claim Yours,Last chance: free gift with every order.,https://shop.brightleaf.example/gift,gift_v3_1080x1920.png
+42,Facebook Ads,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1350.png
+43,Facebook,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social ,bundle_v2_1080x1080.mp4
+44,tiktok,Younger Skin,Clinically proven to reduce wrinkles in 14 days.,https://shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1920.mp4
+45,fb,Glow Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/serum?utm_source=fb&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1080.png
+46,tiktok,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1920.mp4
+47,Facebook,Weekend Glow Offer,Our bestselling daily moisturiser. 30% OFF this weekend., https://shop.brightleaf.example/moisturiser?utm_source=facebook&utm_medium=paid_social&utm_campaign=moisturiser_sale,moisturiser_sale_v2_1080x1920.mp4
+48,TikTok,Weekend Glow Offer,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1920.mp4
+49,insta,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v3_1080x1080.png
+50,FB,Shop the Bundle Limited Time Offer Today Only,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v2_1080x1080.mp4
+51,IG,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1920.png
+52,Facebook,Shop the Sale,Our bestselling daily moisturiser. 30% OFF this weekend.,https://shop.brightleaf.example/moisturiser?utm_source=facebook&utm_medium=paid_social&utm_campaign=moisturiser_sale_oct,moisturiser_sale_v2_1080x1350.mp4
+53,Meta,Shop the Sale,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum,glow_sale_v2_1080x1350.mp4
+54,Tik Tok,Glow Sale,Our eye cream for visibly smoother-looking skin. 25% OFF this weekend.,shop.brightleaf.example/eye-cream-sale?utm_source=tiktok&utm_medium=paid_social&utm_campaign=Eyecream Oct,eyecream_v3_1080x1920.mp4
+55,tiktok,Weekend Glow Offer,Our clay mask for visibly smoother-looking skin. 20% OFF this weekend.,shop.brightleaf.example/old-mask?utm_source=tiktok&utm_medium=paid_social&utm_campaign=mask,mask_v2_1080x1920.mp4
+56,TikTok,Shop the Bundle,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle?utm_sorce=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v2_1080x1920.mp4
+57,Tik Tok,Claim Yours,Last chance: free gift with every order.,https://shop.brightleaf.example/gift?utm_sorce=tiktok&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1920.mp4
+58,Instagram,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct ,
+59,FaceBook,Glow Sale,Our bestselling glow serum. 40% OFF this weekend., shop.brightleaf.example/serum??utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1920.mp4
+60,Facebook Ads,Claim Yours,Last chance: free gift with every order., https://shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1350.png
+61,Instagram,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1350.mp4
+62,Instagram,Shop the Bundle,Bundle and save 15% on our skincare favourites., https://shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v3_1080x1920.png
+63,Tik Tok,Weekend Glow Offer,Our bestselling glow serum. 40% OFF this weekend.,https://shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1920.mp4
+64,FaceBook,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1080.png
+65,tiktok,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1920.mp4
+66,insta,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1350.mp4
+67,insta,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_sorce=instagram&utm_medium=paid_social&utm_campaign=gift_oct ,gift_v1_1080x1080.mp4
+68,fb,Shop the Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v1_1080x1920.mp4
+69,FB,Weekend Glow Offer,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v1_1080x1920.png
+152,,,,,
+70,FB,Shop the Bundle,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle ,bundle_v2_1080x1080.png
+71,insta,Shop Now,Dermatologist-loved glow for every skin type., https://shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1350.png
+72,Instagram Ads,Shop Now,Dermatologist-loved glow for every skin type.,https://shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1350.mp4
+73,Meta,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1350.mp4
+74,Tik Tok,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1920.mp4
+75,Meta,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct ,gift_v1_1080x1080.mp4
+76,FB,Claim Yours,Last chance: free gift with every order., https://shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1920.mp4
+77,TikTok,Weekend Glow Offer,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1920.mp4
+78,fb,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1920.mp4
+79,TikTok,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift_oct ,gift_v3_1080x1920.mp4
+80,IG,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend., https://shop.brightleaf.example/serum,glow_sale_v3_1080x1920.mp4
+81,Meta,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct ,gift_v1_1080x1920.mp4
+82,Instagram,Glow Sale!,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v2_1080x1080.png
+83,TikTok,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1920.mp4
+84,Instagram Ads,Weekend Glow Offer,Dermatologist tested. 30% OFF this weekend. *Tested on 50 volunteers., shop.brightleaf.example/moisturiser?utm_source=meta&utm_medium=paid_social&utm_campaign=moisturiser_sale_oct,moisturiser_sale_v3_1080x1080.png
+85,FB,Claim Yours,Last chance: free gift with every order., https://shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1350.mp4
+86,tiktok,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1920.mp4
+87,TT,Younger Skin,Clinically proven to reduce wrinkles in 14 days.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1920.mp4
+88,tiktok,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1920.mp4
+89,Instagram Ads,Weekend Glow Offer,Our clay mask for visibly smoother-looking skin. 20% OFF this weekend., shop.brightleaf.example/old-mask?utm_source=instagram&utm_medium=paid_social&utm_campaign=mask_oct ,mask_v3_1080x1920.png
+90,tiktok,Shop Now,Dermatologist tested. Visibly smoother-looking skin.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1920.mp4
+91,insta,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_sorce=instagram&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v3_1080x1920.png
+92,FaceBook,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,https://shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1350.png
+93,insta,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v1_1080x1080.png
+94,TikTok,Claim Yours,Last chance: free gift with every order.,https://shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1920.mp4
+95,TikTok,Shop the Sale,Our bestselling eye cream. 25% OFF this weekend.,shop.brightleaf.example/eye-cream-sale?utm_source=tiktok&utm_medium=paid_social&utm_campaign=eyecream_oct,eyecream_v3_1080x1920.mp4
+96,tiktok,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift,gift_v1_1080x1920.mp4
+97,FaceBook,Claim Yours,Last chance: free gift with every order.,https://shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1920.png
+98,TikTok,Shop the Bundle,Bundle and save 15% on our skincare favourites., shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1920.mp4
+99,Instagram,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,https://shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1080.mp4
+100,ig,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,
+101,Facebook,Glow Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1080.mp4
+102,TT,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale,glow_sale_v1_1080x1920.mp4
+103,Tik Tok,Glow Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1920.mp4
+104,Facebook Ads,Shop the Bundle,Bundle and save 15% on our skincare favourites., shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1350.mp4
+105,Instagram,Shop the Sale,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend., https://shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1350.png
+106,Instagram Ads,Claim Yours,Last chance: free gift with every order., shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1080.mp4
+107,IG,Glow Sale,Our gentle cleanser for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/cleanser?utm_source=instagram&utm_medium=paid_social&utm_campaign=cleanser_oct,cleanser_v3_1080x1350.mp4
+108,Facebook,Glow Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1350.png
+109,insta,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1350.png
+110,Meta,Weekend Glow Offer,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1350.mp4
+111,Instagram Ads,Glow Sale,Dermatologist tested. 25% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/eye-cream-sale?utm_source=instagram&utm_medium=paid_social&utm_campaign=eyecream_oct,eyecream_v3_1080x1350.mp4
+112,TT,Claim Yours,Last chance: free gift with every order., https://shop.brightleaf.example/gift?utm_source=tiktok&utm_campaign=gift_oct,gift_v3_1080x1920.mp4
+113,FB,Weekend Glow Offer,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1080.mp4
+114,LI,Book a demo,Cut reporting time in half,tallyhq.example/demo?utm_source=linkedin&utm_medium=paid_social&utm_campaign=demo_q4,demo_1200x627.png
+115,TT,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend., https://shop.brightleaf.example/serum?utm_source=tiktok&utm_medium=paid_social&utm_campaign=Glow Sale Oct ,glow_sale_v3_1080x1920.mp4
+116,Instagram Ads,Younger Skin,Clinically proven to reduce wrinkles in 14 days.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=Gift Oct,gift_v3_1080x1080.mp4
+117,TT,Shop the Sale,Dermatologist tested. 20% OFF this weekend. *Tested on 50 volunteers.,shop.brightleaf.example/old-mask?utm_source=tiktok&utm_medium=paid_social&utm_campaign=mask_oct,mask_v2_1080x1920.mp4
+118,fb,Shop the Sale,Our bestselling glow serum. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1350.png
+119,Facebook,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1920.png
+120,Instagram Ads,Shop the Bundle,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v2_1080x1920.mp4
+121,Meta,Shop Now,Dermatologist tested. Visibly smoother-looking skin.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v3_1080x1350.png
+122,Facebook Ads,Shop the Bundle,Bundle and save 15% on our skincare favourites., shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1920.mp4
+123,Tik Tok,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1920.mp4
+124,Facebook,Shop the Sale,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1080.mp4
+125,TikTok,Glow Sale!,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=tt&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v2_1080x1920.mp4
+126,fb,Weekend Glow Offer,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers., shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale,glow_sale_v3_1080x1080.png
+127,fb,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=facebook&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1080.mp4
+128,insta,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_sorce=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1350.png
+129,ig,Weekend Glow Offer,Our gentle cleanser for visibly smoother-looking skin. 40% OFF this weekend.,https://shop.brightleaf.example/cleanser?utm_source=instagram&utm_medium=paid_social&utm_campaign=cleanser_oct,cleanser_v1_1080x1350.png
+130,fb,Weekend Glow Offer,Our glow serum for visibly smoother-looking skin. 40% OFF this weekend.,shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct ,glow_sale_v2_1080x1920.png
+131,TT,Claim Yours,Last chance: free gift with every order.,https://shop.brightleaf.example/gift?utm_source=tiktok&utm_medium=paid_social&utm_campaign=gift,gift_v2_1080x1920.mp4
+132,Meta,Shop Now,Dermatologist tested. Visibly smoother-looking skin.,https://shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle,bundle_v3_1080x1080.png
+133,insta,Shop the Bundle,Bundle and save 15% on our skincare favourites.,https://shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=Bundle Oct,bundle_v1_1080x1920.mp4
+134,TikTok,Younger Skin,Clinically proven to reduce wrinkles in 14 days.,shop.brightleaf.example/bundle?utm_source=tiktok&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v2_1080x1920.mp4
+135,Instagram,Shop the Bundle,Bundle and save 15% on our skincare favourites., shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1080.mp4
+136,ig,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v1_1080x1350.png
+137,Meta,Glow Sale,Our gentle cleanser for visibly smoother-looking skin. 40% OFF this weekend., https://shop.brightleaf.example/cleanser?utm_source=facebook&utm_medium=paid_social&utm_campaign=cleanser_oct,cleanser_v3_1080x1920.png
+138,Facebook Ads,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v3_1080x1920.mp4
+139,Meta,Shop the Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v2_1080x1080.png
+140,Instagram,Glow Sale,Our gentle cleanser for visibly smoother-looking skin. 40% OFF this weekend.,https://shop.brightleaf.example/cleanser?utm_source=instagram&utm_medium=paid_social&utm_campaign=cleanser_oct ,cleanser_v2_1080x1350.mp4
+141,Facebook,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v1_1080x1920.mp4
+142,FaceBook,Glow Sale,Dermatologist tested. 40% OFF this weekend. *Tested on 50 volunteers.,https://shop.brightleaf.example/serum?utm_source=facebook&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1080.mp4
+143,Instagram Ads,Claim Yours,Last chance: free gift with every order., https://shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1350.png
+144,insta,Younger Skin,Dermatologist recommended. Visibly smoother-looking skin.,https://shop.brightleaf.example/bundle?utm_source=instagram&utm_medium=paid_social&utm_campaign=bundle_oct ,bundle_v1_1080x1350.png
+145,Instagram,Claim Yours,Last chance: free gift with every order.,shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v3_1080x1080.mp4
+146,ig,Shop the Sale,Our bestselling eye cream. 25% OFF this weekend., https://shop.brightleaf.example/eye-cream-sale?utm_source=instagram&utm_medium=paid_social&utm_campaign=eyecream_oct ,eyecream_v3_1080x1350.mp4
+147,Instagram Ads,Claim Yours,Last chance: free gift with every order., shop.brightleaf.example/gift?utm_source=instagram&utm_medium=paid_social&utm_campaign=gift_oct,gift_v2_1080x1350.png
+148,FaceBook,Shop the Sale,Dermatologist tested. 20% OFF this weekend. *Tested on 50 volunteers., shop.brightleaf.example/old-mask?utm_source=facebook&utm_medium=paid&utm_campaign=mask_oct,mask_v1_1080x1080.png
+149,IG,Glow Sale,Our bestselling glow serum. 40% OFF this weekend., shop.brightleaf.example/serum?utm_source=instagram&utm_medium=paid_social&utm_campaign=glow_sale_oct,glow_sale_v1_1080x1080.png
+150,fb,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid_social&utm_campaign=bundle_oct,bundle_v3_1080x1920.png
+151,FB,Shop the Bundle,Bundle and save 15% on our skincare favourites.,shop.brightleaf.example/bundle?utm_source=facebook&utm_medium=paid-social&utm_campaign=bundle_oct,bundle_v3_1080x1350.png

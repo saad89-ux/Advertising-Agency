@@ -1,0 +1,10 @@
+{
+  "_note": "SYNTHETIC. Maps link host to client. Unknown host = no client rules on file.",
+  "shop.brightleaf.example": "brightleaf",
+  "brightleaf.example": "brightleaf",
+  "calmleaf.example": "calmleaf",
+  "oakandhome.example": "oakandhome",
+  "tallyhq.example": null,
+  "linen.example": null,
+  "local_storefront_base": "http://localhost:8099/<client>"
+}
