@@ -515,6 +515,8 @@ def cells_for(style, rid, r):
 
 SIZES = [40, 40, 45, 50, 55, 60, 60, 70, 75, 80, 80, 90, 95, 100, 100, 100, 110, 120, 120, 130, 140, 150, 150, 160, 170, 180, 190, 200, 200, 100]
 XLSX = {5, 11, 17, 22, 26, 29}
+# held-out sheets chosen so every header style appears in BOTH dev and held_out
+HELD_OUT = {5, 8, 10, 13, 15, 17, 20, 22, 25, 30}
 MULTI = {3, 8, 12, 15, 19, 24, 27, 30}
 from openpyxl import Workbook
 all_counts = {"verdict": {}, "types": {}, "rows": 0, "malformed": 0}
@@ -554,7 +556,7 @@ for i in range(1, 31):
         with open(p, "w", newline="", encoding="utf-8") as f:
             cw = csv.writer(f); cw.writerow(header); cw.writerows(rows)
     digest = hashlib.sha256(p.read_bytes()).hexdigest()
-    split = "held_out" if i % 3 == 0 else "dev"
+    split = "held_out" if i in HELD_OUT else "dev"
     wj(f"labels/sheet_{i:02d}.labels.json", {"_note": "SYNTHETIC ground truth", "sheet": Path(fname).name, "sheet_sha256": digest,
         "split": split, "header_variant": header, "data_rows": len(rows), "clients_in_sheet": clients, "rows": labels})
     sheet_meta.append({"sheet": Path(fname).name, "rows": len(rows), "split": split})
@@ -694,7 +696,7 @@ Any result produced from it must be labelled **SYNTHETIC**. It proves the system
 ## Rules the labels follow
 - Verdict of a row: `blocked` if any blocking error (forbidden claim, expired offer, page not found, handmade misuse); else `needs_person` (unknown claim, unknown client); else `fix_needed` (anything else); else `ready`.
 - Malformed rows are not ads; they must be isolated, not lost or merged (`expected_verdict: malformed_isolated`).
-- `split`: 20 sheets are `dev`, 10 are `held_out` (sheet numbers divisible by 3). Tune on dev only; report held_out honestly.
+- `split`: 20 sheets are `dev`, 10 are `held_out` (sheets 5, 8, 10, 13, 15, 17, 20, 22, 25, 30). Every header style appears in both groups. Tune on dev only; report held_out honestly.
 - "Meta" in the platform column means facebook. Client is found from the link host (`domain_map.json`). Hosts not in the map have no client rules.
 - Mechanical checks use `platform_limits.json` values as truth. Ratio tolerance 2%. Google creative `n/a` or blank is fine; blank elsewhere is an error.
 - Today is 2026-10-10 for offer dates.

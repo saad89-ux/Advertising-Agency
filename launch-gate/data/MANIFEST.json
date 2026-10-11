@@ -16,7 +16,7 @@
     {
       "sheet": "sheet_03.csv",
       "rows": 46,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_04.csv",
@@ -26,12 +26,12 @@
     {
       "sheet": "sheet_05.xlsx",
       "rows": 56,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_06.csv",
       "rows": 61,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_07.csv",
@@ -41,17 +41,17 @@
     {
       "sheet": "sheet_08.csv",
       "rows": 71,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_09.csv",
       "rows": 77,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_10.csv",
       "rows": 82,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_11.xlsx",
@@ -61,12 +61,12 @@
     {
       "sheet": "sheet_12.csv",
       "rows": 92,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_13.csv",
       "rows": 97,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_14.csv",
@@ -86,12 +86,12 @@
     {
       "sheet": "sheet_17.xlsx",
       "rows": 111,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_18.csv",
       "rows": 121,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_19.csv",
@@ -101,17 +101,17 @@
     {
       "sheet": "sheet_20.csv",
       "rows": 132,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_21.csv",
       "rows": 141,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_22.xlsx",
       "rows": 151,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_23.csv",
@@ -121,12 +121,12 @@
     {
       "sheet": "sheet_24.csv",
       "rows": 162,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_25.csv",
       "rows": 171,
-      "split": "dev"
+      "split": "held_out"
     },
     {
       "sheet": "sheet_26.xlsx",
@@ -136,7 +136,7 @@
     {
       "sheet": "sheet_27.csv",
       "rows": 191,
-      "split": "held_out"
+      "split": "dev"
     },
     {
       "sheet": "sheet_28.csv",

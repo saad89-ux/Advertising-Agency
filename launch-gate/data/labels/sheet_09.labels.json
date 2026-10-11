@@ -2,7 +2,7 @@
   "_note": "SYNTHETIC ground truth",
   "sheet": "sheet_09.csv",
   "sheet_sha256": "2f6cf89dc0567660e9b334776ebff15616088cbe0d7e1186140112389e7fcb93",
-  "split": "held_out",
+  "split": "dev",
   "header_variant": [
     "ad no",
     "network",

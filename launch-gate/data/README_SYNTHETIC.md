@@ -20,7 +20,7 @@ Any result produced from it must be labelled **SYNTHETIC**. It proves the system
 ## Rules the labels follow
 - Verdict of a row: `blocked` if any blocking error (forbidden claim, expired offer, page not found, handmade misuse); else `needs_person` (unknown claim, unknown client); else `fix_needed` (anything else); else `ready`.
 - Malformed rows are not ads; they must be isolated, not lost or merged (`expected_verdict: malformed_isolated`).
-- `split`: 20 sheets are `dev`, 10 are `held_out` (sheet numbers divisible by 3). Tune on dev only; report held_out honestly.
+- `split`: 20 sheets are `dev`, 10 are `held_out` (sheets 5, 8, 10, 13, 15, 17, 20, 22, 25, 30). Every header style appears in both groups. Tune on dev only; report held_out honestly.
 - "Meta" in the platform column means facebook. Client is found from the link host (`domain_map.json`). Hosts not in the map have no client rules.
 - Mechanical checks use `platform_limits.json` values as truth. Ratio tolerance 2%. Google creative `n/a` or blank is fine; blank elsewhere is an error.
 - Today is 2026-10-10 for offer dates.
@@ -30,7 +30,3 @@ Six different header styles (combined or split text and headline) and varied pla
 
 ## Truth you can score against (counts)
 Rows: 3260 valid ads, 41 malformed rows. Verdicts: {"blocked": 386, "ready": 1667, "needs_person": 106, "fix_needed": 1101}.
-
-## Regenerating and checking
-`_generator/generate_mock_data.py` rebuilds this pack deterministically (seed 42; `OUT=<dir> python3 generate_mock_data.py`).
-`_generator/validate_mock_data.py <path-to-data>` independently re-checks every label against the files. Do not edit files by hand; regenerate instead.
