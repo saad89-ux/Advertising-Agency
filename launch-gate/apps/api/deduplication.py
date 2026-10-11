@@ -1,71 +1,46 @@
-"""Client-scoped sheet and row deduplication primitives."""
+"""Client-scoped sheet deduplication primitives."""
 
-from collections.abc import Sequence
+from psycopg import Connection
 
-from apps.api.clients import create_client_tables
+from apps.api.ads import create_ads_table
+from apps.api.batches import create_batches_table
 from apps.api.database import get_session
-from apps.api.ingest import hash_normalized_row
 
 
-CREATE_INGESTED_SHEETS_TABLE = """
-CREATE TABLE IF NOT EXISTS ingested_sheets (
+CREATE_SHEET_CLAIMS_TABLE = """
+CREATE TABLE IF NOT EXISTS sheet_claims (
     client_id TEXT NOT NULL REFERENCES clients (client_id) ON DELETE CASCADE,
     sheet_hash TEXT NOT NULL CHECK (length(trim(sheet_hash)) > 0),
+    batch_id TEXT NOT NULL REFERENCES batches (batch_id) ON DELETE CASCADE,
     PRIMARY KEY (client_id, sheet_hash)
 )
 """
 
-CREATE_CLIENT_ROW_HASH_INDEX = """
-CREATE UNIQUE INDEX IF NOT EXISTS ads_client_row_hash_unique
-ON ads (client_id, row_hash)
-"""
-
 
 def create_deduplication_constraints() -> None:
-    """Create sheet identity storage and enforce client-scoped row uniqueness."""
-    create_client_tables()
+    """Ensure dependencies exist, then create per-client sheet claim storage."""
+    create_batches_table()
+    create_ads_table()
     with get_session() as connection:
-        connection.execute(CREATE_INGESTED_SHEETS_TABLE)
-        connection.execute(CREATE_CLIENT_ROW_HASH_INDEX)
+        connection.execute(CREATE_SHEET_CLAIMS_TABLE)
 
 
-def claim_sheet(client_id: str, sheet_hash: str) -> bool:
-    """Atomically record a client sheet hash; return False when already seen."""
-    if not client_id.strip() or not sheet_hash.strip():
-        raise ValueError("client_id and sheet_hash must be non-empty")
-    with get_session() as connection:
-        result = connection.execute(
-            """INSERT INTO ingested_sheets (client_id, sheet_hash)
-               VALUES (%s, %s) ON CONFLICT (client_id, sheet_hash) DO NOTHING
-               RETURNING sheet_hash""",
-            (client_id, sheet_hash),
-        )
-        return result.fetchone() is not None
-
-
-def filter_unseen_rows(
-    client_id: str, rows: Sequence[dict[str, str]]
-) -> list[dict[str, str]]:
-    """Return input rows whose client-scoped hashes are not already in ads.
-
-    The unique index created by ``create_deduplication_constraints`` remains the
-    final concurrency guard when callers persist returned rows.
-    """
-    if not client_id.strip():
-        raise ValueError("client_id must be non-empty")
-    hashes = [hash_normalized_row(row) for row in rows]
-    if not hashes:
-        return []
-    with get_session() as connection:
-        result = connection.execute(
-            "SELECT row_hash FROM ads WHERE client_id = %s AND row_hash = ANY(%s)",
-            (client_id, hashes),
-        )
-        existing = {record[0] for record in result.fetchall()}
-    seen = set(existing)
-    unique_rows: list[dict[str, str]] = []
-    for row, row_hash in zip(rows, hashes):
-        if row_hash not in seen:
-            unique_rows.append(row)
-            seen.add(row_hash)
-    return unique_rows
+def claim_sheet(
+    connection: Connection, client_id: str, sheet_hash: str, batch_id: str
+) -> str | None:
+    """Claim a sheet in the caller's transaction; return prior batch ID on repeat."""
+    if not client_id.strip() or not sheet_hash.strip() or not batch_id.strip():
+        raise ValueError("client_id, sheet_hash, and batch_id must be non-empty")
+    result = connection.execute(
+        """INSERT INTO sheet_claims (client_id, sheet_hash, batch_id)
+           VALUES (%s, %s, %s) ON CONFLICT (client_id, sheet_hash) DO NOTHING
+           RETURNING batch_id""",
+        (client_id, sheet_hash, batch_id),
+    )
+    if result.fetchone() is not None:
+        return None
+    prior = connection.execute(
+        "SELECT batch_id FROM sheet_claims WHERE client_id = %s AND sheet_hash = %s",
+        (client_id, sheet_hash),
+    ).fetchone()
+    return str(prior[0]) if prior else None

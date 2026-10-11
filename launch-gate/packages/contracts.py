@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, conint, constr, root_validator
+from pydantic import BaseModel, ConfigDict, Field, conint, constr, model_validator
 
 
 NonEmptyString = constr(strip_whitespace=True, min_length=1)
@@ -9,8 +9,7 @@ PositiveRowNumber = conint(gt=0)
 
 
 class ContractModel(BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class CheckType(str, Enum):
@@ -39,11 +38,11 @@ class AdContract(ContractModel):
     row_hash: NonEmptyString
     sheet_hash: NonEmptyString
 
-    @root_validator(skip_on_failure=True)
-    def require_ad_text_or_headline(cls, values):
-        if not values.get("ad_text") and not values.get("headline"):
+    @model_validator(mode="after")
+    def require_ad_text_or_headline(self):
+        if not self.ad_text and not self.headline:
             raise ValueError("ad_text or headline must be provided")
-        return values
+        return self
 
 
 class FindingContract(ContractModel):
@@ -72,12 +71,12 @@ class BatchContract(ContractModel):
     verdicts: List[VerdictContract] = Field(default_factory=list)
     summary: Optional[NonEmptyString] = None
 
-    @root_validator(skip_on_failure=True)
-    def validate_batch_references(cls, values):
-        batch_id = values.get("batch_id")
-        ads = values.get("ads", [])
-        findings = values.get("findings", [])
-        verdicts = values.get("verdicts", [])
+    @model_validator(mode="after")
+    def validate_batch_references(self):
+        batch_id = self.batch_id
+        ads = self.ads
+        findings = self.findings
+        verdicts = self.verdicts
 
         ad_ids = [ad.ad_id for ad in ads]
         if len(ad_ids) != len(set(ad_ids)):
@@ -102,4 +101,4 @@ class BatchContract(ContractModel):
         ):
             raise ValueError("verdict findings must reference findings in the batch")
 
-        return values
+        return self

@@ -50,6 +50,7 @@ class ParsedCsvUpload:
     columns: tuple[str, ...]
     rows: list[dict[str, str]]
     rejected_rows: list[RejectedRow] = field(default_factory=list)
+    valid_row_indices: tuple[int, ...] = ()
 
     @property
     def row_hashes(self) -> tuple[str, ...]:
@@ -70,18 +71,24 @@ def _hash_payload(value: object) -> str:
 
 
 def hash_normalized_row(row: dict[str, str]) -> str:
-    """Hash all normalized ad fields except the source-specific row number."""
-    canonical = {key: value for key, value in row.items() if key != "row_number"}
-    return _hash_payload(canonical)
+    """Hash only the canonical ad fields; source metadata and extras are ignored."""
+    return _hash_payload(_canonical_hash_fields(row))
 
 
 def hash_normalized_sheet(rows: list[dict[str, str]]) -> str:
-    """Hash valid normalized rows in order; rejected rows are not included."""
-    canonical = [
-        {key: value for key, value in row.items() if key != "row_number"}
-        for row in rows
-    ]
+    """Hash canonical fields from valid normalized rows in source order."""
+    canonical = [_canonical_hash_fields(row) for row in rows]
     return _hash_payload(canonical)
+
+
+def _canonical_hash_fields(row: dict[str, str]) -> dict[str, str]:
+    return {
+        "platform": row.get("platform", ""),
+        "text": row.get("ad_text", ""),
+        "headline": row.get("headline", ""),
+        "link": row.get("destination_url", ""),
+        "creative": row.get("creative_file", ""),
+    }
 
 
 def _normalize_header(header: str) -> str:
@@ -263,9 +270,8 @@ def _validate_record(
         )
 
     normalized = {
-        column: _neutralize_formula_cell(str(value))
+        column: _neutralize_formula_cell("" if value is None else str(value))
         for column, value in zip(source_columns, field_values)
-        if value is not None
     }
     normalized["row_number"] = str(row_number)
     return normalized, None
@@ -277,12 +283,13 @@ def _validate_filename_and_size(
     *,
     extension: str,
     max_file_bytes: int,
+    unsupported_type_message: str | None = None,
 ) -> None:
     if not isinstance(filename, str) or not filename.strip():
         raise UploadValidationError("a filename is required", reason_code="invalid_filename")
     if PurePath(filename).suffix.casefold() != extension:
         raise UploadValidationError(
-            f"only {extension[1:].upper()} files are accepted",
+            unsupported_type_message or f"only {extension[1:].upper()} files are accepted",
             reason_code="unsupported_file_type",
         )
     if not isinstance(content, bytes):
@@ -313,6 +320,7 @@ def _finish_upload(
         valid_widths.pop()
 
     rows: list[dict[str, str]] = []
+    valid_row_indices: list[int] = []
     rejected_rows: list[RejectedRow] = []
     for data_row_index, (record, width_ok) in enumerate(
         zip(records, valid_widths), start=1
@@ -328,6 +336,7 @@ def _finish_upload(
             continue
         assert normalized is not None
         rows.append(normalized)
+        valid_row_indices.append(data_row_index)
         if len(rows) > MAX_CSV_ROWS:
             raise UploadValidationError(
                 f"upload may contain at most {MAX_CSV_ROWS} valid ads",
@@ -335,7 +344,10 @@ def _finish_upload(
             )
 
     return ParsedCsvUpload(
-        columns=_output_columns(source_columns), rows=rows, rejected_rows=rejected_rows
+        columns=_output_columns(source_columns),
+        rows=rows,
+        rejected_rows=rejected_rows,
+        valid_row_indices=tuple(valid_row_indices),
     )
 
 
@@ -387,42 +399,67 @@ def parse_xlsx_upload(
     content: bytes,
     *,
     max_file_bytes: int,
+    max_uncompressed_bytes: int | None = None,
+    max_archive_entries: int = 200,
 ) -> ParsedCsvUpload:
-    """Validate and isolate rows from the first worksheet of a non-macro XLSX."""
+    """Validate and isolate rows from the sole non-empty worksheet in an XLSX."""
     if isinstance(filename, str) and PurePath(filename).suffix.casefold() == ".xlsm":
         _validate_filename_and_size(
             filename, content, extension=".xlsm", max_file_bytes=max_file_bytes
         )
         raise UploadValidationError(
-            "macro-enabled XLSX is not readable", reason_code="unreadable_xlsx"
+            "This is a macro-enabled workbook; macro-enabled XLSX is not accepted. Upload a non-macro XLSX file.",
+            reason_code="macro_enabled_xlsx",
         )
     _validate_filename_and_size(
-        filename, content, extension=".xlsx", max_file_bytes=max_file_bytes
+        filename,
+        content,
+        extension=".xlsx",
+        max_file_bytes=max_file_bytes,
+        unsupported_type_message="Please upload a valid XLSX file.",
     )
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            names = archive.namelist()
+            archive_entries = archive.infolist()
+            if len(archive_entries) > max_archive_entries:
+                raise UploadValidationError(
+                    f"XLSX archive has more than {max_archive_entries} entries",
+                    reason_code="xlsx_too_many_entries",
+                )
+            uncompressed_size = sum(entry.file_size for entry in archive_entries)
+            if (
+                max_uncompressed_bytes is not None
+                and uncompressed_size > max_uncompressed_bytes
+            ):
+                raise UploadValidationError(
+                    "XLSX uncompressed archive size "
+                    f"{uncompressed_size} bytes exceeds the configured limit of "
+                    f"{max_uncompressed_bytes} bytes",
+                    reason_code="xlsx_uncompressed_too_large",
+                )
+            names = [entry.filename for entry in archive_entries]
             if any(name.casefold().endswith("vbaproject.bin") for name in names):
                 raise UploadValidationError(
-                    "macro-enabled XLSX is not readable",
-                    reason_code="unreadable_xlsx",
+                    "This is a macro-enabled workbook; macro-enabled XLSX is not accepted. Upload a non-macro XLSX file.",
+                    reason_code="macro_enabled_xlsx",
                 )
             try:
                 content_types = archive.read("[Content_Types].xml").decode("utf-8")
             except (KeyError, UnicodeDecodeError) as exc:
                 raise UploadValidationError(
-                    "XLSX is corrupt or unreadable", reason_code="unreadable_xlsx"
+                    "XLSX is corrupt or unreadable; upload a valid XLSX file.",
+                    reason_code="unreadable_xlsx",
                 ) from exc
             if "macroenabled" in content_types.casefold():
                 raise UploadValidationError(
-                    "macro-enabled XLSX is not readable",
-                    reason_code="unreadable_xlsx",
+                    "This is a macro-enabled workbook; macro-enabled XLSX is not accepted. Upload a non-macro XLSX file.",
+                    reason_code="macro_enabled_xlsx",
                 )
     except UploadValidationError:
         raise
     except Exception as exc:
         raise UploadValidationError(
-            "XLSX is corrupt, encrypted, or unreadable",
+            "XLSX is corrupt, encrypted, or unreadable; upload a valid XLSX file.",
             reason_code="unreadable_xlsx",
         ) from exc
 
@@ -432,18 +469,37 @@ def parse_xlsx_upload(
         )
     except (InvalidFileException, OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
         raise UploadValidationError(
-            "XLSX is corrupt, encrypted, or unreadable",
+            "XLSX is corrupt, encrypted, or unreadable; upload a valid XLSX file.",
             reason_code="unreadable_xlsx",
         ) from exc
 
     try:
-        if not workbook.worksheets:
+        non_empty_sheets: list[tuple[str, list[tuple[object, ...]]]] = []
+        for worksheet in workbook.worksheets:
+            worksheet_rows = [
+                tuple(record)
+                for record in worksheet.iter_rows(values_only=True)
+            ]
+            if any(
+                not _is_empty(value)
+                for record in worksheet_rows
+                for value in record
+            ):
+                non_empty_sheets.append((worksheet.title, worksheet_rows))
+
+        if len(non_empty_sheets) > 1:
             raise UploadValidationError(
-                "XLSX has no worksheet", reason_code="unreadable_xlsx"
+                "XLSX must contain exactly one non-empty worksheet.",
+                reason_code="multiple_worksheets",
             )
-        worksheet = workbook.worksheets[0]
-        iterator = worksheet.iter_rows(values_only=True)
-        header_values = next(iterator, None)
+        if not non_empty_sheets:
+            raise UploadValidationError(
+                "XLSX has no non-empty worksheet; upload a valid XLSX file with a worksheet.",
+                reason_code="unreadable_xlsx",
+            )
+
+        _, worksheet_rows = non_empty_sheets[0]
+        header_values = worksheet_rows[0] if worksheet_rows else None
         if not header_values:
             raise UploadValidationError(
                 "missing required columns: platform, link, text or headline",
@@ -458,7 +514,7 @@ def parse_xlsx_upload(
             )
         source_columns = _validate_columns([str(value) for value in header_values])
 
-        records: list[tuple[object, ...]] = list(iterator)
+        records = worksheet_rows[1:]
         width_checks = [
             not any(not _is_empty(value) for value in record[len(source_columns):])
             for record in records
@@ -467,7 +523,7 @@ def parse_xlsx_upload(
         raise
     except Exception as exc:
         raise UploadValidationError(
-            "XLSX is corrupt, encrypted, or unreadable",
+            "XLSX is corrupt, encrypted, or unreadable; upload a valid XLSX file.",
             reason_code="unreadable_xlsx",
         ) from exc
     finally:

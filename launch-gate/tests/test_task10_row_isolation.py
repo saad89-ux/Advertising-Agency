@@ -163,7 +163,6 @@ def test_xlsx_isolates_empty_required_values_and_extra_nonempty_cells():
             [3, "Meta", "Extra", "/extra", "beyond header"],
             [4, "Meta", "Good too", "/good-too"],
         ],
-        second_sheet=True,
     )
     result = xlsx_upload(content)
 

@@ -22,7 +22,9 @@ def make_workbook(*, extra_sheet: str | None = None) -> bytes:
     sheet.append(["#", "Channel", "Primary Text", "Headline", "URL", "Asset"])
     sheet.append([1, "Search", "hello", "title", "/page", None])
     if extra_sheet:
-        workbook.create_sheet(extra_sheet)
+        other_sheet = workbook.create_sheet(extra_sheet)
+        other_sheet.append(["Platform", "Headline", "URL"])
+        other_sheet.append(["Meta", "another ad", "/other-page"])
     output = BytesIO()
     workbook.save(output)
     workbook.close()
@@ -59,9 +61,25 @@ def test_normalizes_xlsx_headers_and_matches_csv_result_shape():
     ]
 
 
-def test_reads_first_worksheet_only():
+def test_rejects_multiple_non_empty_worksheets():
     content = make_workbook(extra_sheet="Other")
-    assert len(parse(content).rows) == 1
+    with pytest.raises(UploadValidationError) as exc_info:
+        parse(content)
+    assert exc_info.value.reason_code == "multiple_worksheets"
+
+
+def test_ignores_empty_worksheets_when_exactly_one_contains_data():
+    workbook = Workbook()
+    first = workbook.active
+    first.title = "Ads"
+    first.append(["Row", "Platform", "Headline", "URL"])
+    first.append([1, "Meta", "hello", "/page"])
+    workbook.create_sheet("Empty")
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+
+    assert len(parse(output.getvalue()).rows) == 1
 
 
 def test_formula_cells_are_neutralized():
@@ -106,12 +124,15 @@ def test_validates_size_workbook_format_and_headers():
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Ads"
-    sheet.append(["Platform", "Headline", "URL"])
+    sheet.append(["Platform", "Headline"])
     output = BytesIO()
     workbook.save(output)
     workbook.close()
-    with pytest.raises(UploadValidationError, match="missing required columns"):
+    with pytest.raises(
+        UploadValidationError, match="missing required columns: link"
+    ) as exc_info:
         parse(output.getvalue())
+    assert exc_info.value.reason_code == "missing_required_columns"
 
 
 def test_enforces_the_200_data_row_limit():

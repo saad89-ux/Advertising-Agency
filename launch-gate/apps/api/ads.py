@@ -1,11 +1,12 @@
 from apps.api.clients import create_client_tables
+from apps.api.batches import create_batches_table
 from apps.api.database import get_session
 
 
 CREATE_ADS_TABLE = """
 CREATE TABLE IF NOT EXISTS ads (
     ad_id TEXT PRIMARY KEY CHECK (length(trim(ad_id)) > 0),
-    batch_id TEXT NOT NULL CHECK (length(trim(batch_id)) > 0),
+    batch_id TEXT NOT NULL REFERENCES batches (batch_id) ON DELETE CASCADE,
     client_id TEXT NOT NULL REFERENCES clients (client_id),
     row_number INTEGER NOT NULL CHECK (row_number > 0),
     platform TEXT NOT NULL CHECK (length(trim(platform)) > 0),
@@ -22,9 +23,52 @@ CREATE TABLE IF NOT EXISTS ads (
 )
 """
 
+INSERT_AD = """
+INSERT INTO ads (
+    ad_id, batch_id, client_id, row_number, platform, ad_text, headline,
+    destination_url, creative_file, row_hash, sheet_hash
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+ENSURE_ADS_BATCH_FOREIGN_KEY = """
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ads_batch_id_fkey'
+          AND conrelid = 'ads'::regclass
+    ) THEN
+        ALTER TABLE ads ADD CONSTRAINT ads_batch_id_fkey
+            FOREIGN KEY (batch_id) REFERENCES batches (batch_id) ON DELETE CASCADE NOT VALID;
+    END IF;
+END $$
+"""
+
 
 def create_ads_table() -> None:
     """Create the ads table after ensuring its clients-table dependency exists."""
+    create_batches_table()
     create_client_tables()
     with get_session() as connection:
         connection.execute(CREATE_ADS_TABLE)
+        connection.execute(ENSURE_ADS_BATCH_FOREIGN_KEY)
+
+
+def persist_ads_on_connection(connection, ads: list[dict[str, object]]) -> None:
+    for ad in ads:
+        connection.execute(
+            INSERT_AD,
+            (
+                ad["ad_id"],
+                ad["batch_id"],
+                ad["client_id"],
+                ad["row_number"],
+                ad["platform"],
+                ad.get("ad_text"),
+                ad.get("headline"),
+                ad["destination_url"],
+                ad.get("creative_file", ""),
+                ad["row_hash"],
+                ad["sheet_hash"],
+            ),
+        )
