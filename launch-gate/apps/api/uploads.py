@@ -26,6 +26,7 @@ from apps.api.ingest import (
     parse_csv_upload,
     parse_xlsx_upload,
 )
+from apps.api.queue import AdJob, enqueue_ad_jobs
 from apps.api.settings import (
     MAX_XLSX_ARCHIVE_ENTRIES,
     max_upload_bytes,
@@ -145,6 +146,7 @@ def _persist_upload(
     duplicate_clients: list[str] = []
     accepted_count = 0
     all_duplicate_batch_ids: list[str] = []
+    jobs_to_enqueue: list[AdJob] = []
     _insert_upload_schema()
     try:
         with get_session() as connection:
@@ -186,6 +188,10 @@ def _persist_upload(
                 raise _DuplicateUpload(original_batch_id)
 
             ads.persist_ads_on_connection(connection, rows_to_save)
+            jobs_to_enqueue = [
+                AdJob(batch_id=str(row["batch_id"]), ad_id=str(row["ad_id"]))
+                for row in rows_to_save
+            ]
             rejected_rows.persist_rejected_rows_on_connection(
                 connection, batch_id, rejected
             )
@@ -201,6 +207,12 @@ def _persist_upload(
                 "duplicate_sheet": True,
             },
         )
+
+    if jobs_to_enqueue:
+        try:
+            enqueue_ad_jobs(jobs_to_enqueue)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="ad queue unavailable") from exc
 
     response: dict[str, Any] = {
         "batch_id": batch_id,

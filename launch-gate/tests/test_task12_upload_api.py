@@ -11,6 +11,7 @@ from openpyxl import Workbook
 
 from apps.api import auth, settings, uploads
 from apps.api.auth import CurrentUser
+from apps.api.queue import AdJob
 from apps.api.main import app
 
 
@@ -77,6 +78,7 @@ def api_setup(monkeypatch):
     database = FakeUploadDatabase()
     monkeypatch.setattr(uploads, "_insert_upload_schema", lambda: None)
     monkeypatch.setattr(uploads, "get_session", database.session)
+    monkeypatch.setattr(uploads, "enqueue_ad_jobs", lambda jobs: len(jobs))
     return database
 
 
@@ -109,6 +111,8 @@ def xlsx_bytes(url="https://brightleaf.example/page"):
 
 
 def test_upload_csv_saves_ads_with_inferred_client_and_rejected_rows(monkeypatch, api_setup):
+    enqueued = []
+    monkeypatch.setattr(uploads, "enqueue_ad_jobs", lambda jobs: enqueued.extend(jobs))
     headers = auth_headers(monkeypatch)
     body = (
         "Row,Platform,Headline,URL\n"
@@ -130,6 +134,7 @@ def test_upload_csv_saves_ads_with_inferred_client_and_rejected_rows(monkeypatch
         "unknown_client",
     }
     assert api_setup.state["ads"][0][2] == "brightleaf"
+    assert enqueued == [AdJob(batch_id=payload["batch_id"], ad_id=api_setup.state["ads"][0][0])]
     assert len(api_setup.state["rejected"]) == 2
     assert api_setup.state["batches"][payload["batch_id"]][2] == "ads.csv"
 
@@ -146,6 +151,27 @@ def test_upload_xlsx_accepts_valid_workbook(monkeypatch, api_setup):
     assert response.status_code == 201
     assert response.json()["accepted_count"] == 1
     assert api_setup.state["ads"][0][2] == "brightleaf"
+
+
+def test_upload_enqueues_exactly_one_job_per_saved_ad(monkeypatch, api_setup):
+    enqueued = []
+    monkeypatch.setattr(uploads, "enqueue_ad_jobs", lambda jobs: enqueued.extend(jobs))
+    headers = auth_headers(monkeypatch)
+    body = (
+        "Row,Platform,Headline,URL\n"
+        "1,Meta,first,https://brightleaf.example/one\n"
+        "bad,Meta,isolated,https://brightleaf.example/two\n"
+        "2,Meta,second,https://brightleaf.example/three\n"
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+
+    assert response.status_code == 201
+    assert response.json()["accepted_count"] == 2
+    saved_ad_ids = [ad[0] for ad in api_setup.state["ads"]]
+    assert [job.ad_id for job in enqueued] == saved_ad_ids
+    assert all(job.batch_id == response.json()["batch_id"] for job in enqueued)
 
 
 def test_repeated_sheet_returns_original_batch_and_saves_nothing_again(monkeypatch, api_setup):
