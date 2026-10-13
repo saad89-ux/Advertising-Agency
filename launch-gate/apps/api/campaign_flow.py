@@ -19,7 +19,7 @@ from apps.api.access import require_client_access
 from apps.api.auth import CurrentUser, get_current_user, require_role
 from apps.api.guest_sessions import get_request_user, require_guest_csrf
 from apps.api.database import get_session
-from apps.api.notifications import NotificationDispatcher
+from apps.api.notifications import NotificationDispatcher, create_notification_tables
 from apps.api.client_ip import get_client_ip
 from apps.api.ingest import hash_normalized_row, hash_normalized_sheet
 from apps.api.platforms_schema import init_platform_tables
@@ -75,6 +75,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_launch_contacts_batch_email
 
 def init_flow_tables():
     init_platform_tables()
+    create_notification_tables()
     with get_session() as conn:
         with conn.cursor() as cur:
             cur.execute(CREATE_CONTACTS_TABLE)
@@ -478,6 +479,7 @@ def launch_batch(
                                         f"Details: {review_notes}"
                                     ),
                                     ad_id=ad_id,
+                                    batch_id=actual_batch_id,
                                     platform=plat,
                                 )
                                 notifications_dispatched.append(alert_res)
@@ -1045,7 +1047,7 @@ def dispatch_test_alert(
             f"Recipient Phone: {phone}\n"
             f"Client Account: {client_id}\n"
             f"Triggered by User: {user.email}\n"
-            f"Status: Emergency alert notification delivery channel verified.\n\n"
+            f"Status: Emergency alert delivery has been queued for processing.\n\n"
             f"If your campaign experiences platform blockers or policy suspensions, an SMTP email alert will be routed here."
         ),
     )
@@ -1058,8 +1060,8 @@ def dispatch_test_alert(
         "dispatch_result": alert_res,
         "email_status": alert_res.get("email_status"),
         "message": (
-            "Test alert dispatched successfully. "
-            f"SMTP Email Status: {alert_res.get('email_status')}."
+            "Test alert queued for delivery. "
+            f"Email status: {alert_res.get('email_status')}."
         ),
     }
 
@@ -1098,7 +1100,7 @@ def hitl_remediate(
             client_id=ad["client_id"], recipient_email=email, recipient_phone=phone,
             alert_type="remediation_requested", subject=f"Launch Gate: Ad {req.ad_id} awaiting review",
             message_body="Revised copy was saved for worker checks and human review. No platform relaunch was performed.",
-            ad_id=req.ad_id, platform=ad["platform"])
+            ad_id=req.ad_id, batch_id=ad.get("batch_id"), platform=ad["platform"])
     return {**result, "status": "pending_review", "message": "Revised copy saved for checks and human approval.",
             "notification_dispatched": {"employee_email": email, "employee_phone": phone,
                                         "email_status": notification["email_status"], "dispatch_result": notification},

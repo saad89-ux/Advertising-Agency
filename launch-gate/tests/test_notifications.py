@@ -51,14 +51,14 @@ def test_email_sends_through_smtp(monkeypatch):
 
 
 def test_alert_dispatch_has_email_status_only(monkeypatch):
-    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
-    monkeypatch.setenv("NOTIFICATION_FROM_EMAIL", "alerts@example.com")
+    from contextlib import nullcontext
+    from apps.api import notifications
 
-    with patch.object(
-        NotificationDispatcher,
-        "send_email",
-        return_value={"status": "sent", "provider": "smtp"},
-    ):
+    monkeypatch.setattr("apps.api.database.get_session", lambda: nullcontext(object()))
+    monkeypatch.setattr(notifications, "record_notification_delivery", lambda *a, **k: {
+        "delivery_id": "delivery-test", "status": "pending", "is_duplicate": False,
+    })
+    with patch.object(NotificationDispatcher, "send_email") as send_email:
         result = NotificationDispatcher.dispatch_campaign_alert(
             client_id="client",
             recipient_email="buyer@example.com",
@@ -68,6 +68,9 @@ def test_alert_dispatch_has_email_status_only(monkeypatch):
             message_body="Connector unavailable",
         )
 
-    assert result["email_status"] == "sent"
+    assert result["email_status"] == "queued"
+    assert result["status"] == "pending"
+    assert result["delivery_id"] == "delivery-test"
+    send_email.assert_not_called()
     assert "sms_status" not in result
     assert result["details"]["recipient_phone"] == "+15551234567"

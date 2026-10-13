@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from apps.worker.job_runner import run_once
+from apps.api.notifications import process_pending_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,14 @@ def main(*, process_jobs: bool = False, run_until_empty: bool = False, **kwargs:
     if run_until_empty:
         processed_jobs = []
         while True:
+            processed_notifications = process_pending_notifications(batch_size=10)
             job = run_once(**kwargs)
-            if job is None:
+            if job is not None:
+                processed_jobs.append(job)
+            elif not processed_notifications:
                 break
-            processed_jobs.append(job)
         return processed_jobs
+    process_pending_notifications(batch_size=10)
     return run_once(**kwargs)
 
 

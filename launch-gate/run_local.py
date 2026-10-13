@@ -98,15 +98,17 @@ def run_stand_in_platform():
 
 
 def run_worker_loop():
-    """Continuously pop and process ad jobs from the Redis queue."""
+    """Continuously process durable notification and ad jobs."""
     try:
         from apps.worker.job_runner import run_once
+        from apps.api.notifications import process_pending_notifications
     except Exception as exc:
         print(f"[WARN] Background worker loop notice: {exc}")
         return
 
     while True:
         try:
+            process_pending_notifications(batch_size=10)
             run_once(run_wording_checks=True)
         except Exception:
             pass

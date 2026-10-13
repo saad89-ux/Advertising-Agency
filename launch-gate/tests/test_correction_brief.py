@@ -70,7 +70,8 @@ def test_prompt_launch_and_repeat_history(client):
     data = response.json()
     assert data["status"] == "blocked"
     assert len(data["results"]) == 2
-    assert data["notifications"][0]["email_status"] == "unconfigured_credentials"
+    assert data["notifications"][0]["email_status"] == "queued"
+    assert data["notifications"][0]["status"] == "pending"
     assert "sms_dispatch" not in data["notification_contact"]
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     batch = data["batch_id"]

@@ -9,6 +9,7 @@ from apps.api import (
     edits,
     evidence,
     findings,
+    notifications,
     outbox,
     rejected_rows,
 )
@@ -34,4 +35,5 @@ def init_schema() -> None:
     edits.create_ad_edits_table()
     cost_ledger.create_cost_ledger_table()
     sender.create_send_tables()
+    notifications.create_notification_tables()
     create_trace_tables()

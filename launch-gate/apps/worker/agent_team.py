@@ -584,6 +584,8 @@ class IssueTrackingSpecialistNode:
         crawler_feedback: str | None = None,
         contact_email: str | None = None,
         contact_phone: str | None = None,
+        batch_id: str | None = None,
+        launch_attempt_id: str | None = None,
         model_client: Any = None,
         trigger_alert: bool = True,
         use_llm: bool = False,
@@ -687,7 +689,9 @@ class IssueTrackingSpecialistNode:
                     subject=subject,
                     message_body=message_body,
                     ad_id=ad_id,
+                    batch_id=batch_id,
                     platform=platform,
+                    launch_attempt_id=launch_attempt_id,
                 )
                 alert_dispatched = True
             except Exception as exc:
