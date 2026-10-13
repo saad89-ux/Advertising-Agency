@@ -12,6 +12,7 @@ from apps.api import (
     outbox,
     rejected_rows,
 )
+from apps.api import guest_sessions
 from apps.worker import cost_ledger, sender
 from apps.worker.tracing import create_trace_tables
 
@@ -19,7 +20,9 @@ from apps.worker.tracing import create_trace_tables
 def init_schema() -> None:
     """Create the API's tables and constraints in dependency order."""
     clients.create_client_tables()
+    guest_sessions.init_guest_tables()
     batches.create_batches_table()
+    guest_sessions.init_batch_guest_ownership()
     ads.create_ads_table()
     ads.ensure_platform_raw_column()
     outbox.create_ad_job_outbox_table()

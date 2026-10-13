@@ -37,7 +37,7 @@ export default function MetricsScreen({
     const headers = { Accept: "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    fetch(`${apiBaseUrl}/batches`, { headers })
+    fetch(`${apiBaseUrl}/batches`, { headers, credentials: "include" })
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
         if (isMounted && Array.isArray(data)) {
@@ -71,7 +71,7 @@ export default function MetricsScreen({
         url = `${apiBaseUrl}/metrics${queryParams.toString() ? `?${queryParams.toString()}` : ""}`;
       }
 
-      const res = await fetch(url, { headers });
+      const res = await fetch(url, { headers, credentials: "include" });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const msg =
@@ -120,7 +120,7 @@ export default function MetricsScreen({
 
     let es;
     try {
-      es = new EventSource(sseUrl);
+      es = new EventSource(sseUrl, { withCredentials: true });
       setLiveStatus("connecting");
 
       es.addEventListener("connected", () => {

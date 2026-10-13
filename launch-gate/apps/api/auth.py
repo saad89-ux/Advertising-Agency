@@ -33,6 +33,7 @@ class CurrentUser:
     display_name: str
     role: str
     assigned_client_ids: tuple[str, ...]
+    guest_session_id: str | None = None
 
 
 def get_jwt_secret() -> str:
@@ -191,13 +192,21 @@ def get_current_user(
 
 
 def get_current_user_for_sse(
+    request: Request,
     token: str | None = Query(None),
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> CurrentUser:
+    if request.headers.get("authorization"):
+        if credentials is not None and credentials.scheme.casefold() == "bearer" and credentials.credentials:
+            return authenticate_token(credentials.credentials)
+        raise unauthorized()
     if credentials is not None and credentials.scheme.casefold() == "bearer" and credentials.credentials:
         return authenticate_token(credentials.credentials)
     if token:
         return authenticate_token(token)
+    if request.cookies.get("launch_gate_guest"):
+        from apps.api.guest_sessions import get_guest_user
+        return get_guest_user(request)
     raise unauthorized()
 
 

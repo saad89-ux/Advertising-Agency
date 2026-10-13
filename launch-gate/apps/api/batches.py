@@ -9,7 +9,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from apps.api.auth import CurrentUser, get_current_user
+from apps.api.auth import CurrentUser
+from apps.api.guest_sessions import get_request_user
 from apps.api.clients import create_client_tables
 from apps.api.database import get_session
 
@@ -20,12 +21,14 @@ router = APIRouter(tags=["batches"])
 CREATE_BATCHES_TABLE = """
 CREATE TABLE IF NOT EXISTS batches (
     batch_id TEXT PRIMARY KEY CHECK (length(trim(batch_id)) > 0),
-    uploaded_by TEXT NOT NULL REFERENCES users (user_id),
+    uploaded_by TEXT REFERENCES users (user_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     filename TEXT NOT NULL CHECK (length(filename) <= 255),
     sheet_hash TEXT NOT NULL CHECK (length(trim(sheet_hash)) > 0),
     is_sample BOOLEAN NOT NULL DEFAULT FALSE,
-    file_ref TEXT
+    file_ref TEXT,
+    guest_session_id TEXT,
+    CHECK ((uploaded_by IS NULL) <> (guest_session_id IS NULL))
 )
 """
 ENSURE_BATCHES_IS_SAMPLE_COLUMN = "ALTER TABLE batches ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT FALSE;"
@@ -49,19 +52,22 @@ def create_batches_table() -> None:
             connection.execute(ENSURE_BATCHES_UPLOADER_IP_COLUMN)
         except Exception:
             pass
+        connection.execute("ALTER TABLE batches ADD COLUMN IF NOT EXISTS guest_session_id TEXT;")
+        connection.execute("ALTER TABLE batches ALTER COLUMN uploaded_by DROP NOT NULL;")
 
 
 def create_batch_on_connection(
     connection: Any,
     *,
     batch_id: str,
-    uploaded_by: str,
+    uploaded_by: str | None,
     filename: str,
     sheet_hash: str,
     file_ref: str | None = None,
     uploader_ip: str | None = None,
+    guest_session_id: str | None = None,
 ) -> None:
-    if uploader_ip is None:
+    if guest_session_id is None and uploader_ip is None:
         connection.execute(
             """INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash, file_ref, is_sample)
                VALUES (%s, %s, %s, %s, %s, FALSE)
@@ -70,13 +76,32 @@ def create_batch_on_connection(
             (batch_id, uploaded_by, filename, sheet_hash, file_ref),
         )
         return
+    if guest_session_id is None:
+        connection.execute(
+            """INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash, file_ref, uploader_ip, is_sample)
+               VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+               ON CONFLICT (batch_id) DO UPDATE SET
+                   file_ref = COALESCE(EXCLUDED.file_ref, batches.file_ref),
+                   uploader_ip = COALESCE(EXCLUDED.uploader_ip, batches.uploader_ip);""",
+            (batch_id, uploaded_by, filename, sheet_hash, file_ref, uploader_ip),
+        )
+        return
+    if uploader_ip is None:
+        connection.execute(
+            """INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash, file_ref, guest_session_id, is_sample)
+               VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+               ON CONFLICT (batch_id) DO UPDATE SET
+                   file_ref = COALESCE(EXCLUDED.file_ref, batches.file_ref);""",
+            (batch_id, uploaded_by, filename, sheet_hash, file_ref, guest_session_id),
+        )
+        return
     connection.execute(
-        """INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash, file_ref, uploader_ip, is_sample)
-           VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+        """INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash, file_ref, uploader_ip, guest_session_id, is_sample)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
            ON CONFLICT (batch_id) DO UPDATE SET
                file_ref = COALESCE(EXCLUDED.file_ref, batches.file_ref),
                uploader_ip = COALESCE(EXCLUDED.uploader_ip, batches.uploader_ip);""",
-        (batch_id, uploaded_by, filename, sheet_hash, file_ref, uploader_ip),
+        (batch_id, uploaded_by, filename, sheet_hash, file_ref, uploader_ip, guest_session_id),
     )
 
 
@@ -85,7 +110,7 @@ def create_batch_on_connection(
 def get_batch_record(connection: Any, batch_id: str) -> dict[str, Any] | None:
     """Retrieve raw batch metadata row."""
     cur = connection.execute(
-        "SELECT batch_id, uploaded_by, created_at, filename, sheet_hash, file_ref FROM batches WHERE batch_id = %s",
+        "SELECT batch_id, uploaded_by, created_at, filename, sheet_hash, file_ref, guest_session_id FROM batches WHERE batch_id = %s",
         (batch_id,),
     )
     row = cur.fetchone()
@@ -94,7 +119,8 @@ def get_batch_record(connection: Any, batch_id: str) -> dict[str, Any] | None:
     f_ref = str(row[5]) if len(row) > 5 and row[5] is not None else None
     return {
         "batch_id": str(row[0]),
-        "uploaded_by": str(row[1]),
+        "uploaded_by": str(row[1]) if row[1] is not None else None,
+        "guest_session_id": str(row[6]) if len(row) > 6 and row[6] is not None else None,
         "created_at": str(row[2]),
         "filename": str(row[3]),
         "sheet_hash": str(row[4]),
@@ -328,10 +354,12 @@ def get_batch_rejected_rows(connection: Any, batch_id: str) -> list[dict[str, An
 
 
 def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -> dict[str, Any]:
-    """Retrieve full batch review details scoped strictly to the current user's assigned clients."""
+    """Retrieve batch review details scoped to assigned clients or the owning guest session."""
     def _fetch(conn: Any) -> dict[str, Any]:
         batch_rec = get_batch_record(conn, batch_id)
         if batch_rec is None:
+            raise HTTPException(status_code=404, detail="batch not found")
+        if user.guest_session_id and batch_rec.get("guest_session_id") != user.guest_session_id:
             raise HTTPException(status_code=404, detail="batch not found")
 
         # Total ads across the entire batch (to distinguish 404 vs 403)
@@ -526,11 +554,14 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
 
 
 def list_user_batches(user: CurrentUser, connection: Any = None) -> list[dict[str, Any]]:
-    """List batches that contain ads for the user's assigned clients (or uploaded by the user)."""
+    """List batches for assigned clients, the authenticated uploader, or the owning guest session."""
     client_ids = list(user.assigned_client_ids)
 
     def _query(conn: Any) -> list[dict[str, Any]]:
-        if client_ids:
+        if user.guest_session_id:
+            cur = conn.execute("""SELECT b.batch_id, b.filename, b.uploaded_by, b.created_at, b.sheet_hash, b.file_ref
+                FROM batches b WHERE b.guest_session_id = %s ORDER BY b.created_at DESC;""", (user.guest_session_id,))
+        elif client_ids:
             cur = conn.execute(
                 """
                 SELECT b.batch_id, b.filename, b.uploaded_by, b.created_at, b.sheet_hash, b.file_ref
@@ -576,7 +607,7 @@ def list_user_batches(user: CurrentUser, connection: Any = None) -> list[dict[st
             results.append({
                 "batch_id": bid,
                 "filename": str(row[1]),
-                "uploaded_by": str(row[2]),
+                "uploaded_by": str(row[2]) if row[2] is not None else None,
                 "created_at": str(row[3]),
                 "sheet_hash": str(row[4]),
                 "file_ref": f_ref,
@@ -595,8 +626,8 @@ def list_user_batches(user: CurrentUser, connection: Any = None) -> list[dict[st
 # --- Router Endpoints ---
 
 @router.get("/batches")
-def list_batches_endpoint(batch_id: str | None = None, client_id: str | None = None, user: CurrentUser = Depends(get_current_user)) -> list[dict[str, Any]]:
-    """List batches visible to the authenticated user."""
+def list_batches_endpoint(batch_id: str | None = None, client_id: str | None = None, user: CurrentUser = Depends(get_request_user)) -> list[dict[str, Any]]:
+    """List batches visible to the authenticated user or current guest session."""
     if batch_id:
         detail = get_batch_detail(batch_id, user)
         return [item for item in list_user_batches(user) if item["batch_id"] == batch_id]
@@ -604,8 +635,8 @@ def list_batches_endpoint(batch_id: str | None = None, client_id: str | None = N
 
 
 @router.get("/batches/{batch_id}")
-def get_batch_endpoint(batch_id: str, user: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
-    """Retrieve full batch review screen details scoped strictly to assigned clients."""
+def get_batch_endpoint(batch_id: str, user: CurrentUser = Depends(get_request_user)) -> dict[str, Any]:
+    """Retrieve batch review details scoped to the authenticated user or owning guest session."""
     return get_batch_detail(batch_id, user)
 
 

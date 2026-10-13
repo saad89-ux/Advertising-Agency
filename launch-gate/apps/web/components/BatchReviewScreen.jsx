@@ -73,7 +73,7 @@ export default function BatchReviewScreen({
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    fetch(`${apiBaseUrl}/batches/${batchId}`, { headers })
+    fetch(`${apiBaseUrl}/batches/${batchId}`, { headers, credentials: "include" })
       .then(async (res) => {
         if (!isMounted) return;
         setStatusCode(res.status);
@@ -126,7 +126,7 @@ export default function BatchReviewScreen({
 
     let es;
     try {
-      es = new EventSource(sseUrl);
+      es = new EventSource(sseUrl, { withCredentials: true });
       setLiveStatus("connecting");
 
       es.addEventListener("connected", () => {

@@ -40,8 +40,9 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
       const headers = { Accept: "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch(`${apiBaseUrl}/batches/${batchId}`, { headers });
+      const res = await fetch(`${apiBaseUrl}/batches/${batchId}`, { headers, credentials: "include" });
       if (!res.ok) {
+        if (res.status === 401) throw new Error("Your guest session expired. The saved campaign is available only with its original session cookie.");
         throw new Error(await readError(res));
       }
 

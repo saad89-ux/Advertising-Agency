@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.access import require_client_access
 from apps.api.auth import CurrentUser, get_current_user
+from apps.api.guest_sessions import get_request_user
 from apps.api.batches import (
     get_ads_findings,
     get_ads_verdicts,
@@ -608,13 +609,15 @@ def calculate_global_metrics(
 @router.get("/batches/{batch_id}/metrics", status_code=status.HTTP_200_OK)
 def get_batch_metrics_endpoint(
     batch_id: str,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Retrieve complete PRD §4.7 metrics for a batch, scoped to assigned clients."""
     with get_session() as conn:
         batch_rec = get_batch_record(conn, batch_id)
         if batch_rec is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="batch not found")
+        if user.guest_session_id and batch_rec.get("guest_session_id") != user.guest_session_id:
+            raise HTTPException(status_code=404, detail="batch not found")
 
         # Client scoping check (Needs: 7)
         allowed_clients = list(user.assigned_client_ids)
@@ -636,7 +639,7 @@ def get_batch_metrics_endpoint(
 @router.get("/batches/{batch_id}/metrics/summary", status_code=status.HTTP_200_OK)
 def get_batch_metrics_summary_endpoint(
     batch_id: str,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Retrieve concise KPI summary of batch metrics."""
     with get_session() as conn:
@@ -662,7 +665,7 @@ def get_batch_metrics_summary_endpoint(
 @router.get("/batches/{batch_id}/metrics/export", status_code=status.HTTP_200_OK)
 def export_batch_metrics_endpoint(
     batch_id: str,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Export complete batch metrics for auditing and reporting."""
     return get_batch_metrics_endpoint(batch_id, user)

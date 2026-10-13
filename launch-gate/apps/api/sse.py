@@ -238,6 +238,8 @@ def verify_batch_client_access(connection: Any, batch_id: str, user: CurrentUser
     batch_rec = get_batch_record(connection, batch_id)
     if batch_rec is None:
         raise HTTPException(status_code=404, detail="batch not found")
+    if user.guest_session_id and batch_rec.get("guest_session_id") != user.guest_session_id:
+        raise HTTPException(status_code=404, detail="batch not found")
 
     cur_total = connection.execute("SELECT COUNT(*) FROM ads WHERE batch_id = %s", (batch_id,))
     total_in_batch = int(cur_total.fetchone()[0])

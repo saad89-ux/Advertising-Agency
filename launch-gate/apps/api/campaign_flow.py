@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from apps.api.access import require_client_access
 from apps.api.auth import CurrentUser, get_current_user, require_role
+from apps.api.guest_sessions import get_request_user, require_guest_csrf
 from apps.api.database import get_session
 from apps.api.notifications import NotificationDispatcher
 from apps.api.client_ip import get_client_ip
@@ -128,6 +129,15 @@ class ManualAlertTestRequest(BaseModel):
 def resolve_campaign_client(user: CurrentUser, client_id: str = "", batch_id: str | None = None,
                             destination_url: str = "", input_text: str = "") -> str:
     """Resolve only an authorized real client; never guess another client's campaign."""
+    if user.guest_session_id:
+        if client_id and client_id not in user.assigned_client_ids:
+            raise HTTPException(status_code=404, detail="client not found")
+        if batch_id:
+            with get_session() as conn:
+                owned = conn.execute("SELECT 1 FROM batches WHERE batch_id=%s AND guest_session_id=%s", (batch_id, user.guest_session_id)).fetchone()
+            if not owned:
+                raise HTTPException(status_code=404, detail="batch not found")
+        return user.assigned_client_ids[0]
     if client_id.strip():
         require_client_access(user, client_id.strip())
         return client_id.strip()
@@ -159,7 +169,9 @@ def resolve_campaign_client(user: CurrentUser, client_id: str = "", batch_id: st
 
 @router.post("/resolve-client")
 @endpoint_errors
-def resolve_launch_client(req: PreflightReviewRequest, user: CurrentUser = Depends(get_current_user)):
+def resolve_launch_client(req: PreflightReviewRequest, request: Request, user: CurrentUser = Depends(get_request_user)):
+    if user.guest_session_id:
+        require_guest_csrf(request)
     return {"client_id": resolve_campaign_client(user, req.client_id, req.batch_id,
             str(req.ad_overrides.get("destination_url") or ""), req.input_text)}
 
@@ -167,11 +179,14 @@ def resolve_launch_client(req: PreflightReviewRequest, user: CurrentUser = Depen
 @endpoint_errors
 def preflight_review(
     req: PreflightReviewRequest,
-    user: CurrentUser = Depends(get_current_user),
+    request: Request,
+    user: CurrentUser = Depends(get_request_user),
     background: bool = False,
 ) -> dict[str, Any]:
     """Review uploaded resources, check copy, creative specs, and verify Meta credentials."""
     init_flow_tables()
+    if user.guest_session_id:
+        require_guest_csrf(request)
     client_id = resolve_campaign_client(user, req.client_id, req.batch_id,
                  str(req.ad_overrides.get("destination_url") or ""), req.input_text)
 
@@ -1268,14 +1283,25 @@ def get_revenue_analytics(
 @endpoint_errors
 def get_chat_history(
     request: Request,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_request_user),
 ) -> list[dict[str, Any]]:
-    """Return real historical batch sessions for the left chat sidebar scoped dynamically by user IP."""
+    """Return history owned by the verified guest session or authenticated user's existing scope."""
     init_flow_tables()
     client_ip = get_client_ip(request)
     with get_session() as conn:
         with conn.cursor() as cur:
-            cur.execute(
+            if user.guest_session_id:
+                cur.execute(
+                    """SELECT b.batch_id, COALESCE(MAX(a.client_id), ''), COUNT(DISTINCT a.ad_id), b.created_at,
+                              MAX(c.employee_email), MAX(b.campaign_name), MAX(b.filename)
+                       FROM batches b LEFT JOIN ads a ON b.batch_id=a.batch_id
+                       LEFT JOIN campaign_launch_contacts c ON b.batch_id=c.batch_id
+                       WHERE b.guest_session_id=%s AND b.is_sample=FALSE
+                       GROUP BY b.batch_id,b.created_at ORDER BY b.created_at DESC LIMIT 25""",
+                    (user.guest_session_id,),
+                )
+            else:
+                cur.execute(
                 """
                 SELECT b.batch_id,
                        COALESCE(MAX(a.client_id), MAX(c.client_id), '') as client_id,
@@ -1294,7 +1320,7 @@ def get_chat_history(
                 LIMIT 25;
                 """,
                 (list(user.assigned_client_ids), list(user.assigned_client_ids), client_ip, client_ip),
-            )
+                )
             rows = cur.fetchall()
 
     if not rows:

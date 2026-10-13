@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.auth import CurrentUser, get_current_user
+from apps.api.guest_sessions import get_request_user
 from apps.api.database import get_database_url, get_session
 from apps.api.main import app
 
@@ -51,6 +52,7 @@ def clean_database():
 def client(clean_database):
     user = CurrentUser(user_id="brief-user", email="reviewer@example.com", display_name="Reviewer", role="buyer", assigned_client_ids=("real-client",))
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_request_user] = lambda: user
     with TestClient(app, raise_server_exceptions=False, client=("198.51.100.1", 1234)) as session:
         yield session
     app.dependency_overrides.clear()
@@ -159,6 +161,7 @@ def test_account_manager_real_jwt_sheet_to_launch_pipeline(client, monkeypatch, 
 def test_client_resolution_does_not_guess_between_assigned_clients(client):
     user = CurrentUser(user_id="brief-user", email="reviewer@example.com", display_name="Reviewer", role="buyer", assigned_client_ids=("real-client", "other-client"))
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_request_user] = lambda: user
     response = client.post("/campaign-flow/resolve-client", json={"input_text": "A campaign with no brand identified"})
     assert response.status_code == 422
     response = client.post("/campaign-flow/resolve-client", json={"input_text": "Real Client autumn campaign"})

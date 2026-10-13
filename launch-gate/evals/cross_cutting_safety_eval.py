@@ -47,6 +47,7 @@ from apps.api.approvals import (
     transition_ad_state,
 )
 from apps.api.auth import CurrentUser, create_access_token, get_current_user
+from apps.api.guest_sessions import get_request_user
 from apps.api.client_inference import infer_client_id, load_domain_map
 from apps.api.ingest import parse_csv_upload
 from apps.api.main import app as main_api_app
@@ -660,6 +661,7 @@ def run_cross_client_probes_eval(repo_root: Path | None = None) -> dict[str, Any
 
     client = TestClient(main_api_app)
     main_api_app.dependency_overrides[get_current_user] = lambda: user_bl
+    main_api_app.dependency_overrides[get_request_user] = lambda: user_bl
 
     api_probes = [
         ("GET", "/batches/batch_oakandhome", None, "Foreign batch detail"),

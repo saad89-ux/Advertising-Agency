@@ -15,7 +15,8 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 from apps.api import ads, batches, deduplication, rejected_rows
 from apps.api import outbox
 from apps.api.access import require_client_access
-from apps.api.auth import CurrentUser, get_current_user, require_role
+from apps.api.auth import CurrentUser
+from apps.api.guest_sessions import get_request_user, require_guest_csrf
 from apps.worker.file_storage import get_file_store
 from apps.api.client_inference import infer_client_id, load_domain_map
 from apps.api.database import get_session
@@ -125,7 +126,7 @@ def _persist_upload(
     known_rows_by_client: dict[str, list[tuple[int, dict[str, str]]]] = {}
     rejected = list(parsed.rejected_rows)
     for index, row in zip(parsed.valid_row_indices, parsed.rows):
-        client_id = infer_client_id(row.get("destination_url"), domain_map)
+        client_id = user.assigned_client_ids[0] if user.guest_session_id else infer_client_id(row.get("destination_url"), domain_map)
         if client_id is None:
             rejected.append(
                 RejectedRow(
@@ -184,10 +185,11 @@ def _persist_upload(
             batches.create_batch_on_connection(
                 connection,
                 batch_id=batch_id,
-                uploaded_by=user.user_id,
+                uploaded_by=None if user.guest_session_id else user.user_id,
                 filename=base_name,
                 sheet_hash=parsed.sheet_hash,
                 file_ref=file_ref,
+                guest_session_id=user.guest_session_id,
             )
             connection.execute(
                 "UPDATE batches SET uploader_ip = %s WHERE batch_id = %s;",
@@ -276,8 +278,12 @@ def _persist_upload(
 @router.post("/uploads")
 async def upload_batch(
     request: Request,
-    user: CurrentUser = Depends(require_role("buyer", "account_manager")),
+    user: CurrentUser = Depends(get_request_user),
 ):
+    if user.guest_session_id:
+        require_guest_csrf(request)
+    elif user.role not in {"buyer", "account_manager", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="insufficient role")
     content_type = request.headers.get("content-type", "").split(";", 1)[0].casefold()
     if content_type != "multipart/form-data":
         raise HTTPException(status_code=415, detail="upload must use multipart/form-data")
@@ -439,9 +445,10 @@ SUPPORTED_CREATIVE_MIMES = {
 
 @router.post("/uploads/creative")
 async def upload_creative(
+    request: Request,
     file: FastAPIUploadFile = File(...),
     client_id: str | None = Form(None),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_request_user),
 ):
     """Upload a single creative asset (image, video, PDF) to persistent Cloudinary / unified storage."""
     filename = file.filename or "creative_asset"
@@ -460,6 +467,8 @@ async def upload_creative(
     if not client_id:
         raise HTTPException(status_code=422, detail="client_id is required for a creative upload.")
     require_client_access(user, client_id)
+    if user.guest_session_id:
+        require_guest_csrf(request)
 
     upload_limit = max_upload_bytes() * 10
     content = await file.read(upload_limit + 1)

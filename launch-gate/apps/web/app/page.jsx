@@ -17,6 +17,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
 
   // Glass Toast notification state
   const [toast, setToast] = useState(null);
+  const [hasEmployeeSession, setHasEmployeeSession] = useState(false);
 
   // Chat / Batch history state for sidebar
   const [chatHistory, setChatHistory] = useState([]);
@@ -55,20 +56,25 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`${apiBaseUrl}/campaign-flow/chat-history`, { headers });
+      if (!token) {
+        const session = await fetch(`${apiBaseUrl}/auth/guest-session`, { method: "POST", credentials: "include" });
+        if (!session.ok) throw new Error("Unable to start a guest session. Refresh and try again.");
+      }
+      const res = await fetch(`${apiBaseUrl}/campaign-flow/chat-history`, { headers, credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setChatHistory(data);
-
-      }
+      } else if (res.status === 401) setToast({ message: "Your guest session expired. Refresh this page to start a new session.", type: "error" });
     } catch (err) {
       console.warn("Failed to fetch chat history:", err);
+      setToast({ message: "Your guest session expired or could not be validated. Your saved campaigns need the original session cookie; refresh only if you want to start a new session.", type: "error" });
     }
   };
 
   // Fetch launcher contact from DB or localStorage on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
+      setHasEmployeeSession(Boolean(localStorage.getItem("launch_gate_token")));
       const savedEmail = localStorage.getItem("launcher_email");
 
       if (savedEmail) {
@@ -100,7 +106,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
 
   // Launch Campaign & Capture Employee Contact
   const submitCampaign = async () => {
-    if (!employeeEmail || !employeeEmail.includes("@")) {
+    if (hasEmployeeSession && (!employeeEmail || !employeeEmail.includes("@"))) {
       setToast({ message: "Please enter a valid launcher email address.", type: "error" });
       return;
     }
@@ -135,6 +141,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
           const uploadRes = await fetch(`${apiBaseUrl}/uploads`, {
             method: "POST",
             headers: token ? { Authorization: `Bearer ${token}` } : {},
+            credentials: "include",
             body: fileFormData,
           });
           if (uploadRes.ok) {
@@ -160,7 +167,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       }
 
       const clientResponse = await fetch(`${apiBaseUrl}/campaign-flow/resolve-client`, {
-        method: "POST", headers, body: JSON.stringify({
+        method: "POST", headers, credentials: "include", body: JSON.stringify({
           batch_id: inputTab === "file" ? currentBatchId : null,
           input_text: promptText,
           ad_overrides: {destination_url: missingForm.destination_url || ""}
@@ -173,6 +180,15 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       if (!clientResponse.ok) throw new Error(await readError(clientResponse));
       clientId = (await clientResponse.json()).client_id;
 
+      if (!token) {
+        if (inputTab !== "file" || !selectedFile) throw new Error("Guest campaigns currently need a CSV or XLSX campaign sheet.");
+        setShowLaunchModal(false);
+        await fetchChatHistory();
+        router.push(`/batches/${encodeURIComponent(currentBatchId)}`);
+        setToast({ message: "Campaign saved for review. Sign in to dispatch through connected platforms.", type: "success" });
+        return;
+      }
+
       // 2. If user attached a creative asset (Method 3: Image/Video), persist to Cloud creative storage
       if (inputTab === "media" && selectedImage && !uploadedCreativeRef) {
         try {
@@ -182,6 +198,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
           const creativeRes = await fetch(`${apiBaseUrl}/uploads/creative`, {
             method: "POST",
             headers: token ? { Authorization: `Bearer ${token}` } : {},
+            credentials: "include",
             body: creativeFormData,
           });
           if (creativeRes.ok) { uploadedCreativeRef = (await creativeRes.json()).file_ref; setCreativeRef(uploadedCreativeRef); }
@@ -217,7 +234,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       let checked;
       for (;;) {
       const preflightRes = await fetch(`${apiBaseUrl}/campaign-flow/preflight-review?background=true`, {
-        method: "POST", headers, body: JSON.stringify(reviewRequest)
+        method: "POST", headers, credentials: "include", body: JSON.stringify(reviewRequest)
       });
       if (!preflightRes.ok) throw new Error(await readError(preflightRes));
       checked = await preflightRes.json();
@@ -400,7 +417,9 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       localStorage.setItem("launch_gate_active_batch", item.batch_id || "");
                     }
                     selectCampaign(item.batch_id, item.client_id);
-                    router.push(`/dispatches?batch_id=${encodeURIComponent(item.batch_id)}&client_id=${encodeURIComponent(item.client_id || "")}`);
+                    router.push(localStorage.getItem("launch_gate_token")
+                      ? `/dispatches?batch_id=${encodeURIComponent(item.batch_id)}&client_id=${encodeURIComponent(item.client_id || "")}`
+                      : `/batches/${encodeURIComponent(item.batch_id)}`);
                   }}
                   style={{
                     padding: sidebarOpen ? "12px 14px" : "10px",
@@ -732,10 +751,12 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
           }}>
             <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: "800", color: "#f8fafc" }}>
-              Review and Launch Campaign
+              {hasEmployeeSession ? "Review and Launch Campaign" : "Save Campaign for Review"}
             </h2>
             <p style={{ fontSize: "13px", color: "#94a3b8", lineHeight: "1.5", margin: "0 0 20px 0" }}>
-              Enter the responsible media buyer email address before launch. Launch Gate dispatches rejection, blocker, and suspension alerts directly to this address via SMTP email.
+              {hasEmployeeSession
+                ? "Enter the responsible media buyer email address before launch. Launch Gate dispatches rejection, blocker, and suspension alerts directly to this address via SMTP email."
+                : "Upload a CSV or XLSX campaign sheet to save an isolated review batch. Sign in with an employee account to dispatch campaigns."}
             </p>
 
             {formError && <div role="alert" style={{color: "#fcd34d", marginBottom: 16}}>
@@ -821,7 +842,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               )}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "24px" }}>
+            {hasEmployeeSession && <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "24px" }}>
               <div>
                 <p style={{color: "#94a3b8", fontSize: 12}}>Used only to send you launch and policy alerts.</p>
                 <label style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", display: "block", marginBottom: "6px" }}>
@@ -851,7 +872,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 )}
               </div>
 
-            </div>
+            </div>}
 
             {inputTab !== "file" && <div style={{display: "grid", gap: 12, marginBottom: 20}}>
               <p style={{margin: 0, fontSize: 13, color: "#cbd5e1"}}>Confirm the campaign details before authorization.</p>
@@ -892,8 +913,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 const isLaunchDisabled =
                   isLaunching ||
                   selectedPlatforms.length === 0 ||
-                  !employeeEmail ||
-                  !employeeEmail.includes("@");
+                  (hasEmployeeSession && (!employeeEmail || !employeeEmail.includes("@")));
                 return (
                   <button
                     onClick={submitCampaign}
@@ -913,7 +933,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       transition: "all 0.2s ease",
                     }}
                   >
-                    {isLaunching ? launchStage : "Authorize & Launch via MCP Agents 🚀"}
+                    {isLaunching ? launchStage : hasEmployeeSession ? "Authorize & Launch via MCP Agents 🚀" : "Save Campaign for Review"}
                   </button>
                 );
               })()}

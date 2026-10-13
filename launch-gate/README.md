@@ -376,3 +376,16 @@ python -m pytest tests/test_integration.py
 
 Built for **Fernlight Media, LLC** (Denver, CO) under the Launch Gate Mini PRD specification.  
 All sample brands, ad copies, and evaluation sheets are **SYNTHETIC** datasets for performance verification and release gating.
+# Anonymous guest sessions
+
+Visitors can upload CSV/XLSX campaign sheets without signing in. The API issues a random
+256-bit guest cookie (`launch_gate_guest`) with `HttpOnly`, `Path=/`, and a 30-day default
+expiry (`GUEST_SESSION_TTL_DAYS`, valid range 1–365). The database stores only a SHA-256
+token hash and a session-specific synthetic client; batches point to that session. Guest
+cookies are revocable with `DELETE /auth/guest-session`. They are never exposed to browser
+JavaScript or placed in URLs. `APP_ENV=production` sets `Secure` and `SameSite=None`, so
+production must use HTTPS. Cookie-authenticated POST requests require an `Origin` matching
+`FRONTEND_ORIGINS`; configure that list narrowly and keep credentialed CORS enabled only
+for those trusted origins. New sessions are limited to 20 per source address per hour;
+the limiter stores an IP hash and does not participate in ownership checks. Employees
+continue using JWTs and assigned-client permissions.

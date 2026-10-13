@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from apps.api.alerts import router as alerts_router
 from apps.api.approvals import router as approvals_router
 from apps.api.auth import get_jwt_secret, router as auth_router
+from apps.api.guest_sessions import router as guest_router
 from apps.api.batches import router as batches_router
 from apps.api.dead_letter import router as dead_letter_router
 from apps.api.edits import router as edits_router
@@ -46,7 +47,9 @@ app = FastAPI(
     description="""
 # 🚀 Launch Gate API — Pre-Launch Ad Quality & Compliance Gate
 
-All operational endpoints (except `/health` and `/auth/login`) require a Bearer token.
+Employee operational endpoints require a Bearer token. Anonymous campaign review uses a
+server-issued HttpOnly guest cookie through `/auth/guest-session`; dispatch and employee
+controls continue to require employee authentication.
 
 Create a real user with `python -m scripts.create_user` before signing in.
 
@@ -78,6 +81,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(guest_router)
 app.include_router(upload_router)
 app.include_router(batches_router)
 app.include_router(approvals_router)
