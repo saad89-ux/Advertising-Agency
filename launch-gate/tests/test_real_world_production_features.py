@@ -7,7 +7,11 @@
 6. Dynamic real client inference
 """
 
+from types import SimpleNamespace
+
 from apps.api.client_inference import infer_client_id, allowed_origins_for_client
+
+from apps.worker import judge_eval
 from apps.worker.file_storage import UnifiedFileStore, get_file_store
 from apps.worker.judge_eval import evaluate_with_llm_judge
 from apps.worker.mcp_client import MCPPlatformDispatcher
@@ -55,7 +59,21 @@ def test_runtime_llm_judge_clean_pass():
     assert judge_res.needs_person is False
 
 
-def test_runtime_llm_judge_with_findings():
+def test_runtime_llm_judge_with_findings(monkeypatch):
+    # Keep the judge contract test deterministic and independent of PostgreSQL/model credentials.
+    monkeypatch.setattr(
+        judge_eval,
+        "call_gemini_model",
+        lambda **_kwargs: SimpleNamespace(
+            text=(
+                '{"judge_verdict":"CONFIRMED","confidence_score":0.95,'
+                '"faithfulness_score":0.95,"hallucinations_detected":false,'
+                '"false_alarms_dismissed":[],"remediation_approved":true,'
+                '"judge_reasoning":"The claim is directly unsupported."}'
+            ),
+            cost_usd=0.0,
+        ),
+    )
     ad = AdContract(
         ad_id="ad-test-judge-2",
         batch_id="batch-1",
@@ -103,7 +121,47 @@ def test_mcp_platform_dispatcher(monkeypatch):
         },
     )
     assert resp.success is False
-    assert resp.error == "connector_not_configured"
+    assert resp.error == "real_platform_calls_disabled"
+
+
+def test_meta_dispatch_stays_disabled_without_live_write_configuration(monkeypatch):
+    from apps.worker.meta_mcp_client import MetaMCPClient
+
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "false")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "false")
+    monkeypatch.setenv("MCP_META_SERVER_URL", "https://mcp.facebook.com/ads")
+    monkeypatch.setenv("META_MCP_ACCESS_TOKEN", "test-token")
+    monkeypatch.setattr(
+        MetaMCPClient,
+        "call_tool_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("external write attempted")),
+    )
+
+    response = MCPPlatformDispatcher().call_tool(
+        platform="facebook",
+        tool_name="facebook_dispatch_ad",
+        arguments={"ad_id": "test-ad"},
+    )
+
+    assert response.success is False
+    assert response.error == "real_platform_calls_disabled"
+
+
+def test_meta_mcp_client_refuses_writes_even_when_legacy_flag_is_true():
+    from apps.worker.meta_mcp_client import MetaMCPClient
+
+    client = MetaMCPClient(
+        server_url="https://mcp.facebook.com/ads",
+        access_token="test-token",
+        allow_writes=True,
+    )
+    result = client.call_tool_sync(
+        "ads_create_ad", {}, tool_annotations=SimpleNamespace(readOnlyHint=True)
+    )
+
+    assert result.success is False
+    assert result.is_write_refusal is True
+    assert "disabled by Launch Gate v1 policy" in result.error
 
 
 def test_dynamic_client_inference():

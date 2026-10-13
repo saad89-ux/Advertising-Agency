@@ -118,41 +118,6 @@ def get_batch_ads(connection: Any, batch_id: str, allowed_clients: Sequence[str]
         (batch_id, list(allowed_clients)),
     )
     rows = cur.fetchall()
-    if not rows:
-        # Detect client from batch_id, contacts, or active ads
-        target_cid = None
-        for cid in ["oakandhome", "oak_and_home", "brightleaf", "calmleaf", "aurora"]:
-            if cid in batch_id.lower():
-                target_cid = "oakandhome" if "oak" in cid else cid
-                break
-
-        if not target_cid:
-            cur_contact = connection.execute(
-                """
-                SELECT client_id FROM campaign_launch_contacts
-                WHERE batch_id = %s AND client_id = ANY(%s)
-                ORDER BY (client_id = 'oakandhome') DESC, created_at DESC LIMIT 1;
-                """,
-                (batch_id, list(allowed_clients)),
-            )
-            c_row = cur_contact.fetchone()
-            if c_row and c_row[0]:
-                target_cid = c_row[0]
-
-        if not target_cid:
-            target_cid = "oakandhome"
-
-        cur_fb = connection.execute(
-            """
-            SELECT ad_id, %s as batch_id, client_id, row_number, platform, platform_raw,
-                   ad_text, headline, destination_url, creative_file, row_hash, sheet_hash
-            FROM ads
-            WHERE client_id = %s
-            ORDER BY row_number ASC;
-            """,
-            (batch_id, target_cid),
-        )
-        rows = cur_fb.fetchall()
 
     ads: list[dict[str, Any]] = []
     for r in rows:
@@ -551,6 +516,7 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
             "ads": visible_ads,
             "rejected_rows": rejected_rows,
             "rejected_count": len(rejected_rows),
+            "client_ids": client_ids,
         }
 
     if connection is not None:

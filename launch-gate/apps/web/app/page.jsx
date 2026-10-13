@@ -85,6 +85,14 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   // Open the shared form first; requirements are checked after contact entry.
   const handleReviewAndCheck = (e) => {
     if (e) e.preventDefault();
+    // Guard: require at least one input before opening the modal
+    const hasPrompt = typeof promptText === "string" && promptText.trim().length > 0;
+    const hasFile = Boolean(selectedFile && selectedFile.size > 0);
+    const hasImage = Boolean(selectedImage && selectedImage.size > 0);
+    if (!hasPrompt && !hasFile && !hasImage) {
+      setToast({ message: "Please add a prompt, file, or image before launching.", type: "error" });
+      return;
+    }
     setFormError("");
     setNeedsSignIn(false);
     setShowLaunchModal(true);

@@ -96,8 +96,8 @@ class MCPPlatformDispatcher:
     ) -> MCPResponse:
         """Execute an MCP tool call over standard JSON-RPC 2.0 protocol.
 
-        Returns success=False with 'connector_not_configured' when no active connector
-        is configured for the platform.
+        Refuses real dispatch writes per Launch Gate v1 policy. Non-write operations
+        return success=False with 'connector_not_configured' when no connector is configured.
         """
         rpc_id = f"mcp_{uuid.uuid4().hex[:8]}"
 
@@ -110,6 +110,18 @@ class MCPPlatformDispatcher:
                 tool_name=tool_name,
                 result={},
                 error="unsupported_platform_meta_only",
+                rpc_id=rpc_id,
+            )
+
+        # Launch Gate v1 deliberately keeps real platform writes disabled (PRD §6, Rule 7).
+        # This guard remains effective even if deployment flags are accidentally enabled.
+        if tool_name.endswith("_dispatch_ad"):
+            return MCPResponse(
+                success=False,
+                platform=platform,
+                tool_name=tool_name,
+                result={},
+                error="real_platform_calls_disabled",
                 rpc_id=rpc_id,
             )
 

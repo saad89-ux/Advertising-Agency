@@ -91,8 +91,8 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
             status: isAct ? "ACTIVE" : deliv.toUpperCase(),
             platform: (ad.platform || "Instagram").toUpperCase(),
             tracked: ad.tracked !== false,
-            spend: ad.spend_usd ?? ad.spend ?? (Math.floor(Math.random() * 400) + 120),
-            orders: ad.inbound_sales_usd ? Math.round(ad.inbound_sales_usd / 35) : (ad.impressions ? Math.round(ad.impressions / 25) : Math.floor(Math.random() * 18) + 4),
+            spend: ad.spend_usd ?? ad.spend ?? null,
+            orders: ad.inbound_orders ?? null,
             headline: ad.headline,
             destination_url: ad.destination_url,
             handle: ad.handle || `@${cid}`,
@@ -573,7 +573,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
                               {camp.spend != null ? `$${Number(camp.spend).toFixed(2)}` : "Not tracked"}
                             </span>
                             <span style={{ color: "#64748b", marginLeft: "10px" }}>Orders: </span>
-                            <span style={{ color: "#34d399", fontWeight: "600" }}>{camp.orders}</span>
+                            <span style={{ color: "#34d399", fontWeight: "600" }}>{camp.orders != null ? camp.orders : "Not tracked"}</span>
                           </div>
 
                           <button

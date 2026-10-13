@@ -329,9 +329,12 @@ def fake_session(mock_db: MockDB, monkeypatch: pytest.MonkeyPatch):
             # 3. Global dead-letter count
             if "SELECT COUNT(*)" in s and "JOIN ad_approvals" in s and "ap.state = 'dead_letter'" in s:
                 clients = params_tuple[0]
+                batch_id_filter = params_tuple[1] if len(params_tuple) > 1 else None
                 count = 0
                 for a in self.db.ads.values():
                     if a["client_id"] in clients:
+                        if batch_id_filter and a["batch_id"] != batch_id_filter:
+                            continue
                         appr = self.db.approvals.get(a["ad_id"])
                         if appr and appr["state"] == "dead_letter":
                             count += 1
@@ -355,14 +358,17 @@ def fake_session(mock_db: MockDB, monkeypatch: pytest.MonkeyPatch):
                 rows.sort(key=lambda r: r[3])  # sort by row_number
                 return FakeResult(rows)
 
-            # 5. Global dead-letter ads list
-            if "JOIN ad_approvals" in s and "a.client_id = ANY(%s) AND ap.state = 'dead_letter'" in s:
+            # 5. Global dead-letter ads list (params: clients, batch_id, batch_id, limit, offset)
+            if "JOIN ad_approvals" in s and "a.client_id = ANY(%s)" in s and "IS NULL OR a.batch_id = %s" in s and "ap.state = 'dead_letter'" in s:
                 clients = params_tuple[0]
-                limit = params_tuple[1]
-                offset = params_tuple[2]
+                batch_id_filter = params_tuple[1] if len(params_tuple) > 1 else None
+                limit = params_tuple[3] if len(params_tuple) > 3 else 50
+                offset = params_tuple[4] if len(params_tuple) > 4 else 0
                 rows = []
                 for a in self.db.ads.values():
                     if a["client_id"] in clients:
+                        if batch_id_filter and a["batch_id"] != batch_id_filter:
+                            continue
                         appr = self.db.approvals.get(a["ad_id"])
                         if appr and appr["state"] == "dead_letter":
                             rows.append((

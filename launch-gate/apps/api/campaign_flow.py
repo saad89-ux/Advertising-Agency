@@ -424,13 +424,20 @@ def launch_batch(
                     # Check success on every connector call; on failure do not write fake rows
                     if not mcp_resp.success or not (mcp_resp.result or {}).get("platform_ad_id"):
                         error_msg = mcp_resp.error or "Platform did not confirm an ad ID. Delivery is unconfirmed."
-                        is_unconfigured = error_msg == "connector_not_configured"
+                        is_unconfigured = error_msg in {"connector_not_configured", "real_platform_calls_disabled"}
                         disp_status = "blocked_connector_not_configured" if is_unconfigured else "rejected"
-                        review_status = "Blocked: Connector Not Configured" if is_unconfigured else "Rejected / Dispatch Failed"
-                        review_notes = (
-                            f"Platform connector '{plat}' is not configured. Set MCP_{plat.upper()}_SERVER_URL to enable live dispatch."
-                            if is_unconfigured else error_msg
-                        )
+                        if error_msg == "real_platform_calls_disabled":
+                            review_status = "Blocked: Live Writes Disabled"
+                        elif error_msg == "connector_not_configured":
+                            review_status = "Blocked: Connector Not Configured"
+                        else:
+                            review_status = "Rejected / Dispatch Failed"
+                        if error_msg == "real_platform_calls_disabled":
+                            review_notes = "Real platform writes are disabled by Launch Gate v1 policy."
+                        elif error_msg == "connector_not_configured":
+                            review_notes = f"Platform connector '{plat}' is not configured."
+                        else:
+                            review_notes = error_msg
                         dispatch_results.append({
                             "ad_id": ad_id,
                             "platform": plat,
@@ -1144,7 +1151,8 @@ def get_all_campaigns(
                     p.impressions as impressions,
                     p.has_rule_violation as has_violation,
                     (p.ad_id IS NOT NULL) as tracked,
-                    a.is_sample
+                    a.is_sample,
+                    p.inbound_orders as inbound_orders
                 FROM ads a
                 JOIN batches b ON a.batch_id = b.batch_id
                 LEFT JOIN ad_live_dispatches d ON a.ad_id = d.ad_id
@@ -1164,6 +1172,7 @@ def get_all_campaigns(
         spend = float(r[9]) if (is_tracked and r[9] is not None) else None
         roas = float(r[10]) if (is_tracked and r[10] is not None) else None
         impressions = int(r[11]) if (is_tracked and r[11] is not None) else None
+        inbound_orders = int(r[15]) if (is_tracked and len(r) > 15 and r[15] is not None) else None
         campaigns.append({
             "ad_id": r[0],
             "client_id": r[1],
@@ -1178,6 +1187,7 @@ def get_all_campaigns(
             "spend_usd": spend,
             "roas": roas,
             "impressions": impressions,
+            "inbound_orders": inbound_orders,
             "has_rule_violation": bool(r[12]) if is_tracked else False,
             "tracked": is_tracked,
             "is_sample": bool(r[14]),

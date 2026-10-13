@@ -6,7 +6,7 @@ using the official Python `mcp` SDK over Streamable HTTP transport with Bearer t
 Safety Guarantees:
 - Reads credentials strictly from environment (`MCP_META_SERVER_URL`, `META_MCP_ACCESS_TOKEN`).
 - Zero token logging or exposure.
-- Enforces write protection (`META_MCP_ALLOW_WRITES=false` by default).
+- Real platform mutations remain disabled by Launch Gate v1 policy.
 - Zero fake fallbacks: any failure returns `success=False` with the explicit reason.
 - Bounded retries with exponential backoff on transient errors; immediate fail on 401/403.
 """
@@ -264,17 +264,19 @@ class MetaMCPClient:
     ) -> MetaMCPResult:
         """Call a specific tool on the Meta MCP server over JSON-RPC.
         
-        Enforces write protection: refuses execution if tool is classified as a write and
-        `allow_writes` is False.
+        Refuses all tools classified as writes under the Launch Gate v1 policy.
         """
         rpc_id = f"meta_{uuid.uuid4().hex[:8]}"
 
-        # 1. Enforce Write Protection
-        if not self.allow_writes and is_write_tool(tool_name, tool_description, tool_annotations):
+        # Launch Gate v1 has no authorization path for real platform mutations.
+        # Keep this fail-closed even if the legacy environment flag is set.
+        if (
+            is_write_tool(tool_name, tool_description, tool_annotations)
+            or is_write_tool(tool_name, tool_description)
+        ):
             refusal_msg = (
-                f"Write operation refused: tool '{tool_name}' performs mutations/creations, "
-                f"but META_MCP_ALLOW_WRITES is set to 'false'. To allow mutations, the owner "
-                f"must explicitly set META_MCP_ALLOW_WRITES=true in .env."
+                f"Write operation refused: real platform writes are disabled by Launch Gate v1 policy "
+                f"(tool '{tool_name}')."
             )
             logger.warning("[MCP SAFETY REFUSAL] %s", refusal_msg)
             return MetaMCPResult(
