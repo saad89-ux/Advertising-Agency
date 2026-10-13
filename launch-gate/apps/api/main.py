@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from apps.api.alerts import router as alerts_router
+from apps.api.notifications import router as notifications_router
 from apps.api.approvals import router as approvals_router
 from apps.api.auth import get_jwt_secret, router as auth_router
 from apps.api.guest_sessions import router as guest_router
@@ -92,6 +93,7 @@ app.include_router(sends_router)
 app.include_router(metrics_router)
 app.include_router(dead_letter_router)
 app.include_router(alerts_router)
+app.include_router(notifications_router)
 app.include_router(sse_router)
 app.include_router(team_router)
 app.include_router(diagnostics_router)

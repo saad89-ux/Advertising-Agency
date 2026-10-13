@@ -661,7 +661,8 @@ def claim_pending_deliveries(
                 "event_type": str(r[3]),
                 "severity": str(r[4]),
                 "recipient": str(r[5]),
-                "subject": str(r[6]),
+                "subject": (str(r[6])[:32] + "...") if r[6] and len(str(r[6])) > 32 else (str(r[6]) or ""),
+            "subject_sanitized": (str(r[6])[:32] + "...") if r[6] and len(str(r[6])) > 32 else (str(r[6]) or ""),
                 "message_body": str(r[7]),
                 "ad_id": str(r[8]) if r[8] else None,
                 "batch_id": str(r[9]) if r[9] else None,
@@ -999,7 +1000,8 @@ def preview_expired_notifications(
             "event_type": str(r[3]),
             "status": str(r[4]),
             "recipient_masked": mask_recipient(str(r[5])),
-            "subject": str(r[6]),
+            "subject": (str(r[6])[:32] + "...") if r[6] and len(str(r[6])) > 32 else (str(r[6]) or ""),
+            "subject_sanitized": (str(r[6])[:32] + "...") if r[6] and len(str(r[6])) > 32 else (str(r[6]) or ""),
             "created_at": r[7].isoformat() if hasattr(r[7], "isoformat") else str(r[7]),
             "delivered_at": r[8].isoformat() if r[8] and hasattr(r[8], "isoformat") else (str(r[8]) if r[8] else None),
             "last_attempt_at": r[9].isoformat() if r[9] and hasattr(r[9], "isoformat") else (str(r[9]) if r[9] else None),
@@ -1188,6 +1190,8 @@ class NotificationDispatcher:
                 target_parts.append(f"batch:{batch_id}")
             if ad_id:
                 target_parts.append(f"ad:{ad_id}")
+            if platform:
+                target_parts.append(f"platform:{platform}")
             if launch_attempt_id:
                 target_parts.append(f"attempt:{launch_attempt_id}")
 
@@ -1283,3 +1287,58 @@ class NotificationDispatcher:
                 "timestamp": timestamp,
                 "error": "Notification could not be durably queued",
             }
+
+
+# --- Retention Maintenance Router ---
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from apps.api.auth import CurrentUser, require_role
+
+router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+class RetentionMaintenanceRequest(BaseModel):
+    client_id: str | None = None
+    retention_days: int | None = Field(default=None, ge=1)
+    batch_size: int = Field(default=500, ge=1, le=5000)
+    dry_run: bool = True
+
+
+@router.post("/retention", status_code=status.HTTP_200_OK)
+def manage_notification_retention(
+    req: RetentionMaintenanceRequest,
+    user: CurrentUser = Depends(require_role("buyer", "account_manager")),
+) -> dict[str, Any]:
+    """Execute or preview bounded retention purge of terminal notification records.
+
+    Safety:
+    - Restricted to buyer/account_manager roles.
+    - Multi-tenant client scoping enforced when client_id specified.
+    - Never deletes pending, processing, or retryable notifications.
+    - Transaction safe with FOR UPDATE SKIP LOCKED.
+    """
+    from apps.api.access import require_client_access
+    from apps.api.database import get_session
+
+    if req.client_id:
+        require_client_access(user, req.client_id)
+
+    with get_session() as conn:
+        result = purge_expired_notifications(
+            conn,
+            retention_days=req.retention_days,
+            batch_size=req.batch_size,
+            dry_run=req.dry_run,
+        )
+        if not req.dry_run and hasattr(conn, "commit") and not getattr(conn, "autocommit", False):
+            conn.commit()
+
+    logger.info(
+        "Retention maintenance executed: dry_run=%s, eligible_count=%s, purged_count=%s by user=%s",
+        req.dry_run,
+        result.get("eligible_count"),
+        result.get("purged_count"),
+        user.user_id,
+    )
+    return result

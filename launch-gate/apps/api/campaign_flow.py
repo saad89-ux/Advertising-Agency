@@ -70,6 +70,8 @@ WHERE old.batch_id = newer.batch_id AND old.employee_email = newer.employee_emai
   AND (old.created_at, old.contact_id) < (newer.created_at, newer.contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_launch_contacts_batch_email
     ON campaign_launch_contacts (batch_id, employee_email);
+ALTER TABLE ad_live_dispatches ADD COLUMN IF NOT EXISTS launch_attempt_id TEXT;
+ALTER TABLE send_alerts ADD COLUMN IF NOT EXISTS launch_attempt_id TEXT;
 """
 
 
@@ -99,6 +101,7 @@ class PreflightReviewRequest(BaseModel):
 class LaunchBatchRequest(BaseModel):
     client_id: str = ""
     batch_id: str | None = None
+    launch_attempt_id: str | None = None
     campaign_name: str = "Multi-Platform Growth Burst"
     employee_email: str
     employee_phone: str = ""
@@ -284,6 +287,7 @@ def launch_batch(
         raise HTTPException(status_code=400, detail="At least one valid target platform must be selected.")
 
     batch_id = req.batch_id or f"batch_{req.client_id[:3]}_{uuid.uuid4().hex[:8]}"
+    launch_attempt_id = (req.launch_attempt_id or "").strip() or f"lnch_{batch_id[:12]}_{uuid.uuid4().hex[:8]}"
     contact_id = f"cnt_{uuid.uuid4().hex[:8]}"
 
     # 1. Ensure valid batch exists in batches table
@@ -381,37 +385,39 @@ def launch_batch(
                              "destination_url": ad_row[3], "creative_file": ad_row[5] or ""}
                 if hash_normalized_row(canonical) != ad_row[4]:
                     raise HTTPException(status_code=409, detail="Ad content changed; save an edit and recheck before authorizing.")
+                cur.execute("SELECT state, content_hash, approved_by FROM ad_approvals WHERE ad_id = %s", (ad_id,))
+                existing_approval = cur.fetchone()
+                if existing_approval:
+                    curr_st = existing_approval[0]
+                    curr_hash = existing_approval[1]
+                    if curr_st == "rejected":
+                        raise HTTPException(status_code=409, detail="Ad has been rejected and cannot be dispatched without remediation and re-approval.")
+                    if curr_st == "dead_letter":
+                        raise HTTPException(status_code=409, detail="Dead-lettered ad cannot be dispatched without remediation and re-approval.")
+                    if curr_hash and curr_hash != ad_row[4]:
+                        raise HTTPException(status_code=409, detail="Ad content changed; save an edit and recheck before authorizing.")
+
                 cur.execute(
                     """
-                    INSERT INTO ad_approvals (ad_id, client_id, state)
-                    VALUES (%s, %s, 'pending_review')
-                    ON CONFLICT (ad_id) DO NOTHING;
-                    """,
-                    (ad_id, req.client_id),
-                )
-                cur.execute(
-                    """
-                    UPDATE ad_approvals
-                    SET state = 'approved',
-                        approved_by = %s,
+                    INSERT INTO ad_approvals (ad_id, client_id, state, approved_by, approved_at, content_hash, content_snapshot, updated_at)
+                    VALUES (%s, %s, 'approved', %s, NOW(), %s, %s, NOW())
+                    ON CONFLICT (ad_id) DO UPDATE SET
+                        state = 'approved',
+                        approved_by = EXCLUDED.approved_by,
                         approved_at = NOW(),
-                        content_hash = %s,
+                        content_hash = EXCLUDED.content_hash,
+                        content_snapshot = EXCLUDED.content_snapshot,
                         updated_at = NOW()
-                    WHERE ad_id = %s AND state IN ('pending_review', 'blocked_connector_not_configured', 'dead_letter');
+                    WHERE ad_approvals.state IN ('pending_review', 'blocked_connector_not_configured');
                     """,
-                    (
-                        user.user_id,
-                        ad_row[4],
-                        ad_id,
-                    ),
+                    (ad_id, req.client_id, user.user_id, ad_row[4], json.dumps(canonical, sort_keys=True)),
                 )
                 cur.execute("SELECT state, content_hash FROM ad_approvals WHERE ad_id = %s", (ad_id,))
                 approval = cur.fetchone()
                 if not approval or approval[0] not in {'approved', 'sent'} or approval[1] != ad_row[4]:
                     raise HTTPException(status_code=409, detail="The current ad content requires a recorded human approval before dispatch.")
                 cur.execute("INSERT INTO approval_history (ad_id, from_state, to_state, changed_by, content_hash, reason) VALUES (%s,%s,%s,%s,%s,%s)",
-                            (ad_id, 'pending_review', 'approved', user.user_id, ad_row[4], 'Explicit campaign authorization'))
-                cur.execute("UPDATE ad_approvals SET content_snapshot = %s WHERE ad_id = %s", (json.dumps(canonical, sort_keys=True), ad_id))
+                            (ad_id, existing_approval[0] if existing_approval else 'pending_review', 'approved', user.user_id, ad_row[4], 'Explicit campaign authorization'))
                 conn.commit()
                 for plat in normalized_platforms:
                     disp_id = f"disp_{ad_id}_{plat}_{ad_row[4][:16]}"
@@ -481,10 +487,11 @@ def launch_batch(
                                     ad_id=ad_id,
                                     batch_id=actual_batch_id,
                                     platform=plat,
+                                    launch_attempt_id=launch_attempt_id,
                                 )
                                 notifications_dispatched.append(alert_res)
-                                cur.execute("INSERT INTO send_alerts (alert_id,ad_id,client_id,batch_id,alert_type,severity,message,details) VALUES (%s,%s,%s,%s,%s,'warning',%s,%s)",
-                                            (str(uuid.uuid4()), ad_id, req.client_id, actual_batch_id, 'launch_blocked' if is_unconfigured else 'platform_rejection', review_notes, json.dumps(alert_res)))
+                                cur.execute("INSERT INTO send_alerts (alert_id,ad_id,client_id,batch_id,alert_type,severity,message,details,launch_attempt_id) VALUES (%s,%s,%s,%s,%s,'warning',%s,%s,%s)",
+                                            (str(uuid.uuid4()), ad_id, req.client_id, actual_batch_id, 'launch_blocked' if is_unconfigured else 'platform_rejection', review_notes, json.dumps(alert_res), launch_attempt_id))
                             except Exception as notif_err:
                                 logger.exception("Failed to dispatch alert for ad %s: %s", ad_id, notif_err)
 
@@ -492,16 +499,17 @@ def launch_batch(
                             """
                             INSERT INTO ad_live_dispatches (
                                 dispatch_id, ad_id, batch_id, client_id, platform, handle,
-                                status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
+                                status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url, launch_attempt_id
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s)
                             ON CONFLICT (dispatch_id) DO UPDATE SET
                                 status = EXCLUDED.status,
                                 platform_ad_id = EXCLUDED.platform_ad_id,
                                 platform_review_status = EXCLUDED.platform_review_status,
                                 platform_review_notes = EXCLUDED.platform_review_notes,
+                                launch_attempt_id = EXCLUDED.launch_attempt_id,
                                 last_tracked_at = NOW();
                             """,
-                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, disp_status, disp_id, review_status, review_notes),
+                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, disp_status, disp_id, review_status, review_notes, launch_attempt_id),
                         )
 
                         if not is_unconfigured:
@@ -610,6 +618,7 @@ def launch_batch(
             else "failed"
         ),
         "batch_id": actual_batch_id,
+        "launch_attempt_id": launch_attempt_id,
         "client_id": req.client_id,
         "campaign_name": req.campaign_name,
         "notification_contact": {
@@ -831,10 +840,10 @@ def get_platform_performance(
                 f"""
                 SELECT status, COUNT(*)
                 FROM ad_live_dispatches
-                WHERE client_id = ANY(%s) {sample_clause}
+                WHERE client_id = ANY(%s) AND (%s::text IS NULL OR batch_id = %s) {sample_clause}
                 GROUP BY status;
                 """,
-                (allowed,),
+                (allowed, batch_id, batch_id),
             )
             status_counts = dict(cur.fetchall())
 

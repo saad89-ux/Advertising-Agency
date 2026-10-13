@@ -47,11 +47,74 @@ class MCPPlatformDispatcher:
         self.meta_mcp_url = os.environ.get("MCP_META_SERVER_URL", "").strip()
 
     def list_tools(self, platform: str) -> list[MCPToolDefinition]:
-        """Return available MCP tools defined for a specific platform."""
-        return [
+        """Return available MCP tools defined for a specific platform, including real Meta Graph MCP tools."""
+        tools: list[MCPToolDefinition] = []
+        if platform.lower() in ("facebook", "meta"):
+            tools.extend([
+            MCPToolDefinition(
+                name="ads_create_campaign",
+                description="Creates a single Meta campaign group in PAUSED state with validated objective and CBO/ABO budget.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "account_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "objective": {"type": "string", "enum": ["OUTCOME_TRAFFIC", "OUTCOME_SALES", "OUTCOME_LEADS", "OUTCOME_ENGAGEMENT"]},
+                        "status": {"type": "string", "enum": ["PAUSED"]},
+                    },
+                    "required": ["account_id", "name", "objective"],
+                },
+            ),
+            MCPToolDefinition(
+                name="ads_create_ad_set",
+                description="Creates a Meta ad set under a campaign in PAUSED state with targeting, placement, and billing event.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "account_id": {"type": "string"},
+                        "campaign_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "optimization_goal": {"type": "string"},
+                        "billing_event": {"type": "string"},
+                        "status": {"type": "string", "enum": ["PAUSED"]},
+                    },
+                    "required": ["account_id", "campaign_id", "name"],
+                },
+            ),
+            MCPToolDefinition(
+                name="ads_create_creative",
+                description="Creates an ad creative payload with headline, body, link URL, and page attribution.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "account_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "object_story_spec": {"type": "object"},
+                    },
+                    "required": ["account_id", "name"],
+                },
+            ),
+            MCPToolDefinition(
+                name="ads_create_ad",
+                description="Stages a final ad entity referencing ad_set_id and creative_id in PAUSED state.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "account_id": {"type": "string"},
+                        "ad_set_id": {"type": "string"},
+                        "creative_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "status": {"type": "string", "enum": ["PAUSED"]},
+                    },
+                    "required": ["account_id", "ad_set_id", "creative_id", "name"],
+                },
+            ),
+            ])
+
+        tools.extend([
             MCPToolDefinition(
                 name=f"{platform}_dispatch_ad",
-                description=f"Authenticate and publish verified ad creative payload to {platform.title()} Ads API.",
+                description=f"Legacy alias: Authenticate and publish verified ad creative payload to {platform.title()} Ads API.",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -86,7 +149,8 @@ class MCPPlatformDispatcher:
                     "required": ["platform_ad_id"],
                 },
             ),
-        ]
+        ])
+        return tools
 
     def call_tool(
         self,
