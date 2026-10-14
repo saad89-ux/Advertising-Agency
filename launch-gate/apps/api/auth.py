@@ -12,7 +12,7 @@ import time
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from apps.api import users
@@ -133,14 +133,10 @@ def unauthorized() -> HTTPException:
     )
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-) -> CurrentUser:
-    if credentials is None or credentials.scheme.casefold() != "bearer":
-        raise unauthorized()
+def authenticate_token(token_str: str) -> CurrentUser:
     try:
         payload = jwt.decode(
-            credentials.credentials,
+            token_str,
             get_jwt_secret(),
             algorithms=["HS256"],
             options={"require": ["sub", "role", "iat", "exp"]},
@@ -167,6 +163,25 @@ def get_current_user(
         role=str(record["role"]),
         assigned_client_ids=tuple(client_ids),
     )
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> CurrentUser:
+    if credentials is None or credentials.scheme.casefold() != "bearer":
+        raise unauthorized()
+    return authenticate_token(credentials.credentials)
+
+
+def get_current_user_for_sse(
+    token: str | None = Query(None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> CurrentUser:
+    if credentials is not None and credentials.scheme.casefold() == "bearer":
+        return authenticate_token(credentials.credentials)
+    if token:
+        return authenticate_token(token)
+    raise unauthorized()
 
 
 def require_role(*roles: str):

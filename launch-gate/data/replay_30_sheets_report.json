@@ -1,0 +1,148 @@
+{
+  "split": "all",
+  "as_of": "2026-10-11",
+  "sheets_evaluated": 30,
+  "total_evaluated_rows": 3301,
+  "total_valid_rows": 3260,
+  "malformed_rows_isolated": 41,
+  "clean_rows_total": 1667,
+  "clean_rows_false_alarms": 0,
+  "false_alarm_rate": 0.0,
+  "planted_rows_total": 1593,
+  "planted_rows_marked_ready": 0,
+  "false_ready_rate": 0.0,
+  "verdict_accuracy": 1.0,
+  "overall_recall": 1.0,
+  "recall_by_type": {
+    "brand_book_violation": {
+      "planted": 96,
+      "detected": 96,
+      "recall": 1.0
+    },
+    "creative_missing": {
+      "planted": 53,
+      "detected": 53,
+      "recall": 1.0
+    },
+    "creative_ratio_mismatch": {
+      "planted": 48,
+      "detected": 48,
+      "recall": 1.0
+    },
+    "forbidden_claim": {
+      "planted": 214,
+      "detected": 214,
+      "recall": 1.0
+    },
+    "handmade_misuse": {
+      "planted": 12,
+      "detected": 12,
+      "recall": 1.0
+    },
+    "headline_too_long": {
+      "planted": 61,
+      "detected": 61,
+      "recall": 1.0
+    },
+    "missing_footnote": {
+      "planted": 111,
+      "detected": 111,
+      "recall": 1.0
+    },
+    "page_delivery_threshold_mismatch": {
+      "planted": 46,
+      "detected": 46,
+      "recall": 1.0
+    },
+    "page_discount_mismatch": {
+      "planted": 145,
+      "detected": 145,
+      "recall": 1.0
+    },
+    "page_expired_offer": {
+      "planted": 102,
+      "detected": 102,
+      "recall": 1.0
+    },
+    "page_not_found": {
+      "planted": 58,
+      "detected": 58,
+      "recall": 1.0
+    },
+    "page_utm_dropped": {
+      "planted": 112,
+      "detected": 112,
+      "recall": 1.0
+    },
+    "text_too_long": {
+      "planted": 73,
+      "detected": 73,
+      "recall": 1.0
+    },
+    "unknown_claim": {
+      "planted": 66,
+      "detected": 66,
+      "recall": 1.0
+    },
+    "unknown_client": {
+      "planted": 40,
+      "detected": 40,
+      "recall": 1.0
+    },
+    "utm_campaign_format": {
+      "planted": 192,
+      "detected": 192,
+      "recall": 1.0
+    },
+    "utm_malformed_query": {
+      "planted": 68,
+      "detected": 68,
+      "recall": 1.0
+    },
+    "utm_missing": {
+      "planted": 233,
+      "detected": 233,
+      "recall": 1.0
+    },
+    "utm_misspelled": {
+      "planted": 241,
+      "detected": 241,
+      "recall": 1.0
+    }
+  },
+  "confusion_matrix": {
+    "blocked": {
+      "blocked": 386
+    },
+    "ready": {
+      "ready": 1667
+    },
+    "needs_person": {
+      "needs_person": 106
+    },
+    "fix_needed": {
+      "fix_needed": 1101
+    }
+  },
+  "elapsed_seconds": 2.617,
+  "ci_release_gate": {
+    "status": "passed",
+    "passed": true,
+    "false_alarm_passed": true,
+    "false_ready_passed": true,
+    "checks": [
+      {
+        "name": "False Alarm Rate <= 5%",
+        "target": "<= 5.0%",
+        "actual": "0.0%",
+        "passed": true
+      },
+      {
+        "name": "False-Ready Rate <= 5%",
+        "target": "<= 5.0%",
+        "actual": "0.0%",
+        "passed": true
+      }
+    ]
+  }
+}

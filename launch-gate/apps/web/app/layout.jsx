@@ -1,3 +1,5 @@
+import "./review.css";
+
 export const metadata = {
   title: "Launch Gate",
   description: "Pre-launch ad review",

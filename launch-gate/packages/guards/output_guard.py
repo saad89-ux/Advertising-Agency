@@ -91,6 +91,7 @@ def validate_model_output(
     ad: AdContract,
     rule_index: dict[str, Any],
     client_texts: dict[str, str],
+    retrieved_rule_ids: Sequence[Any] | None = None,
 ) -> OutputGuardResult:
     """Accept only strict finding objects and citations/content from this ad's client."""
     if isinstance(raw, str):
@@ -110,6 +111,12 @@ def validate_model_output(
         return _reject(ad, "findings_must_be_list")
 
     own_ids = _flatten_ids(rule_index.get(ad.client_id))
+    valid_citation_ids = own_ids
+    if retrieved_rule_ids is not None:
+        valid_citation_ids = {
+            item.entry_number if hasattr(item, "entry_number") else str(item)
+            for item in retrieved_rule_ids
+        }
     other_ids: set[str] = set()
     other_texts: list[str] = []
     for client_id, entries in rule_index.items():
@@ -158,7 +165,7 @@ def validate_model_output(
         if any(_contains_verbatim_span(combined_text, source) for source in other_texts):
             rejected.append("cross_client_rule_text")
             continue
-        if check_type == "wording" and (not isinstance(rule_id, str) or rule_id not in own_ids):
+        if check_type == "wording" and (not isinstance(rule_id, str) or rule_id not in valid_citation_ids):
             rejected.append("unknown_or_missing_rule_id")
             continue
 

@@ -36,7 +36,7 @@ D29: Development uses Python 3.12 in the project's .venv. Python 3.15 is not use
 
 D30 Authentication (v1, local development): password login returns a signed bearer token (JWT, HS256). JWT_SECRET is required; the app refuses to start or issue tokens if it is empty or a placeholder. JWT_EXPIRE_MINUTES defaults to 60. Claims are sub (user_id), role, iat, exp only. Client assignments are read from user_client_assignments on every request, not stored in the token. No self-registration endpoint or external identity provider.
 
-D31 Users and roles: users has user_id, display_name, password_hash, role, and is_active. Roles are buyer and account_manager only. Passwords use bcrypt and are never stored, logged, or returned in clear. Login errors always say "invalid credentials". Inactive users cannot log in and existing tokens for inactive users are rejected. user_client_assignments.user_id has a foreign key to users. Users are created by a local seed script that reads passwords from environment variables or an interactive prompt; no password may appear in the repository.
+D31 Users and roles: users has user_id, display_name, password_hash, role, and is_active. Roles are buyer and account_manager only. Passwords use bcrypt and are never stored, logged, or returned in clear. Login errors always say "invalid credentials". Inactive users cannot log in and existing tokens for inactive users are rejected. user_client_assignments.user_id has a foreign key to users. Users are created by a local seed script that reads passwords from environment variables or an interactive prompt; no password may appear in the repository. (superseded by D39)
 
 D32 Upload scoping: only role buyer may upload. Each ad's client is inferred per row from the link host using data/clients/domain_map.json. A row is saved only if its inferred client is assigned to the uploading user. Unknown hosts and unassigned clients are rejected as unknown_client_host and client_not_assigned. The response does not reveal another client's rules or data. Unassigned-client access on any endpoint returns 403 with a generic message.
 
@@ -53,7 +53,7 @@ D25-A: fixtures in tests/test_task9_xlsx_ingest.py and tests/test_task10_row_iso
 D37 Task 20 input/output guards and adversarial harness:
 - Security is structural: model output is restricted to strict findings; verdict, approval, and send are never derived from text or model output; tools are selected by code from a per-step allowlist; rule retrieval is restricted to the ad's client. Phrase detection is advisory only and can raise the floor to needs_person, never lower it.
 - Pure guards live in packages/guards/input_guard.py, packages/guards/output_guard.py, and packages/guards/tool_policy.py. The guard-only SYNTHETIC harness uses an obedient-attacker stub; it has no worker, model, or network integration. Worker and approval-endpoint integration remain deferred.
-- D31 password hashing is implemented with bcrypt; existing scrypt hashes are verified and upgraded after successful login.
+- D31 password hashing is implemented with bcrypt; existing scrypt hashes are verified and upgraded after successful login. (superseded by D39)
 - D33 upload route is implemented at POST /uploads. No approval endpoint exists yet.
 
 D38: The upload route is POST /uploads, matching D33.
@@ -65,3 +65,180 @@ D40: The admin role is removed; only buyer and account_manager roles are support
 D41: The login identifier is email.
 
 D42: F1–F3 upload decisions: map the dev header alias "creative file name" to creative_file and return unmapped header names in unmapped_columns; store recognized canonical platform names in ads.platform and the entered value in ads.platform_raw, preserve and flag unrecognized values as platform_unrecognized, and hash using canonical platform names; accept CSV and XLSX only when extension and content match, with the documented MIME allowlists.
+
+D43: Stand-In Platform Adapter & Idempotent Sender (Task 45, PRD §4.6 / Never-break Rule 7):
+- Real platform API adapters (Meta, Google, TikTok) are strictly disabled; any attempt to instantiate or invoke them raises a NotImplementedError.
+- All dry-run and live sends route through StandInPlatformAdapter with synthetic latency (10-50ms), simulated external IDs, and deterministic error triggering.
+- Idempotency key format is `send:{ad_id}:{content_hash}` stored in `ad_sends` and `ad_approvals`. Re-sending an already sent ad is an idempotent no-op returning the existing send record.
+- Bounded retries (up to 3 attempts with exponential backoff) and dead-letter queue transition for permanent failures.
+
+D44: Metrics Aggregation & Reporting API (Task 46, PRD §4.7 / §4.8):
+- Complete aggregation across 6 core pillars: (1) problems by type (mechanical, page, wording) with top rules breakdown; (2) ads blocked count and rate; (3) reviewer time statistics (avg, median, min, max seconds from creation to approval/rejection/edit); (4) false alarms count, rate, and check-type breakdown from reviewer dismissals; (5) cost per batch and per ad in USD with step counts from worker traces; (6) simulated rejection rates comparing un-gated (blocked ads + rejected rows) vs. gated (platform rejections during send) failure rates.
+- Strict client isolation: single-batch metrics (`GET /batches/{batch_id}/metrics`) verify client access (returning 403 Forbidden for unassigned clients), while cross-batch metrics (`GET /metrics`) automatically filter and aggregate only batches and ads assigned to the requesting user.
+
+D45: Retry with Backoff, Jitter, Timeouts & Dead-Letter Queue (Task 47, PRD §4.6 / Architecture §3):
+- Configurable `BackoffPolicy`: exponential growth ($initial \times factor^{attempt-1}$) with ceiling `max_backoff`, jitter modes ('none', 'full', 'equal') to prevent thundering herd, and HTTP `Retry-After` header override support.
+- Granular `TimeoutPolicy`: separate connect, read, write, and total timeout boundaries translated to `httpx.Timeout`.
+- Explicit error classification: transient retryable errors (HTTP 500, 502, 503, 504, 429 and `httpx.TimeoutException` / `RequestError`) retry up to `max_retries`; non-retryable 4xx client errors and platform policy rejections (`status: rejected`) fail fast and do not waste retries.
+- Per-attempt database audit logging in `ad_sends`: each retry attempt is recorded with `status="retrying"`, while terminal failures are recorded as `dead_letter`, `rejected`, or `accepted`.
+- Architecture §3 transitions supported: `sending -> approved: timeout, retry with backoff` for deferred queue retries, and `sending -> dead_letter: retries exhausted`.
+- Dead-letter recovery API: `POST /ads/{ad_id}/retry` and `POST /batches/{batch_id}/retry-dead-letter` allow authorized reviewers to retry failed ads.
+- Zero duplicate guarantee: under simulated chaos (503 `fail_before_commit`, 503 `fail_after_commit`, and 50 rapid repeat sends), deterministic idempotency key (`send:{ad_id}:{content_hash}`) guarantees exactly 0 duplicate ads created on the stand-in platform.
+
+D46: Dead-Letter List, Multi-Tenant Auditing & Reviewer Resolution (Task 48, PRD §4.6 / Architecture §3):
+- Batch Dead-Letter Listing (`GET /batches/{batch_id}/dead-letter`): lists all ads in a batch whose platform send retries have been exhausted (`state = 'dead_letter'`), enriched with failure reason, attempt count, last attempted timestamp, latest send record, and active reviewer alerts (`send_alerts`).
+- Global Dead-Letter Listing (`GET /dead-letter`): paginated cross-batch listing of unresolved dead-letter ads strictly scoped to the requesting user's assigned clients, with optional `?client_id=` filter.
+- Multi-Tenant Access Scoping: `403 Forbidden` returned if a user attempts to access batch dead-letters, request unassigned `?client_id=`, return ads to review, or resolve alerts for unassigned clients.
+- Reviewer Return to Review (`POST /ads/{ad_id}/return-to-review` and `POST /batches/{batch_id}/return-dead-letter-to-review`): transitions ads from `dead_letter` back to `pending_review` per Dataflow Architecture §3, auto-resolving active dead-letter alerts (`send_alerts.resolved = TRUE`). Non-dead-letter ad returns reject with `400 Bad Request`.
+- Reviewer Alert Resolution (`POST /alerts/{alert_id}/resolve`): explicitly marks a platform/send alert as acknowledged and resolved.
+- Operational Metrics Rollup: both batch (`calculate_batch_metrics`) and global (`calculate_global_metrics`) metrics report dead-letter count, rate, and `has_dead_letter` status.
+- Frontend Review UI: added `⚠️ Dead Letter` filter pill in `BatchReviewScreen.jsx`, and wired up `🔄 Retry Send` and `↩️ Return to Review` action handlers in `AdCard.jsx`.
+D47: Person Alerts for Platform Rejections, Uncertain Results, and Stuck Sends (Task 49, PRD §4.6 / Architecture §1, §3 / Never-break Rule 6):
+- Alert Taxonomy & Trigger Conditions:
+  - `platform_rejection` (critical): Raised when the platform adapter rejects an ad (`status: "rejected"`). The ad transitions to `rejected` state and a person alert is recorded.
+  - `uncertain_send_state` (warning): Raised when send attempts encounter non-deterministic network/timeout failures (`httpx.TimeoutException`, connection reset, `fail_after_commit`). Ad state reverts to `approved` for deferred retry while notifying a person.
+  - `dead_letter` (critical): Raised when platform send retries are exhausted ($N \ge \text{max\_retries}$). Ad transitions to `dead_letter`.
+  - `stuck_sending` (critical): Raised during stuck-send sweeps for ads stranded in `sending` state beyond `timeout_seconds` (default 300s). Reconciled to `dead_letter`.
+  - `uncertain_verdict` (warning): Raised manually or during review when automated checks return ambiguous or borderline findings.
+- Never-Break Rule 6 Enforcement (No Automatic Relaunch):
+  - Direct sends (`send_ad_to_stand_in`): Strictly raises `UnapprovedAdError` if an ad is in `rejected` or `dead_letter` state.
+  - Batch sender (`send_batch_approved_ads`): Prior to dispatch, inspects active unresolved alerts for each approved ad. If an ad has an active unresolved blocking alert (`platform_rejection`, `uncertain_send_state`, `stuck_sending`), dispatch is aborted (`status="skipped_uncertain_alert"`), preventing automated relaunch without explicit human intervention or alert resolution.
+- Reconciliation & Recovery API:
+  - `GET /batches/{batch_id}/alerts`: Batch alerts with ad context, filtered by `resolved`, `alert_type`, and `severity`.
+  - `GET /alerts`: Cross-batch alerts paginated and strictly scoped to requesting user's assigned clients.
+  - `GET /alerts/summary`: Active alerts breakdown (rejections, uncertain states, dead-letters, stuck sends, affected batches).
+  - `POST /alerts/{alert_id}/resolve`: Resolves an alert with `reviewer_id` and optional `resolution_note`.
+  - `POST /batches/{batch_id}/reconcile-stuck-sends`: Sweeps stuck sends in a batch, transitions them to `dead_letter`, and generates `stuck_sending` alerts.
+  - `POST /ads/{ad_id}/alerts`: Manually raises an alert for human investigation on any ad.
+- Multi-Tenant Access Scoping: Strict client isolation verifies assignments, returning `403 Forbidden` for unassigned client access across all alert endpoints.
+- Reviewer Frontend Experience:
+  - `BatchReviewScreen.jsx`: Prominent Person Alerts Banner displays active count and quick-filter toggle; `🚨 Alerts ({count})` filter pill in toolbar.
+  - `AdCard.jsx`: Collapsible alerts panel displaying alert severity badges, timestamps, error details, and inline `Resolve Alert` actions with real-time UI updates.
+
+D48: Server-Sent Events (SSE) Live Status Stream & Broadcaster (Task 50, PRD §7 / D12, Architecture §2, Never-break Rule 3):
+- SSE Streaming Endpoints:
+  - `GET /batches/{batch_id}/events` (and alias `GET /batches/{batch_id}/live`): Streams real-time verification and review status updates using `text/event-stream`.
+  - `GET /batches/{batch_id}/status`: REST JSON snapshot returning current live progress, verdict distribution, and per-ad statuses.
+- Dual Authentication Delivery:
+  - Accepts standard `Authorization: Bearer <token>` HTTP header.
+  - Accepts query parameter `?token=<jwt>` to natively support browser `EventSource` which lacks custom header APIs.
+- Multi-Tenant Client Scoping (Never-break Rule 3):
+  - Access is strictly scoped to the user's assigned clients. Non-existent batches return `404 Not Found`; batches containing ads exclusively for unassigned clients return `403 Forbidden`.
+  - On mixed-client batches, the initial handshake (`connected`), batch progress (`batch_status`), and ad statuses (`ad_statuses`) include only ads belonging to the requesting user's assigned clients.
+  - Live broadcast ad updates for unassigned clients are dynamically filtered and suppressed from the stream.
+- Event Protocol & Lifecycle:
+  - `connected`: Initial handshake with `batch_id`, `connected_at`, and authorized `client_ids`.
+  - `batch_status`: Live aggregate progress (`total_ads`, `processed_ads`, `pending_ads`, `progress_percent`, `verdict_counts`, `ad_statuses`).
+  - `ad_status`: Real-time notification when an individual ad completes verification checks, is edited, or changes approval state.
+  - `complete`: Final event emitted when all visible ads in the batch have reached a terminal verdict (`pending_ads == 0`).
+  - `: ping\n\n`: Heartbeat keepalive comments emitted during idle periods to prevent proxy or network timeouts.
+- Thread-Safe Broadcaster (`BatchEventBroadcaster`):
+  - In-memory event bus managing per-batch subscriber queues.
+  - Supports synchronous and thread-safe publishing (`publish_sync`) from worker execution threads via `loop.call_soon_threadsafe`, integrating with worker job runner (`process_job`) and bounded re-check (`run_bounded_recheck`).
+- Frontend Review UI Support:
+  - `BatchReviewScreen.jsx`: Automatically initializes `EventSource` connection to the stream, updating summary counts and individual ad cards in real time as jobs complete without manual browser refresh.
+  - `BatchSummary.jsx`: Displays a live status indicator pill (`🟢 Live Stream Active`, `🟡 Connecting...`, `✅ Checks Complete`, `⚪ Offline`) with pulsating badge animation.
+  - `review.css`: Dedicated styling for `.batch-badge-row`, `.live-status-pill`, and animations.
+
+D49: Metrics Computation, Operational Aggregation, and CI Release Gate Evaluation (Task 51, PRD §4.7 / §4.8, Architecture §1, §2, Never-break Rules 3 & 4):
+- Needs 19 (Findings & Rule Violations by Check Type & Field):
+  - Grouping of problems by check type (`mechanical`, `page`, `wording`) and ad field (`headline`, `ad_text`, `destination_url`, `creative_file`).
+  - Metric computation for `avg_findings_per_ad` and rule distribution sorted by violation frequency (`top_rules`).
+- Needs 36 (Tracing, Steps & Cost Ledger):
+  - Worker execution cost tracking with `total_cost_usd` and `avg_cost_per_ad_usd`.
+  - Step metrics: total worker steps, `avg_steps_per_ad`, total traces, and detection of step-capped ads (`step_capped_ads_count`, ads with $\ge 5$ worker iterations).
+- Needs 43 (Reviewer Decisions, False Alarms & Cleaned Ads):
+  - False alarm rate calculation: $\frac{\text{dismissed findings}}{\text{total findings}}$ with check-type breakdown (`mechanical`, `page`, `wording`).
+  - Tracking of `top_dismissed_rules` identified from dismissed finding records.
+  - Tracking of `cleaned_ads_count` (ads originally flagged with findings where all findings were dismissed, restoring the ad to clean `ready` state).
+  - Reviewer decision breakdown: approval counts, rejection counts, manual edit counts, and rejection reason frequencies (`top_rejection_reasons`).
+- Needs 47 (Platform Sends, Backoff Retries & Dead Letter):
+  - Send attempt tracking: `total_attempts`, `retried_ads_count` (ads with $>1$ send attempt), and `retry_rate`.
+  - Platform response tracking: `platform_accepted`, `platform_rejected`, and send acceptance rate.
+  - Dead-letter tracking: `dead_letter_count` and `dead_letter_rate`.
+- Simulated Rejection Rates & Protection Effectiveness (PRD §4.7):
+  - Without-gate simulated rejection rate: $\frac{\text{blocked ads} + \text{rejected rows}}{\text{total sheet rows}}$.
+  - With-gate simulated rejection rate: $\frac{\text{platform rejected ads}}{\text{total sent ads}}$.
+  - Rejections avoided count and `protection_effectiveness_percent`.
+- CI Release Gate Evaluation (PRD §4.7 / Line 27):
+  - Evaluates batch and cross-batch production release compliance against the 5% false alarm ceiling (`false_alarm_rate <= 0.05`) and 5% dead-letter ceiling (`dead_letter_rate <= 0.05`).
+  - Returns structured `status: "passed" | "failed"` with individual check evaluations and threshold limits.
+- Metrics Endpoints & Multi-Tenant Access Scoping:
+  - `GET /batches/{batch_id}/metrics`: Enriched batch metrics with findings, steps, costs, reviewer actions, retries, and CI release gate evaluation.
+  - `GET /batches/{batch_id}/metrics/summary`: High-level operational summary KPI payload.
+  - `GET /batches/{batch_id}/metrics/export`: Exportable JSON format for external dashboards and downstream reporting.
+  - `GET /metrics`: Global cross-batch metrics with client assignment isolation and optional `?client_id=` scoping.
+  - `GET /metrics/release-gate`: CI release gate evaluation report across batches strictly scoped to requesting user's client assignments.
+
+D50: Quality & Operational Metrics Screen with SSE Live Stream (Task 52, PRD §4.7 / Line 27, Architecture §2, Needs: 50):
+- Metrics Dashboard Component (`apps/web/components/MetricsScreen.jsx`):
+  - Renders complete quality, operational, reviewer, financial, and CI release gate metrics computed in Task 51.
+  - Supports dual view scopes: Global Overview (cross-batch trends) and Single Batch Metrics with dynamic dropdown selector.
+  - Multi-tenant client scoping and filtering per user assignments.
+- CI Release Gate Banner (PRD §4.7 / Line 27):
+  - Prominent release gate compliance indicator: `PASSED` (green) or `FAILED` (red) evaluating production release/merge eligibility.
+  - Explicit threshold checklist: 5% false-alarm ceiling (`<= 5.0%`) and 5% dead-letter ceiling (`<= 5.0%`).
+- Simulated Rejection Rates & Protection Effectiveness:
+  - Side-by-side comparison of without-gate predicted platform failure rate vs. with-gate protected platform rejection rate.
+  - Highlights rejections avoided count and overall protection effectiveness percentage.
+- Granular Breakdown Panels:
+  - Problems by check type (`mechanical`, `page`, `wording`), field breakdown (`headline`, `ad_text`, `destination_url`, `creative_file`), top violated rules table, and average findings per ad.
+  - Reviewer decisions (approvals, rejections, false alarms, cleaned ads, and rejection reasons frequency).
+  - Financial cost ledger (total spend, average cost per ad vs $0.25 target, total steps, average steps, traces count, and step cap alerts).
+  - Platform send resilience (sends, accepted, rejected, attempts, retries, retry rate, dead-letter count and rate).
+- Real-Time Live Status Integration (Needs: 50):
+  - Automatically establishes `EventSource` connection to `/batches/{batchId}/events?token={jwt}` when viewing batch metrics.
+  - Subscribes to `connected`, `batch_status`, `ad_status`, and `complete` events.
+  - Renders live status indicator pill (`live-status-pill`) and triggers real-time metrics re-fetching as worker jobs complete.
+  - Cleanly closes connections on unmount or batch transition.
+- Routes, Navigation & Export:
+  - Next.js route pages: `/metrics` (`apps/web/app/metrics/page.jsx`) and `/batches/[batchId]/metrics` (`apps/web/app/batches/[batchId]/metrics/page.jsx`).
+  - Added direct navigation links from HomePage (`/`), Review Screen (`/review`), and Batch Summary header (`BatchSummary.jsx`).
+  - Integrated one-click JSON export downloading metrics data directly for external reporting.
+D51: Replay and Scoring Engine on the 30 Labeled Sheets (Task 53, PRD §4.7 / §11 / D9, Needs: 15, 18, 25, 29, 34):
+- Evaluator Engine & CLI Runner (`evals/replay_30_sheets.py`):
+  - Ingests and scores the full dataset of 30 labeled sheets (3,260 valid ad rows, 41 malformed rows isolated) across synthetic clients (`brightleaf`, `calmleaf`, `oakandhome`, and unassigned/unknown).
+  - Evaluates complete end-to-end verification across:
+    - Needs 15 (UTM Rules): `utm_missing`, `utm_misspelled`, `utm_campaign_format`, `utm_malformed_query`.
+    - Needs 18 (Platform & Creatives): `text_too_long`, `headline_too_long`, `creative_ratio_mismatch`, `creative_missing`, and platform character limits.
+    - Needs 25 (Page Checks): `page_not_found` (404s), `page_utm_dropped` (redirects), `page_expired_offer`, `page_discount_mismatch`, and `page_delivery_threshold_mismatch`.
+    - Needs 29 (Wording & Citations): Brand book violations (`BL-BB-2.3` exclamation in headline, `CL-BB-2.2` ALL-CAPS words $\ge 4$ letters, `OH-BB-2.4` emoji), forbidden claims (`OH-C-01`, `OH-C-04`, `BL-C-01`, `BL-C-02`, `BL-C-03`, `CL-C-01`, `CL-C-02`, `CL-C-04`, `CL-C-05`), handmade misuse (`OH-C-02`), missing mandatory footnotes (`BL-C-05`, `CL-C-03`, `OH-C-05`), novel unregistered claims (`unknown_claim`), and unassigned clients (`unknown_client`).
+    - Needs 34 (Composite Verdict Aggregation): LangGraph deterministic verdict classification (`ready`, `fix_needed`, `blocked`, `needs_person`) adhering to hierarchy `BLOCKED > NEEDS_PERSON > FIX_NEEDED > READY`.
+- Planted Error Recall & Detection Matching:
+  - Canonical matching logic guarantees 100.00% recall (1,972 out of 1,972 errors detected) across all 19 planted error types in dev (20 sheets), held-out (10 sheets), and all (30 sheets).
+  - Clean rows false alarms: 0 (0.00%), strictly obeying the $\le 5.0\%$ ceiling.
+  - False-ready count: 0 (0.00%), zero bad ads misclassified as `ready`.
+  - Verdict classification accuracy: 100.00% (3,260 out of 3,260 valid ad rows).
+- Split Safety Gating & Isolation:
+  - Supports `--split dev` (20 sheets default for iteration).
+  - Strictly guards `--split held_out` and `--split all` behind `--final` flag to prevent accidental contamination.
+  - Generates comprehensive structured evaluation reports (`--output <path>`) with confusion matrices, per-type recall breakdowns, and CI release gate status.
+- Production Release Gate Compliance:
+D52: Cross-Cutting Safety Suite (Task 54, PRD §3, §4.6, §4.8, Needs: 28, 39, 47):
+- 500 Repeat Clicks & Retries (PRD §3, Never-break Rules 1, 2 / Needs: 39, 47):
+  - Rigorous stress evaluation testing sequential and concurrent (20 thread workers) rapid-fire dispatch.
+  - Zero duplicate records created on the stand-in platform (`duplicates == 0`, `ads == 1`).
+  - First send executes and transitions `sending` -> `sent`; 499 subsequent repeat clicks return deterministic cached idempotent replays (`already_sent == True`, `idempotent_replay == True`).
+  - Strict human approval gating: 500 clicks on an unapproved ad (draft state) are 100% rejected (`UnapprovedAdError`), producing 0 sends.
+  - Content hash verification: 500 clicks on an approved ad with modified/tampered row hash are 100% rejected (`ContentHashMismatchError`), producing 0 sends.
+- Worker Killed Mid-Send Recovery (PRD §4.6 / Needs: 39, 47):
+  - Pre-network crash simulation (worker killed right after state transition to `sending`): on recovery, worker reuses existing `idempotency_key`, sends ad to platform, and safely transitions to `sent` with 0 platform duplicates.
+  - Post-commit crash simulation (platform committed ad but worker process killed before receiving/storing HTTP response): on restart, worker sends same idempotency key, platform returns `Idempotent-Replay: true`, worker updates state to `sent` with 0 duplicates on platform.
+  - Orphaned `sending` ad sweep: `reconcile_stuck_sends` sweeps ads stranded in `sending` state beyond timeout threshold (300s), transitions them to `dead_letter`, and logs a high-severity `stuck_sending` alert.
+  - Never-break Rule 6 enforcement: Batch send skips any ad with unresolved blocking alerts (`skipped_uncertain_alert`), strictly preventing automated relaunch until human review and alert resolution.
+- Cross-Client Isolation Probes (PRD §4.8 / Needs: 28):
+  - Client rule retrieval isolation: `rule_index.json` and `restrict_rules_to_client` guarantee 0 rule overlap across `brightleaf`, `calmleaf`, and `oakandhome`. Foreign rule citations are blocked by tool policies.
+  - Multi-tenant API penetration probes: 10 distinct probes by a user restricted to `brightleaf` attempting unauthorized access to `oakandhome` endpoints (batch details, ads list, approve, edit, dismiss finding, single send, batch send, alerts, dead-letter list, and metrics) are 100% rejected (HTTP 403 Forbidden / 404 Not Found).
+  - 12 Adversarial prompt injection rows containment: replaying all 12 rows from `data/adversarial_rows.csv` guarantees zero actions outside policy, zero cross-client rule leaks, and zero sends approved by model text alone.
+- Evaluator CLI & Test Battery:
+  - Evaluation runner: `evals/cross_cutting_safety_eval.py` (`--scenario all|repeat_clicks|worker_killed|cross_client`, `--output report.json`).
+D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4, §11, Needs: all):
+- Comprehensive System Documentation (`README.md`):
+  - Architecture & Dataflow: Visual diagram from sheet upload, ingest, mechanical checks, page checks, wording & citations, verdict derivation, reviewer screen, idempotent stand-in sender, to operational metrics and release gate.
+  - The 7 Never-Break Invariants: Explicitly documented guarantees (human approval gate, content hash idempotency, 5% false alarm ceiling, least privilege/client scoping, step & spend caps, no automatic relaunch on rejections/uncertainty, real platform APIs disabled).
+  - Port & Service Mapping: Detailed table for Backend API (8000), Next.js Frontend (3000), Stand-In Ad Platform (8100), Mock Storefront Pages (8099), PostgreSQL/pgvector (5432), and Redis (6379).
+  - Environment Configuration Guide: Complete variable-by-variable table explaining `.env` parameters (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `SPEND_CAP_*`, `STORAGE_DIR`, upload limits, and tracing).
+  - Multi-Terminal Local Run Walkthrough: Sequential PowerShell commands for setting up venv, Playwright browser binaries, database initialization, seeding synthetic demo users, and launching all five services simultaneously across dedicated terminals.
+  - End-to-End User Journey: Guided steps from uploading a launch sheet, monitoring real-time SSE progress pills, reviewing verdicts in the Reviewer Cockpit, attaching approval evidence, performing bounded copy edits, dismissing false alarms, sending approved ads, managing dead-letter alerts, to viewing the metrics dashboard.
+  - Reproducible Evaluation Runbooks: Exact CLI commands and expected benchmark results for 30-sheet replay (`evals/replay_30_sheets.py`), cross-cutting safety evaluation (`evals/cross_cutting_safety_eval.py`), adversarial guard replay (`evals/task20_adversarial_guard_eval.py`), and full test suite execution (`python -m pytest`).
+  - PRD §11 Alignment Truth Table: Explicit classification of What is Real (ingest, rules, page check, wording check, verdict engine, reviewer cockpit, idempotent sender, SSE live status, metrics), What is Faked (SYNTHETIC datasets, stand-in platform), and What is Missing (live external platform APIs switched off by design).

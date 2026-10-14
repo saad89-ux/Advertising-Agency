@@ -2,13 +2,17 @@
 
 from apps.api import (
     ads,
+    approvals,
     batches,
     clients,
     deduplication,
+    edits,
+    evidence,
     findings,
     outbox,
     rejected_rows,
 )
+from apps.worker import sender
 
 
 def init_schema() -> None:
@@ -21,3 +25,8 @@ def init_schema() -> None:
     deduplication.create_deduplication_constraints()
     rejected_rows.create_rejected_rows_table()
     findings.create_findings_table()
+    findings.create_dismissed_findings_table()
+    approvals.create_approval_tables()
+    evidence.create_approval_evidence_table()
+    edits.create_ad_edits_table()
+    sender.create_send_tables()
