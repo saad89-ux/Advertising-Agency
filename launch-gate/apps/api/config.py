@@ -25,7 +25,7 @@ COLUMN_ALIASES = {
         "Destination URL",
         "landing page",
     ),
-    "creative_file": ("Creative file", "File", "Asset", "Creative"),
+    "creative_file": ("Creative file", "File", "Asset", "Creative", "creative file name"),
 }
 
 

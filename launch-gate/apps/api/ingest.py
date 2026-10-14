@@ -17,6 +17,7 @@ from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
 from apps.api.config import NORMALIZED_COLUMN_ALIASES, normalize_column_label
+from packages.rules.platform_normalization import normalize_platform
 
 
 MAX_CSV_ROWS = 200
@@ -51,6 +52,7 @@ class ParsedCsvUpload:
     rows: list[dict[str, str]]
     rejected_rows: list[RejectedRow] = field(default_factory=list)
     valid_row_indices: tuple[int, ...] = ()
+    unmapped_columns: tuple[str, ...] = ()
 
     @property
     def row_hashes(self) -> tuple[str, ...]:
@@ -82,8 +84,10 @@ def hash_normalized_sheet(rows: list[dict[str, str]]) -> str:
 
 
 def _canonical_hash_fields(row: dict[str, str]) -> dict[str, str]:
+    raw_platform = row.get("platform", "")
+    normalized_platform = normalize_platform(raw_platform)
     return {
-        "platform": row.get("platform", ""),
+        "platform": normalized_platform.canonical_value or raw_platform,
         "text": row.get("ad_text", ""),
         "headline": row.get("headline", ""),
         "link": row.get("destination_url", ""),
@@ -129,6 +133,15 @@ def _validate_columns(headers: list[str]) -> tuple[str, ...]:
             reason_code="missing_required_columns",
         )
     return columns
+
+
+def _unmapped_column_headers(headers: list[str]) -> tuple[str, ...]:
+    """Return original header names that did not resolve to a known alias."""
+    return tuple(
+        header
+        for header in headers
+        if normalize_column_label(header.strip()) not in NORMALIZED_COLUMN_ALIASES
+    )
 
 
 def _is_empty(value: object | None) -> bool:
@@ -321,6 +334,7 @@ def _finish_upload(
     source_columns: tuple[str, ...],
     records: list[list[object] | tuple[object, ...]],
     valid_widths: list[bool],
+    unmapped_columns: tuple[str, ...] = (),
 ) -> ParsedCsvUpload:
     # A trailing fully empty record is treated like trailing whitespace in the file.
     while records and _is_empty_record(records[-1]):
@@ -356,6 +370,7 @@ def _finish_upload(
         rows=rows,
         rejected_rows=rejected_rows,
         valid_row_indices=tuple(valid_row_indices),
+        unmapped_columns=unmapped_columns,
     )
 
 
@@ -389,6 +404,7 @@ def parse_csv_upload(
                 reason_code="missing_required_columns",
             )
         source_columns = _validate_columns(headers)
+        unmapped_columns = _unmapped_column_headers(headers)
         records: list[list[str]] = list(reader)
     except csv.Error as exc:
         raise UploadValidationError(
@@ -399,6 +415,7 @@ def parse_csv_upload(
         source_columns=source_columns,
         records=records,
         valid_widths=[len(record) == len(source_columns) for record in records],
+        unmapped_columns=unmapped_columns,
     )
 
 
@@ -520,7 +537,9 @@ def parse_xlsx_upload(
             raise UploadValidationError(
                 "XLSX contains an empty column name", reason_code="invalid_header"
             )
-        source_columns = _validate_columns([str(value) for value in header_values])
+        raw_headers = [str(value) for value in header_values]
+        source_columns = _validate_columns(raw_headers)
+        unmapped_columns = _unmapped_column_headers(raw_headers)
 
         records = worksheet_rows[1:]
         width_checks = [
@@ -541,4 +560,5 @@ def parse_xlsx_upload(
         source_columns=source_columns,
         records=records,
         valid_widths=width_checks,
+        unmapped_columns=unmapped_columns,
     )

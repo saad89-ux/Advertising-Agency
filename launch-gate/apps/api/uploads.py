@@ -33,11 +33,19 @@ from apps.api.settings import (
     max_upload_bytes,
     max_xlsx_uncompressed_bytes,
 )
+from packages.rules.platform_normalization import normalize_platform
 
 
 router = APIRouter()
-_CSV_CONTENT_TYPES = {"text/csv", "application/csv"}
+_CSV_CONTENT_TYPES = {
+    "text/csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "text/plain",
+    "application/octet-stream",
+}
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_XLSX_CONTENT_TYPES = {_XLSX_CONTENT_TYPE, "application/octet-stream"}
 
 
 class _DuplicateUpload(Exception):
@@ -73,7 +81,7 @@ def _validate_file_type(file: UploadFile) -> str:
     content_type = _content_type(file)
     if suffix == ".csv" and content_type in _CSV_CONTENT_TYPES:
         return "csv"
-    if suffix == ".xlsx" and content_type == _XLSX_CONTENT_TYPE:
+    if suffix == ".xlsx" and content_type in _XLSX_CONTENT_TYPES:
         return "xlsx"
     raise HTTPException(status_code=415, detail="unsupported file type")
 
@@ -155,6 +163,17 @@ def _persist_upload(
     accepted_count = 0
     all_duplicate_batch_ids: list[str] = []
     jobs_to_enqueue: list[AdJob] = []
+    unrecognized_platforms: list[dict[str, object]] = []
+    for index, row in zip(parsed.valid_row_indices, parsed.rows):
+        platform = normalize_platform(row.get("platform", ""))
+        if platform.flagged:
+            unrecognized_platforms.append(
+                {
+                    "data_row_index": index,
+                    "platform_raw": platform.raw_value,
+                    "reason_code": "platform_unrecognized",
+                }
+            )
     _dispatch_pending_jobs()
     try:
         with get_session() as connection:
@@ -181,7 +200,9 @@ def _persist_upload(
                             "batch_id": batch_id,
                             "client_id": client_id,
                             "row_number": int(row["row_number"]),
-                            "platform": row["platform"],
+                            "platform": normalize_platform(row["platform"]).canonical_value
+                            or row["platform"],
+                            "platform_raw": row["platform"],
                             "ad_text": row.get("ad_text") or None,
                             "headline": row.get("headline") or None,
                             "destination_url": row["destination_url"],
@@ -214,6 +235,8 @@ def _persist_upload(
                 "accepted_count": 0,
                 "rejected_count": 0,
                 "rejected_rows": [],
+                "unmapped_columns": list(parsed.unmapped_columns),
+                "platform_unrecognized": unrecognized_platforms,
                 "duplicate_sheet": True,
             },
         )
@@ -225,6 +248,8 @@ def _persist_upload(
         "accepted_count": accepted_count,
         "rejected_count": len(rejected),
         "rejected_rows": [_rejected_payload(row) for row in rejected],
+        "unmapped_columns": list(parsed.unmapped_columns),
+        "platform_unrecognized": unrecognized_platforms,
         "duplicate_sheet": False,
     }
     if duplicate_clients:

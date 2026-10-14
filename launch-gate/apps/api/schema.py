@@ -16,6 +16,7 @@ def init_schema() -> None:
     clients.create_client_tables()
     batches.create_batches_table()
     ads.create_ads_table()
+    ads.ensure_platform_raw_column()
     outbox.create_ad_job_outbox_table()
     deduplication.create_deduplication_constraints()
     rejected_rows.create_rejected_rows_table()

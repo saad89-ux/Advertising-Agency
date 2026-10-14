@@ -10,7 +10,6 @@ import os
 import re
 import time
 
-import bcrypt
 import jwt
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -25,8 +24,6 @@ _SCRYPT_N = 2**14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _SCRYPT_DKLEN = 64
-_BCRYPT_ROUNDS = 12
-_BCRYPT_SHA256_PREFIX = "bcrypt-sha256"
 
 
 @dataclass(frozen=True)
@@ -64,11 +61,25 @@ def get_jwt_expire_minutes() -> int:
 def hash_password(password: str) -> str:
     if not isinstance(password, str) or not password:
         raise ValueError("password must be a non-empty string")
-    # Pre-hash to a fixed-length printable value so bcrypt's 72-byte input
-    # limit never truncates passwords or breaks legacy-hash upgrades.
-    bcrypt_input = base64.urlsafe_b64encode(hashlib.sha256(password.encode("utf-8")).digest())
-    encoded = bcrypt.hashpw(bcrypt_input, bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("ascii")
-    return _BCRYPT_SHA256_PREFIX + encoded
+    salt = os.urandom(16)
+    derived = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN,
+    )
+    return "$".join(
+        (
+            "scrypt",
+            str(_SCRYPT_N),
+            str(_SCRYPT_R),
+            str(_SCRYPT_P),
+            base64.urlsafe_b64encode(salt).decode("ascii"),
+            base64.urlsafe_b64encode(derived).decode("ascii"),
+        )
+    )
 
 
 def _verify_scrypt_password(password: str, encoded_hash: str) -> bool:
@@ -98,25 +109,7 @@ def _verify_scrypt_password(password: str, encoded_hash: str) -> bool:
 def verify_password(password: str, encoded_hash: str) -> bool:
     if not isinstance(password, str) or not isinstance(encoded_hash, str):
         return False
-    if encoded_hash.startswith(_BCRYPT_SHA256_PREFIX):
-        bcrypt_hash = encoded_hash[len(_BCRYPT_SHA256_PREFIX):].encode("ascii", errors="ignore")
-        bcrypt_input = base64.urlsafe_b64encode(hashlib.sha256(password.encode("utf-8")).digest())
-        try:
-            return bcrypt.checkpw(bcrypt_input, bcrypt_hash)
-        except (ValueError, TypeError):
-            return False
-    if encoded_hash.startswith("scrypt$"):
-        return _verify_scrypt_password(password, encoded_hash)
-    try:
-        bcrypt_hash = encoded_hash.encode("ascii")
-        bcrypt_input = base64.urlsafe_b64encode(hashlib.sha256(password.encode("utf-8")).digest())
-        return bcrypt.checkpw(bcrypt_input, bcrypt_hash)
-    except (AttributeError, TypeError, ValueError, UnicodeError):
-        return False
-
-
-def is_legacy_scrypt_hash(encoded_hash: str) -> bool:
-    return isinstance(encoded_hash, str) and encoded_hash.startswith("scrypt$")
+    return _verify_scrypt_password(password, encoded_hash)
 
 
 def create_access_token(user_id: str, role: str) -> str:
@@ -209,12 +202,6 @@ async def login(request: Request) -> dict[str, str]:
     )
     if not valid:
         raise HTTPException(status_code=401, detail="invalid credentials")
-    encoded_hash = str(record["password_hash"])
-    if is_legacy_scrypt_hash(encoded_hash):
-        replacement_hash = hash_password(password)
-        users.update_password_hash_if_unchanged(
-            str(record["user_id"]), encoded_hash, replacement_hash
-        )
     try:
         token = create_access_token(str(record["user_id"]), str(record["role"]))
     except (RuntimeError, ValueError) as exc:

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS ads (
     client_id TEXT NOT NULL REFERENCES clients (client_id),
     row_number INTEGER NOT NULL CHECK (row_number > 0),
     platform TEXT NOT NULL CHECK (length(trim(platform)) > 0),
+    platform_raw TEXT,
     ad_text TEXT,
     headline TEXT,
     destination_url TEXT NOT NULL CHECK (length(trim(destination_url)) > 0),
@@ -25,10 +26,12 @@ CREATE TABLE IF NOT EXISTS ads (
 
 INSERT_AD = """
 INSERT INTO ads (
-    ad_id, batch_id, client_id, row_number, platform, ad_text, headline,
+    ad_id, batch_id, client_id, row_number, platform, platform_raw, ad_text, headline,
     destination_url, creative_file, row_hash, sheet_hash
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
+
+ENSURE_PLATFORM_RAW_COLUMN = "ALTER TABLE ads ADD COLUMN IF NOT EXISTS platform_raw TEXT"
 
 ENSURE_ADS_BATCH_FOREIGN_KEY = """
 DO $$
@@ -54,6 +57,12 @@ def create_ads_table() -> None:
         connection.execute(ENSURE_ADS_BATCH_FOREIGN_KEY)
 
 
+def ensure_platform_raw_column() -> None:
+    """Add the raw platform column to databases created before this schema change."""
+    with get_session() as connection:
+        connection.execute(ENSURE_PLATFORM_RAW_COLUMN)
+
+
 def persist_ads_on_connection(connection, ads: list[dict[str, object]]) -> None:
     for ad in ads:
         connection.execute(
@@ -64,6 +73,7 @@ def persist_ads_on_connection(connection, ads: list[dict[str, object]]) -> None:
                 ad["client_id"],
                 ad["row_number"],
                 ad["platform"],
+                ad.get("platform_raw", ad["platform"]),
                 ad.get("ad_text"),
                 ad.get("headline"),
                 ad["destination_url"],

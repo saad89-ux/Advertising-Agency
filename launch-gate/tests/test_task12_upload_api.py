@@ -221,6 +221,8 @@ def test_repeated_sheet_returns_original_batch_and_saves_nothing_again(monkeypat
         "accepted_count": 0,
         "rejected_count": 0,
         "rejected_rows": [],
+        "unmapped_columns": [],
+        "platform_unrecognized": [],
         "duplicate_sheet": True,
     }
     assert len(api_setup.state["batches"]) == 1
@@ -343,10 +345,10 @@ def test_wrong_role_is_forbidden(monkeypatch, api_setup):
     assert response.status_code == 403
 
 
-def test_wrong_file_content_type_or_extension_is_415(monkeypatch, api_setup):
+def test_unsupported_content_type_or_extension_is_415(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
-        wrong_mime = client.post(
+        accepted_octet_stream_but_bad_csv = client.post(
             "/uploads",
             files={"file": ("ads.csv", b"data", "application/octet-stream")},
             headers=headers,
@@ -358,7 +360,13 @@ def test_wrong_file_content_type_or_extension_is_415(monkeypatch, api_setup):
         )
         excel_mime_for_csv = client.post(
             "/uploads",
-            files={"file": ("ads.csv", b"data", "application/vnd.ms-excel")},
+            files={
+                "file": (
+                    "ads.csv",
+                    b"Row,Platform,Headline,URL\n1,Meta,hello,https://brightleaf.example/offer\n",
+                    "application/vnd.ms-excel",
+                )
+            },
             headers=headers,
         )
         macro_enabled_extension = client.post(
@@ -372,10 +380,71 @@ def test_wrong_file_content_type_or_extension_is_415(monkeypatch, api_setup):
             },
             headers=headers,
         )
-    assert wrong_mime.status_code == 415
+    assert accepted_octet_stream_but_bad_csv.status_code == 422
     assert wrong_extension.status_code == 415
-    assert excel_mime_for_csv.status_code == 415
+    assert excel_mime_for_csv.status_code == 201
     assert macro_enabled_extension.status_code == 415
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "text/csv",
+        "application/csv",
+        "application/vnd.ms-excel",
+        "text/plain",
+        "application/octet-stream",
+    ],
+)
+def test_csv_accepts_supported_mime_types(monkeypatch, api_setup, content_type):
+    headers = auth_headers(monkeypatch)
+    content = b"Row,Platform,Headline,URL\n1,Meta,hello,https://brightleaf.example/offer\n"
+    with TestClient(app) as client:
+        response = client.post(
+            "/uploads",
+            files={"file": ("ads.csv", content, content_type)},
+            headers=headers,
+        )
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        XLSX_MIME,
+        "application/octet-stream",
+    ],
+)
+def test_xlsx_accepts_supported_mime_types(monkeypatch, api_setup, content_type):
+    headers = auth_headers(monkeypatch)
+    with TestClient(app) as client:
+        response = client.post(
+            "/uploads",
+            files={"file": ("ads.xlsx", xlsx_bytes(), content_type)},
+            headers=headers,
+        )
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize(
+    "filename,content,content_type,reason_code",
+    [
+        ("ads.csv", b"not a valid utf-8 csv \xff", "application/octet-stream", "unparseable_csv"),
+        ("ads.xlsx", b"Row,Platform,Headline,URL\n1,Meta,hello,/page", "application/octet-stream", "unreadable_xlsx"),
+    ],
+)
+def test_allowed_mime_does_not_override_mismatched_file_content(
+    monkeypatch, api_setup, filename, content, content_type, reason_code
+):
+    headers = auth_headers(monkeypatch)
+    with TestClient(app) as client:
+        response = client.post(
+            "/uploads",
+            files={"file": (filename, content, content_type)},
+            headers=headers,
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"]["reason_code"] == reason_code
 
 
 def test_file_level_parse_rejection_returns_reason_code_and_saves_nothing(monkeypatch, api_setup):

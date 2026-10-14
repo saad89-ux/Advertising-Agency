@@ -55,3 +55,13 @@ D37 Task 20 input/output guards and adversarial harness:
 - Pure guards live in packages/guards/input_guard.py, packages/guards/output_guard.py, and packages/guards/tool_policy.py. The guard-only SYNTHETIC harness uses an obedient-attacker stub; it has no worker, model, or network integration. Worker and approval-endpoint integration remain deferred.
 - D31 password hashing is implemented with bcrypt; existing scrypt hashes are verified and upgraded after successful login.
 - D33 upload route is implemented at POST /uploads. No approval endpoint exists yet.
+
+D38: The upload route is POST /uploads, matching D33.
+
+D39: scrypt is accepted instead of bcrypt; bcrypt is dropped. Keep the existing stdlib scrypt password hashing implementation and do not add a bcrypt dependency.
+
+D40: The admin role is removed; only buyer and account_manager roles are supported, per D31.
+
+D41: The login identifier is email.
+
+D42: F1–F3 upload decisions: map the dev header alias "creative file name" to creative_file and return unmapped header names in unmapped_columns; store recognized canonical platform names in ads.platform and the entered value in ads.platform_raw, preserve and flag unrecognized values as platform_unrecognized, and hash using canonical platform names; accept CSV and XLSX only when extension and content match, with the documented MIME allowlists.

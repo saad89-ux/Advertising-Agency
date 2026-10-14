@@ -69,16 +69,6 @@ def get_user_by_email(email: str) -> dict[str, object] | None:
     return dict(zip(("user_id", "email", "display_name", "password_hash", "role", "is_active"), row))
 
 
-def update_password_hash_if_unchanged(user_id: str, old_hash: str, new_hash: str) -> bool:
-    """Upgrade a verified legacy hash without overwriting concurrent password changes."""
-    with get_session() as connection:
-        cursor = connection.execute(
-            "UPDATE users SET password_hash = %s WHERE user_id = %s AND password_hash = %s",
-            (new_hash, user_id, old_hash),
-        )
-        return cursor.rowcount == 1
-
-
 def get_user_by_id(user_id: str) -> dict[str, object] | None:
     with get_session() as connection:
         row = connection.execute(

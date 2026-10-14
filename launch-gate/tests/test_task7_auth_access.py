@@ -1,7 +1,4 @@
 from datetime import datetime, timezone
-import base64
-import hashlib
-import os
 
 import jwt
 import pytest
@@ -53,49 +50,6 @@ def test_login_returns_signed_token_but_never_password(monkeypatch, caplog):
     assert claims["role"] == "buyer"
     assert password not in response.text
     assert password not in caplog.text
-    assert record["password_hash"].startswith("bcrypt-sha256$2b$")
-
-
-def test_successful_legacy_scrypt_login_upgrades_hash(monkeypatch):
-    password = "synthetic-legacy-password"
-    salt = os.urandom(16)
-    derived = hashlib.scrypt(
-        password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=64
-    )
-    legacy_hash = "$".join((
-        "scrypt", "16384", "8", "1",
-        base64.urlsafe_b64encode(salt).decode("ascii"),
-        base64.urlsafe_b64encode(derived).decode("ascii"),
-    ))
-    record = {
-        "user_id": "buyer-legacy",
-        "email": "legacy@example.test",
-        "display_name": "Legacy Buyer",
-        "password_hash": legacy_hash,
-        "role": "buyer",
-        "is_active": True,
-    }
-    upgrades = []
-    monkeypatch.setattr(auth.users, "get_user_by_email", lambda email: record)
-    monkeypatch.setattr(
-        auth.users,
-        "update_password_hash_if_unchanged",
-        lambda user_id, old_hash, new_hash: upgrades.append((user_id, old_hash, new_hash)),
-    )
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/auth/login", json={"email": record["email"], "password": password}
-        )
-
-    assert response.status_code == 200
-    assert len(upgrades) == 1
-    assert upgrades[0][:2] == ("buyer-legacy", legacy_hash)
-    assert upgrades[0][2].startswith("bcrypt-sha256$2b$")
-    assert auth.verify_password(password, upgrades[0][2])
-    assert not auth.verify_password("wrong-password", upgrades[0][2])
-
-
 @pytest.mark.parametrize("case", ["wrong_password", "unknown_user", "inactive_user"])
 def test_login_errors_are_generic(monkeypatch, case):
     password = "synthetic-test-password"
