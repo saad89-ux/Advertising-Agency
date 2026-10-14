@@ -3,12 +3,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from apps.api.auth import get_jwt_secret, router as auth_router
+from apps.api.schema import init_schema
 from apps.api.uploads import UploadBodyLimitMiddleware, router as upload_router
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     get_jwt_secret()
+    init_schema()
     yield
 
 

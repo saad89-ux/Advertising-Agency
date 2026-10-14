@@ -5,7 +5,7 @@ import re
 
 COLUMN_ALIASES = {
     "row_number": ("Row", "#", "ad no", "id", "No.", "row number"),
-    "platform": ("Platform", "Channel"),
+    "platform": ("Platform", "Channel", "network"),
     "ad_text": (
         "Ad text and headline as typed",
         "Text / Headline",
@@ -13,6 +13,8 @@ COLUMN_ALIASES = {
         "Body",
         "Ad text",
         "Text",
+        "copy",
+        "Ad Copy (text / headline)",
     ),
     "headline": ("Headline",),
     "destination_url": (
@@ -21,6 +23,7 @@ COLUMN_ALIASES = {
         "URL",
         "Link",
         "Destination URL",
+        "landing page",
     ),
     "creative_file": ("Creative file", "File", "Asset", "Creative"),
 }

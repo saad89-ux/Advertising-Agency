@@ -68,7 +68,9 @@ async def test_passes_when_all_original_utm_values_survive_unordered(original, f
 
     assert findings == []
     assert calls[0][0] == original
-    assert calls[0][1] == {"timeout_ms": 1200, "capture_screenshot": True}
+    assert calls[0][1]["timeout_ms"] == 1200
+    assert calls[0][1]["capture_screenshot"] is True
+    assert calls[0][1]["allowed_origins"] == {"http://localhost:8099"}
 
 
 @run_async
@@ -140,7 +142,9 @@ async def test_no_original_utm_returns_no_finding_after_page_load(monkeypatch):
     assert await utm_redirect_check.check_utm_survives_redirect(
         make_ad("https://example.test/?gclid=abc#utm_source=fragment"), timeout_ms=500
     ) == []
-    assert calls[0][1] == {"timeout_ms": 500, "capture_screenshot": False}
+    assert calls[0][1]["timeout_ms"] == 500
+    assert calls[0][1]["capture_screenshot"] is False
+    assert calls[0][1]["allowed_origins"] == {"http://localhost:8099"}
 
 
 @run_async
@@ -257,7 +261,10 @@ async def test_captures_screenshot_bytes_when_requested(monkeypatch):
     monkeypatch.setattr(page_browser, "async_playwright", lambda: PlaywrightContext())
 
     opened = await page_browser.open_page_read_only(
-        "https://example.test", timeout_ms=600, capture_screenshot=True
+        "https://example.test",
+        allowed_origins={"https://example.test"},
+        timeout_ms=600,
+        capture_screenshot=True,
     )
 
     assert opened.screenshot_bytes == b"png-bytes"

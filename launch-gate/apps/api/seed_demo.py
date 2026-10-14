@@ -56,7 +56,6 @@ def main() -> None:
 
     for role, user_id, display_name in (
         ("account_manager", "synthetic-account-manager", "SYNTHETIC account manager"),
-        ("admin", "synthetic-admin", "SYNTHETIC admin"),
     ):
         details = _prompt_demo_user(display_name, optional=True)
         if details:
@@ -68,9 +67,8 @@ def main() -> None:
                 password_hash=hash_password(password),
                 role=role,
             )
-            if role == "account_manager":
-                for client_id in clients:
-                    assign_user_to_client(user_id, client_id)
+            for client_id in clients:
+                assign_user_to_client(user_id, client_id)
 
     print("SYNTHETIC clients and the entered demo users are seeded.")
 

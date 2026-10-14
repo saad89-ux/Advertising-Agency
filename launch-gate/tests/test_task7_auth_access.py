@@ -1,11 +1,14 @@
 from datetime import datetime, timezone
+import base64
+import hashlib
+import os
 
 import jwt
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from apps.api import auth
+from apps.api import auth, main, users
 from apps.api.access import require_client_access, user_can_access_client
 from apps.api.auth import CurrentUser
 from apps.api.main import app
@@ -14,6 +17,7 @@ from apps.api.main import app
 @pytest.fixture(autouse=True)
 def configured_auth(monkeypatch):
     monkeypatch.setattr(auth, "load_dotenv", lambda: None)
+    monkeypatch.setattr(main, "init_schema", lambda: None)
     monkeypatch.setenv("JWT_SECRET", "test-secret-only-not-for-production")
     monkeypatch.setenv("JWT_EXPIRE_MINUTES", "60")
 
@@ -49,6 +53,47 @@ def test_login_returns_signed_token_but_never_password(monkeypatch, caplog):
     assert claims["role"] == "buyer"
     assert password not in response.text
     assert password not in caplog.text
+    assert record["password_hash"].startswith("bcrypt-sha256$2b$")
+
+
+def test_successful_legacy_scrypt_login_upgrades_hash(monkeypatch):
+    password = "synthetic-legacy-password"
+    salt = os.urandom(16)
+    derived = hashlib.scrypt(
+        password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=64
+    )
+    legacy_hash = "$".join((
+        "scrypt", "16384", "8", "1",
+        base64.urlsafe_b64encode(salt).decode("ascii"),
+        base64.urlsafe_b64encode(derived).decode("ascii"),
+    ))
+    record = {
+        "user_id": "buyer-legacy",
+        "email": "legacy@example.test",
+        "display_name": "Legacy Buyer",
+        "password_hash": legacy_hash,
+        "role": "buyer",
+        "is_active": True,
+    }
+    upgrades = []
+    monkeypatch.setattr(auth.users, "get_user_by_email", lambda email: record)
+    monkeypatch.setattr(
+        auth.users,
+        "update_password_hash_if_unchanged",
+        lambda user_id, old_hash, new_hash: upgrades.append((user_id, old_hash, new_hash)),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/auth/login", json={"email": record["email"], "password": password}
+        )
+
+    assert response.status_code == 200
+    assert len(upgrades) == 1
+    assert upgrades[0][:2] == ("buyer-legacy", legacy_hash)
+    assert upgrades[0][2].startswith("bcrypt-sha256$2b$")
+    assert auth.verify_password(password, upgrades[0][2])
+    assert not auth.verify_password("wrong-password", upgrades[0][2])
 
 
 @pytest.mark.parametrize("case", ["wrong_password", "unknown_user", "inactive_user"])
@@ -98,7 +143,7 @@ def test_upload_auth_rejects_missing_expired_and_tampered_tokens(monkeypatch, to
 
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.csv", b"Row,Platform,Headline,URL\n1,Meta,Ad,/page", "text/csv")},
             headers=headers,
         )
@@ -122,19 +167,31 @@ def test_app_startup_refuses_empty_jwt_secret(monkeypatch):
             pass
 
 
-def test_client_access_is_assigned_for_buyer_and_manager_and_global_for_admin():
+def test_app_startup_initializes_schema(monkeypatch):
+    initialized = []
+    monkeypatch.setattr(main, "init_schema", lambda: initialized.append(True))
+
+    with TestClient(app):
+        pass
+
+    assert initialized == [True]
+
+
+def test_client_access_is_limited_to_assigned_clients():
     buyer = CurrentUser("b", "b@example.test", "Buyer", "buyer", ("brightleaf",))
     manager = CurrentUser("m", "m@example.test", "Manager", "account_manager", ("calmleaf",))
-    admin = CurrentUser("a", "a@example.test", "Admin", "admin", ())
 
     assert user_can_access_client(buyer, "brightleaf")
     assert not user_can_access_client(buyer, "calmleaf")
     assert user_can_access_client(manager, "calmleaf")
     assert not user_can_access_client(manager, "brightleaf")
-    assert user_can_access_client(admin, "oakandhome")
     with pytest.raises(HTTPException) as exc_info:
         require_client_access(buyer, "calmleaf")
     assert exc_info.value.status_code == 403
+
+
+def test_only_buyer_and_account_manager_roles_are_valid():
+    assert users.VALID_ROLES == {"buyer", "account_manager"}
 
 
 def test_assignments_are_loaded_again_for_each_authenticated_request(monkeypatch):

@@ -202,7 +202,10 @@ def test_capture_uses_visible_text_guards_hidden_text_and_stores_artifacts(
 
     result = asyncio.run(
         page_text_capture.capture_page_snapshot(
-            "https://shop.example.test", timeout_ms=1500, file_store=store
+            "https://shop.example.test",
+            allowed_origins={"https://shop.example.test"},
+            timeout_ms=1500,
+            file_store=store,
         )
     )
     assert result.page_snapshot["visible_text"] == visible
@@ -221,7 +224,10 @@ def test_capture_propagates_page_open_error_in_result(monkeypatch, tmp_path):
 
     result = asyncio.run(
         page_text_capture.capture_page_snapshot(
-            "https://shop.example.test", timeout_ms=1000, file_store=LocalFileStore(tmp_path / "storage")
+            "https://shop.example.test",
+            allowed_origins={"https://shop.example.test"},
+            timeout_ms=1000,
+            file_store=LocalFileStore(tmp_path / "storage"),
         )
     )
     assert result.page_error.reason_code == "page_timeout"

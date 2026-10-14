@@ -7,8 +7,8 @@ from typing import Literal
 from apps.api.database import get_session
 
 
-Role = Literal["buyer", "account_manager", "admin"]
-VALID_ROLES = {"buyer", "account_manager", "admin"}
+Role = Literal["buyer", "account_manager"]
+VALID_ROLES = {"buyer", "account_manager"}
 
 CREATE_USERS_TABLE = """
 CREATE TABLE IF NOT EXISTS users (
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL UNIQUE CHECK (length(trim(email)) > 0),
     display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
     password_hash TEXT NOT NULL CHECK (length(trim(password_hash)) > 0),
-    role TEXT NOT NULL CHECK (role IN ('buyer', 'account_manager', 'admin')),
+    role TEXT NOT NULL CHECK (role IN ('buyer', 'account_manager')),
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 )
 """
@@ -40,7 +40,7 @@ def create_user(
 ) -> None:
     """Insert or update a user without ever accepting a cleartext password."""
     if role not in VALID_ROLES:
-        raise ValueError("role must be buyer, account_manager, or admin")
+        raise ValueError("role must be buyer or account_manager")
     if not all(isinstance(value, str) and value.strip() for value in (user_id, email, display_name, password_hash)):
         raise ValueError("user_id, email, display_name, and password_hash are required")
     with get_session() as connection:
@@ -67,6 +67,16 @@ def get_user_by_email(email: str) -> dict[str, object] | None:
     if row is None:
         return None
     return dict(zip(("user_id", "email", "display_name", "password_hash", "role", "is_active"), row))
+
+
+def update_password_hash_if_unchanged(user_id: str, old_hash: str, new_hash: str) -> bool:
+    """Upgrade a verified legacy hash without overwriting concurrent password changes."""
+    with get_session() as connection:
+        cursor = connection.execute(
+            "UPDATE users SET password_hash = %s WHERE user_id = %s AND password_hash = %s",
+            (new_hash, user_id, old_hash),
+        )
+        return cursor.rowcount == 1
 
 
 def get_user_by_id(user_id: str) -> dict[str, object] | None:

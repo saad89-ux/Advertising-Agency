@@ -30,7 +30,7 @@ def run_async(test_function):
 )
 def test_rejects_non_absolute_http_urls(url):
     with pytest.raises(page_browser.PageOpenError) as error:
-        page_browser._validate_inputs(url, 1000)
+        page_browser._validate_inputs(url, 1000, {"https://example.test"})
 
     assert error.value.reason_code == "unsupported_url_scheme"
 
@@ -38,7 +38,9 @@ def test_rejects_non_absolute_http_urls(url):
 @pytest.mark.parametrize("timeout_ms", [0, -1, True, 1.5, "1000"])
 def test_requires_positive_integer_timeout(timeout_ms):
     with pytest.raises(ValueError, match="timeout_ms must be a positive integer"):
-        page_browser._validate_inputs("https://example.test", timeout_ms)
+        page_browser._validate_inputs(
+            "https://example.test", timeout_ms, {"https://example.test"}
+        )
 
 
 @run_async
@@ -54,15 +56,18 @@ async def test_route_allows_only_http_safe_methods():
         async def continue_(self):
             self.action = ("continue",)
 
+    allowed_origins = {"https://example.test", "http://example.test"}
     cases = [
         ("https://example.test/", "GET", ("continue",)),
         ("http://example.test/", "HEAD", ("continue",)),
         ("https://example.test/submit", "POST", ("abort", "blockedbyclient")),
         ("file:///secret", "GET", ("abort", "blockedbyclient")),
+        ("http://127.0.0.1:5432/", "GET", ("abort", "blockedbyclient")),
+        ("http://169.254.169.254/latest/meta-data/", "GET", ("abort", "blockedbyclient")),
     ]
     for url, method, expected in cases:
         route = Route(url, method)
-        await page_browser._handle_route(route)
+        await page_browser._handle_route(route, allowed_origins)
         assert route.action == expected
 
 
@@ -112,7 +117,11 @@ async def test_open_returns_page_metadata_and_closes_browser(monkeypatch):
 
     monkeypatch.setattr(page_browser, "async_playwright", lambda: PlaywrightContext())
 
-    result = await page_browser.open_page_read_only("https://example.test", timeout_ms=1500)
+    result = await page_browser.open_page_read_only(
+        "https://example.test",
+        allowed_origins={"https://example.test"},
+        timeout_ms=1500,
+    )
 
     assert result == page_browser.OpenedPage(
         final_url="https://example.test/final",
@@ -165,5 +174,9 @@ async def test_navigation_timeout_has_stable_error(monkeypatch):
     monkeypatch.setattr(page_browser, "async_playwright", lambda: PlaywrightContext())
 
     with pytest.raises(page_browser.PageOpenError, match="within 800 ms") as error:
-        await page_browser.open_page_read_only("https://example.test", timeout_ms=800)
+        await page_browser.open_page_read_only(
+            "https://example.test",
+            allowed_origins={"https://example.test"},
+            timeout_ms=800,
+        )
     assert error.value.reason_code == "page_timeout"

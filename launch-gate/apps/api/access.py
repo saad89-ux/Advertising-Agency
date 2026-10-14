@@ -6,8 +6,6 @@ from apps.api.auth import CurrentUser
 
 
 def user_can_access_client(user: CurrentUser, client_id: str) -> bool:
-    if user.role == "admin":
-        return True
     return client_id in user.assigned_client_ids
 
 

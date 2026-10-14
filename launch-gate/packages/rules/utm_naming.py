@@ -7,16 +7,10 @@ import re
 from urllib.parse import parse_qsl, urlsplit
 
 from packages.contracts import AdContract, CheckType, FindingContract
+from packages.rules.platform_normalization import normalize_platform
 from packages.rules.utm_presence import REQUIRED_UTM_PARAMS
 
 
-_PLATFORM_ALIASES = {
-    "facebook": {"facebook", "fb", "meta", "facebook ads"},
-    "instagram": {"instagram", "ig", "insta", "instagram ads"},
-    "tiktok": {"tiktok", "tik tok", "tt"},
-    "google": {"google", "google ads", "adwords"},
-    "linkedin": {"linkedin", "li"},
-}
 _SOURCE_ALIASES = {
     "facebook": {"facebook", "fb", "meta"},
     "instagram": {"instagram", "ig", "insta"},
@@ -54,11 +48,7 @@ def _query_entries(destination_url: str) -> list[tuple[str, str]]:
 
 
 def _canonical_platform(value: str) -> str | None:
-    normalized = value.strip().casefold()
-    return next(
-        (platform for platform, aliases in _PLATFORM_ALIASES.items() if normalized in aliases),
-        None,
-    )
+    return normalize_platform(value).canonical_value
 
 
 def _finding(
@@ -121,7 +111,7 @@ def check_utm_naming(ad: AdContract) -> list[FindingContract]:
             continue  # Task 14 reports missing or blank required values.
         aliases = aliases_by_expected[expected]
         incorrect_values = [
-            value for value in nonempty_values if value.casefold() != expected
+            value for value in nonempty_values if value != expected
         ]
         if incorrect_values:
             observed = ", ".join(repr(value) for value in incorrect_values)

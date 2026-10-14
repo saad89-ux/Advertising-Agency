@@ -273,6 +273,14 @@ def _validate_record(
         column: _neutralize_formula_cell("" if value is None else str(value))
         for column, value in zip(source_columns, field_values)
     }
+    raw_ad_text = normalized.get("ad_text", "")
+    headline = normalized.get("headline", "")
+    if _is_empty(headline) and " / " in raw_ad_text:
+        ad_text, parsed_headline = raw_ad_text.rsplit(" / ", 1)
+        if not _is_empty(ad_text) and not _is_empty(parsed_headline):
+            normalized["raw_ad_text"] = raw_ad_text
+            normalized["ad_text"] = ad_text
+            normalized["headline"] = parsed_headline
     normalized["row_number"] = str(row_number)
     return normalized, None
 

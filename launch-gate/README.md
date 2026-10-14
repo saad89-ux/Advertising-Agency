@@ -30,14 +30,14 @@ python -m apps.api.seed_demo
 python -m uvicorn apps.api.main:app --reload
 ```
 
-The seed command prints a `SYNTHETIC` notice, creates the three pilot client IDs from the read-only domain map, and prompts for synthetic buyer, account-manager, and admin demo credentials. Password input is hidden. The API is available at `http://127.0.0.1:8000`.
+The seed command prints a `SYNTHETIC` notice, creates the three pilot client IDs from the read-only domain map, and prompts for synthetic buyer and account-manager demo credentials. Password input is hidden. The API is available at `http://127.0.0.1:8000`.
 
 In another PowerShell window, enter credentials created by the seed command to log in and upload a CSV or XLSX. Replace the placeholders with your local values; do not place passwords in repository files:
 
 ```powershell
 $login = curl.exe -s -X POST http://127.0.0.1:8000/auth/login -H "Content-Type: application/json" --data-binary '{"email":"<seeded-email>","password":"<entered-password>"}' | ConvertFrom-Json
 $token = $login.access_token
-curl.exe -s -X POST http://127.0.0.1:8000/batches/upload -H "Authorization: Bearer $token" -F "file=@<path-to-sheet.csv>;type=text/csv"
+curl.exe -s -X POST http://127.0.0.1:8000/uploads -H "Authorization: Bearer $token" -F "file=@<path-to-sheet.csv>;type=text/csv"
 ```
 
 For XLSX, use `-F "file=@<path-to-sheet.xlsx>;type=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"`.

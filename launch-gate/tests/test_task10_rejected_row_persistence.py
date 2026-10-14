@@ -36,8 +36,7 @@ def test_persists_rejections_with_batch_id_and_raw_cells(monkeypatch):
         ],
     )
 
-    assert connection.calls[0][0] == rejected_rows.CREATE_REJECTED_ROWS_TABLE
-    statement, params = connection.calls[1]
+    statement, params = connection.calls[0]
     assert statement == rejected_rows.INSERT_REJECTED_ROW
     assert params[0:2] == ("batch-1", 3)
     assert json.loads(params[2]) == "bad"

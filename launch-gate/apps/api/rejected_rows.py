@@ -66,7 +66,6 @@ def persist_rejected_rows_on_connection(
     if not isinstance(batch_id, str) or not batch_id.strip():
         raise ValueError("batch_id must be a non-empty string")
 
-    connection.execute(CREATE_REJECTED_ROWS_TABLE)
     for row in rejected_rows:
         connection.execute(
             INSERT_REJECTED_ROW,

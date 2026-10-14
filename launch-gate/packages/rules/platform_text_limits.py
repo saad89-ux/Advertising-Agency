@@ -6,23 +6,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from packages.contracts import AdContract, CheckType, FindingContract
-
-
-_PLATFORM_ALIASES = {
-    "facebook": {"facebook", "fb", "meta", "facebook ads"},
-    "instagram": {"instagram", "ig", "insta", "instagram ads"},
-    "tiktok": {"tiktok", "tik tok", "tt"},
-    "google": {"google", "google ads", "adwords"},
-    "linkedin": {"linkedin", "li"},
-}
+from packages.rules.platform_normalization import normalize_platform
 
 
 def _canonical_platform(value: str) -> str | None:
-    normalized = value.strip().casefold()
-    return next(
-        (platform for platform, aliases in _PLATFORM_ALIASES.items() if normalized in aliases),
-        None,
-    )
+    return normalize_platform(value).canonical_value
 
 
 def _limit_value(platform_rules: Mapping[str, Any], key: str) -> int:

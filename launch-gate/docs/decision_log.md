@@ -53,4 +53,5 @@ D25-A: fixtures in tests/test_task9_xlsx_ingest.py and tests/test_task10_row_iso
 D37 Task 20 input/output guards and adversarial harness:
 - Security is structural: model output is restricted to strict findings; verdict, approval, and send are never derived from text or model output; tools are selected by code from a per-step allowlist; rule retrieval is restricted to the ad's client. Phrase detection is advisory only and can raise the floor to needs_person, never lower it.
 - Pure guards live in packages/guards/input_guard.py, packages/guards/output_guard.py, and packages/guards/tool_policy.py. The guard-only SYNTHETIC harness uses an obedient-attacker stub; it has no worker, model, or network integration. Worker and approval-endpoint integration remain deferred.
-- Open implementation/documentation drift: D31 says bcrypt while apps/api/auth.py uses stdlib scrypt; D33 says POST /uploads while apps/api/uploads.py exposes POST /batches/upload; D32 specifies per-row client rejection while current upload code rejects the whole upload with 403. Reconcile before relying on those contracts. No approval endpoint exists yet.
+- D31 password hashing is implemented with bcrypt; existing scrypt hashes are verified and upgraded after successful login.
+- D33 upload route is implemented at POST /uploads. No approval endpoint exists yet.

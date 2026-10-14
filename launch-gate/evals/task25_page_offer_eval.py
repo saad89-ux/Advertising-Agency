@@ -76,6 +76,7 @@ async def _evaluate(browser_channel: str | None) -> dict:
         for url in sorted(pages_by_url):
             capture = await capture_page_snapshot(
                 url,
+                allowed_origins={"http://localhost:8099"},
                 timeout_ms=8000,
                 file_store=store,
                 browser_channel=browser_channel,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from urllib.parse import parse_qsl, urlsplit
 
+from apps.api.client_inference import allowed_origins_for_client, load_domain_map
 from apps.worker.file_storage import LocalFileStore
 from apps.worker.page_browser import PageOpenError, open_page_read_only
 from packages.contracts import AdContract, CheckType, FindingContract
@@ -64,6 +65,9 @@ async def check_utm_survives_redirect(
     original = _utm_values(ad.destination_url)
     opened = await open_page_read_only(
         ad.destination_url,
+        allowed_origins=allowed_origins_for_client(
+            ad.client_id, load_domain_map(include_local_storefront=True)
+        ),
         timeout_ms=timeout_ms,
         capture_screenshot=bool(original),
     )

@@ -7,24 +7,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from packages.contracts import AdContract, CheckType, FindingContract
+from packages.rules.platform_normalization import normalize_platform
 
 
 RATIO_TOLERANCE = Decimal("0.02")
-_PLATFORM_ALIASES = {
-    "facebook": {"facebook", "fb", "meta", "facebook ads"},
-    "instagram": {"instagram", "ig", "insta", "instagram ads"},
-    "tiktok": {"tiktok", "tik tok", "tt"},
-    "google": {"google", "google ads", "adwords"},
-    "linkedin": {"linkedin", "li"},
-}
-
-
 def _canonical_platform(value: str) -> str | None:
-    normalized = value.strip().casefold()
-    return next(
-        (platform for platform, aliases in _PLATFORM_ALIASES.items() if normalized in aliases),
-        None,
-    )
+    return normalize_platform(value).canonical_value
 
 
 def _finding(ad: AdContract, *, issue: str, message: str, proposed_fix: str) -> FindingContract:

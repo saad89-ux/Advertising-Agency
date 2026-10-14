@@ -31,6 +31,7 @@ class PageCaptureResult:
 async def capture_page_snapshot(
     url: str,
     *,
+    allowed_origins: frozenset[str] | set[str],
     timeout_ms: int,
     file_store: LocalFileStore | None = None,
     browser_channel: str | None = None,
@@ -40,6 +41,7 @@ async def capture_page_snapshot(
     try:
         opened = await open_page_read_only(
             url,
+            allowed_origins=allowed_origins,
             timeout_ms=timeout_ms,
             capture_screenshot=True,
             capture_visible_text=True,

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile
 
 from apps.api import ads, batches, deduplication, rejected_rows
+from apps.api import outbox
 from apps.api.access import require_client_access
 from apps.api.auth import CurrentUser, require_role
 from apps.api.client_inference import infer_client_id, load_domain_map
@@ -37,7 +38,6 @@ from apps.api.settings import (
 router = APIRouter()
 _CSV_CONTENT_TYPES = {"text/csv", "application/csv"}
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-_XLSM_CONTENT_TYPE = "application/vnd.ms-excel.sheet.macroenabled.12"
 
 
 class _DuplicateUpload(Exception):
@@ -75,8 +75,6 @@ def _validate_file_type(file: UploadFile) -> str:
         return "csv"
     if suffix == ".xlsx" and content_type == _XLSX_CONTENT_TYPE:
         return "xlsx"
-    if suffix == ".xlsm" and content_type == _XLSM_CONTENT_TYPE:
-        return "xlsm"
     raise HTTPException(status_code=415, detail="unsupported file type")
 
 
@@ -97,14 +95,12 @@ def _rejected_payload(row: RejectedRow) -> dict[str, object]:
     }
 
 
-def _insert_upload_schema() -> None:
-    from apps.api.clients import create_client_tables
-
-    create_client_tables()
-    batches.create_batches_table()
-    ads.create_ads_table()
-    deduplication.create_deduplication_constraints()
-    rejected_rows.create_rejected_rows_table()
+def _dispatch_pending_jobs() -> None:
+    try:
+        outbox.dispatch_pending_jobs(enqueue_fn=enqueue_ad_jobs)
+    except Exception:
+        # The jobs remain durable in the outbox and can be dispatched later.
+        pass
 
 
 def _persist_upload(
@@ -123,23 +119,35 @@ def _persist_upload(
                 RejectedRow(
                     data_row_index=index,
                     row_number=row.get("row_number"),
-                    reason_code="unknown_client",
+                    reason_code="unknown_client_host",
                     reason="no client rules on file",
                     raw_cells=_row_as_cells(row, parsed.columns),
                 )
             )
             continue
         known_rows_by_client.setdefault(client_id, []).append((index, row))
-    rejected.sort(key=lambda row: row.data_row_index)
 
     if user.role == "buyer":
         if not user.assigned_client_ids:
             raise HTTPException(status_code=403, detail="forbidden")
-        if any(client_id not in user.assigned_client_ids for client_id in known_rows_by_client):
-            raise HTTPException(status_code=403, detail="forbidden")
+        assigned_clients = set(user.assigned_client_ids)
+        for client_id in tuple(known_rows_by_client):
+            if client_id in assigned_clients:
+                continue
+            for index, row in known_rows_by_client.pop(client_id):
+                rejected.append(
+                    RejectedRow(
+                        data_row_index=index,
+                        row_number=row.get("row_number"),
+                        reason_code="client_not_assigned",
+                        reason="client is not assigned to the uploader",
+                        raw_cells=_row_as_cells(row, parsed.columns),
+                    )
+                )
     else:
         for client_id in known_rows_by_client:
             require_client_access(user, client_id)
+    rejected.sort(key=lambda row: row.data_row_index)
 
     batch_id = str(uuid4())
     base_name = _base_filename(filename)
@@ -147,7 +155,7 @@ def _persist_upload(
     accepted_count = 0
     all_duplicate_batch_ids: list[str] = []
     jobs_to_enqueue: list[AdJob] = []
-    _insert_upload_schema()
+    _dispatch_pending_jobs()
     try:
         with get_session() as connection:
             batches.create_batch_on_connection(
@@ -192,11 +200,13 @@ def _persist_upload(
                 AdJob(batch_id=str(row["batch_id"]), ad_id=str(row["ad_id"]))
                 for row in rows_to_save
             ]
+            outbox.persist_ad_jobs_on_connection(connection, jobs_to_enqueue)
             rejected_rows.persist_rejected_rows_on_connection(
                 connection, batch_id, rejected
             )
             accepted_count = len(rows_to_save)
     except _DuplicateUpload as duplicate:
+        _dispatch_pending_jobs()
         return UploadResult(
             status_code=200,
             response={
@@ -208,11 +218,7 @@ def _persist_upload(
             },
         )
 
-    if jobs_to_enqueue:
-        try:
-            enqueue_ad_jobs(jobs_to_enqueue)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail="ad queue unavailable") from exc
+    _dispatch_pending_jobs()
 
     response: dict[str, Any] = {
         "batch_id": batch_id,
@@ -229,7 +235,7 @@ def _persist_upload(
     return UploadResult(status_code=201, response=response)
 
 
-@router.post("/batches/upload")
+@router.post("/uploads")
 async def upload_batch(
     request: Request,
     user: CurrentUser = Depends(require_role("buyer")),
@@ -309,7 +315,7 @@ class UploadBodyLimitMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope.get("type") != "http" or scope.get("path") != "/batches/upload" or scope.get("method") != "POST":
+        if scope.get("type") != "http" or scope.get("path") != "/uploads" or scope.get("method") != "POST":
             await self.app(scope, receive, send)
             return
 

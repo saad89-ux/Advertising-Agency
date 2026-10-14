@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
-from apps.api import auth, settings, uploads
+from apps.api import auth, main, settings, uploads
 from apps.api.auth import CurrentUser
 from apps.api.queue import AdJob
 from apps.api.main import app
@@ -30,10 +30,13 @@ class FakeResult:
 class FakeUploadDatabase:
     def __init__(self):
         self.state = {"batches": {}, "claims": {}, "ads": [], "rejected": []}
+        self.outbox_jobs = []
+        self.queued_outbox_jobs = set()
 
     @contextmanager
     def session(self):
         pending = deepcopy(self.state)
+        pending_outbox_jobs = deepcopy(self.outbox_jobs)
 
         class Connection:
             def execute(inner, statement, params=None):
@@ -57,6 +60,9 @@ class FakeUploadDatabase:
                 if "insert into batch_rejected_rows" in lowered:
                     pending["rejected"].append(params)
                     return FakeResult()
+                if "insert into ad_job_outbox" in lowered:
+                    pending_outbox_jobs.append(params)
+                    return FakeResult()
                 return FakeResult()
 
         try:
@@ -65,6 +71,7 @@ class FakeUploadDatabase:
             raise
         else:
             self.state = pending
+            self.outbox_jobs = pending_outbox_jobs
 
 
 @pytest.fixture
@@ -76,9 +83,23 @@ def api_setup(monkeypatch):
     monkeypatch.setenv("MAX_UPLOAD_BYTES", str(2 * 1024 * 1024))
     monkeypatch.setenv("MAX_XLSX_UNCOMPRESSED_BYTES", str(20 * 1024 * 1024))
     database = FakeUploadDatabase()
-    monkeypatch.setattr(uploads, "_insert_upload_schema", lambda: None)
+
+    def dispatch_pending_jobs(*, enqueue_fn):
+        pending_jobs = [
+            AdJob(batch_id=batch_id, ad_id=ad_id)
+            for batch_id, ad_id in database.outbox_jobs
+            if (batch_id, ad_id) not in database.queued_outbox_jobs
+        ]
+        if pending_jobs:
+            enqueue_fn(pending_jobs)
+            database.queued_outbox_jobs.update(
+                (job.batch_id, job.ad_id) for job in pending_jobs
+            )
+
+    monkeypatch.setattr(main, "init_schema", lambda: None)
     monkeypatch.setattr(uploads, "get_session", database.session)
     monkeypatch.setattr(uploads, "enqueue_ad_jobs", lambda jobs: len(jobs))
+    monkeypatch.setattr(uploads.outbox, "dispatch_pending_jobs", dispatch_pending_jobs)
     return database
 
 
@@ -122,7 +143,7 @@ def test_upload_csv_saves_ads_with_inferred_client_and_rejected_rows(monkeypatch
     )
 
     with TestClient(app) as client:
-        response = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        response = client.post("/uploads", files=multipart_csv(body), headers=headers)
 
     assert response.status_code == 201
     payload = response.json()
@@ -131,7 +152,7 @@ def test_upload_csv_saves_ads_with_inferred_client_and_rejected_rows(monkeypatch
     assert payload["rejected_count"] == 2
     assert {item["reason_code"] for item in payload["rejected_rows"]} == {
         "invalid_row_number",
-        "unknown_client",
+        "unknown_client_host",
     }
     assert api_setup.state["ads"][0][2] == "brightleaf"
     assert enqueued == [AdJob(batch_id=payload["batch_id"], ad_id=api_setup.state["ads"][0][0])]
@@ -143,7 +164,7 @@ def test_upload_xlsx_accepts_valid_workbook(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.xlsx", xlsx_bytes(), XLSX_MIME)},
             headers=headers,
         )
@@ -155,6 +176,17 @@ def test_upload_xlsx_accepts_valid_workbook(monkeypatch, api_setup):
 
 def test_upload_enqueues_exactly_one_job_per_saved_ad(monkeypatch, api_setup):
     enqueued = []
+    persisted_jobs = []
+    monkeypatch.setattr(
+        uploads.outbox,
+        "persist_ad_jobs_on_connection",
+        lambda connection, jobs: persisted_jobs.extend(jobs),
+    )
+    monkeypatch.setattr(
+        uploads.outbox,
+        "dispatch_pending_jobs",
+        lambda *, enqueue_fn: enqueue_fn(persisted_jobs),
+    )
     monkeypatch.setattr(uploads, "enqueue_ad_jobs", lambda jobs: enqueued.extend(jobs))
     headers = auth_headers(monkeypatch)
     body = (
@@ -165,21 +197,22 @@ def test_upload_enqueues_exactly_one_job_per_saved_ad(monkeypatch, api_setup):
     )
 
     with TestClient(app) as client:
-        response = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        response = client.post("/uploads", files=multipart_csv(body), headers=headers)
 
     assert response.status_code == 201
     assert response.json()["accepted_count"] == 2
     saved_ad_ids = [ad[0] for ad in api_setup.state["ads"]]
+    assert [job.ad_id for job in persisted_jobs] == saved_ad_ids
     assert [job.ad_id for job in enqueued] == saved_ad_ids
-    assert all(job.batch_id == response.json()["batch_id"] for job in enqueued)
+    assert all(job.batch_id == response.json()["batch_id"] for job in persisted_jobs)
 
 
 def test_repeated_sheet_returns_original_batch_and_saves_nothing_again(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     body = "Row,Platform,Headline,URL\n1,Meta,one,https://brightleaf.example/offer\n"
     with TestClient(app) as client:
-        first = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
-        second = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        first = client.post("/uploads", files=multipart_csv(body), headers=headers)
+        second = client.post("/uploads", files=multipart_csv(body), headers=headers)
 
     assert first.status_code == 201
     assert second.status_code == 200
@@ -198,7 +231,7 @@ def test_repeat_by_different_user_does_not_reveal_original_uploader(monkeypatch,
     first_headers = auth_headers(monkeypatch)
     body = "Row,Platform,Headline,URL\n1,Meta,one,https://brightleaf.example/offer\n"
     with TestClient(app) as client:
-        first = client.post("/batches/upload", files=multipart_csv(body), headers=first_headers)
+        first = client.post("/uploads", files=multipart_csv(body), headers=first_headers)
         monkeypatch.setattr(
             auth.users,
             "get_user_by_id",
@@ -213,7 +246,7 @@ def test_repeat_by_different_user_does_not_reveal_original_uploader(monkeypatch,
         monkeypatch.setattr(auth.users, "get_user_client_ids", lambda user_id: ["brightleaf"])
         second_token = auth.create_access_token("second-user", "buyer")
         second = client.post(
-            "/batches/upload",
+            "/uploads",
             files=multipart_csv(body),
             headers={"Authorization": f"Bearer {second_token}"},
         )
@@ -248,7 +281,7 @@ def test_partially_duplicate_multi_client_sheet_only_saves_new_client_rows(monke
     api_setup.state["claims"][("brightleaf", parsed.sheet_hash)] = original_batch_id
 
     with TestClient(app) as client:
-        response = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        response = client.post("/uploads", files=multipart_csv(body), headers=headers)
 
     assert response.status_code == 201
     assert response.json()["accepted_count"] == 1
@@ -256,23 +289,54 @@ def test_partially_duplicate_multi_client_sheet_only_saves_new_client_rows(monke
     assert [ad[2] for ad in api_setup.state["ads"]] == ["calmleaf"]
 
 
-def test_buyer_upload_with_unassigned_client_is_generic_403_and_saves_nothing(monkeypatch, api_setup):
+def test_multi_client_upload_by_buyer_saves_only_assigned_client_rows(monkeypatch, api_setup):
+    headers = auth_headers(monkeypatch, assigned=("brightleaf",))
+    body = (
+        "Row,Platform,Headline,URL\n"
+        "1,Meta,assigned,https://brightleaf.example/offer\n"
+        "2,Meta,unassigned,https://calmleaf.example/offer\n"
+        "3,Meta,unknown,https://tallyhq.example/offer\n"
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/uploads", files=multipart_csv(body), headers=headers)
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["accepted_count"] == 1
+    assert payload["rejected_count"] == 2
+    assert {row["reason_code"] for row in payload["rejected_rows"]} == {
+        "client_not_assigned",
+        "unknown_client_host",
+    }
+    assert [ad[2] for ad in api_setup.state["ads"]] == ["brightleaf"]
+    assert {claim[0] for claim in api_setup.state["claims"]} == {"brightleaf"}
+    assert {row[3] for row in api_setup.state["rejected"]} == {
+        "client_not_assigned",
+        "unknown_client_host",
+    }
+
+
+def test_upload_with_only_unassigned_rows_returns_rejections(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch, assigned=("brightleaf",))
     body = "Row,Platform,Headline,URL\n1,Meta,one,https://calmleaf.example/offer\n"
 
     with TestClient(app) as client:
-        response = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        response = client.post("/uploads", files=multipart_csv(body), headers=headers)
 
-    assert response.status_code == 403
-    assert response.json() == {"detail": "forbidden"}
-    assert api_setup.state == {"batches": {}, "claims": {}, "ads": [], "rejected": []}
+    assert response.status_code == 201
+    assert response.json()["accepted_count"] == 0
+    assert response.json()["rejected_rows"][0]["reason_code"] == "client_not_assigned"
+    assert len(api_setup.state["batches"]) == 1
+    assert api_setup.state["ads"] == []
+    assert {row[3] for row in api_setup.state["rejected"]} == {"client_not_assigned"}
 
 
 def test_wrong_role_is_forbidden(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch, role="account_manager")
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files=multipart_csv("Row,Platform,Headline,URL\n1,Meta,one,https://brightleaf.example/"),
             headers=headers,
         )
@@ -283,24 +347,42 @@ def test_wrong_file_content_type_or_extension_is_415(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
         wrong_mime = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.csv", b"data", "application/octet-stream")},
             headers=headers,
         )
         wrong_extension = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.txt", b"data", CSV_MIME)},
+            headers=headers,
+        )
+        excel_mime_for_csv = client.post(
+            "/uploads",
+            files={"file": ("ads.csv", b"data", "application/vnd.ms-excel")},
+            headers=headers,
+        )
+        macro_enabled_extension = client.post(
+            "/uploads",
+            files={
+                "file": (
+                    "ads.xlsm",
+                    b"data",
+                    "application/vnd.ms-excel.sheet.macroenabled.12",
+                )
+            },
             headers=headers,
         )
     assert wrong_mime.status_code == 415
     assert wrong_extension.status_code == 415
+    assert excel_mime_for_csv.status_code == 415
+    assert macro_enabled_extension.status_code == 415
 
 
 def test_file_level_parse_rejection_returns_reason_code_and_saves_nothing(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files=multipart_csv("Row,Platform,Headline\n1,Meta,missing link\n"),
             headers=headers,
         )
@@ -314,7 +396,7 @@ def test_xlsx_uncompressed_size_cap_is_413(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.xlsx", xlsx_bytes(), XLSX_MIME)},
             headers=headers,
         )
@@ -341,13 +423,13 @@ def test_failure_after_ad_insert_rolls_back_then_retry_succeeds(monkeypatch, api
         "2,Meta,unknown,https://tallyhq.example/offer\n"
     )
     with TestClient(app, raise_server_exceptions=False) as client:
-        failed = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        failed = client.post("/uploads", files=multipart_csv(body), headers=headers)
     assert failed.status_code == 500
     assert api_setup.state == {"batches": {}, "claims": {}, "ads": [], "rejected": []}
 
     monkeypatch.setattr(rejected_rows, "persist_rejected_rows_on_connection", original)
     with TestClient(app) as client:
-        retried = client.post("/batches/upload", files=multipart_csv(body), headers=headers)
+        retried = client.post("/uploads", files=multipart_csv(body), headers=headers)
     assert retried.status_code == 201
     assert api_setup.state["claims"]
 
@@ -357,7 +439,7 @@ def test_filename_is_stored_as_base_name_only(monkeypatch, api_setup):
     body = "Row,Platform,Headline,URL\n1,Meta,one,https://brightleaf.example/offer\n"
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files=multipart_csv(body, filename="../../evil.csv"),
             headers=headers,
         )
@@ -384,7 +466,7 @@ def test_request_body_exactly_at_limit_is_accepted(monkeypatch, api_setup):
 
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             content=body,
             headers={
                 **headers,
@@ -401,13 +483,13 @@ def test_batch_id_form_field_is_ignored_and_client_field_is_rejected(monkeypatch
     body = "Row,Platform,Headline,URL\n1,Meta,one,https://brightleaf.example/offer\n"
     with TestClient(app) as client:
         accepted = client.post(
-            "/batches/upload",
+            "/uploads",
             data={"batch_id": "owner-supplied"},
             files=multipart_csv(body),
             headers=headers,
         )
         rejected = client.post(
-            "/batches/upload",
+            "/uploads",
             data={"client_id": "calmleaf"},
             files=multipart_csv(body.replace("brightleaf", "calmleaf")),
             headers=headers,
@@ -428,7 +510,7 @@ def test_xlsx_archive_entry_count_cap_is_413(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.xlsx", output.getvalue(), XLSX_MIME)},
             headers=headers,
         )
@@ -450,7 +532,7 @@ def test_highly_compressible_xlsx_entry_hits_uncompressed_cap(monkeypatch, api_s
     headers = auth_headers(monkeypatch)
     with TestClient(app) as client:
         response = client.post(
-            "/batches/upload",
+            "/uploads",
             files={"file": ("ads.xlsx", output.getvalue(), XLSX_MIME)},
             headers=headers,
         )
@@ -489,7 +571,7 @@ def test_request_body_limit_streaming_and_content_length(
 
     scope = {
         "type": "http",
-        "path": "/batches/upload",
+        "path": "/uploads",
         "method": "POST",
         "headers": [(b"content-type", b"multipart/form-data; boundary=x")]
         + ([(b"content-length", content_length)] if content_length is not None else []),

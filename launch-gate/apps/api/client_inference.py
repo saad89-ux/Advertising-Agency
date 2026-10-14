@@ -8,7 +8,9 @@ from typing import Mapping
 from urllib.parse import unquote, urlsplit
 
 
-def load_domain_map(path: str | Path | None = None) -> dict[str, str | None]:
+def load_domain_map(
+    path: str | Path | None = None, *, include_local_storefront: bool = False
+) -> dict[str, str | None]:
     """Load the read-only domain map shipped with the repository's data pack."""
     map_path = (
         Path(path)
@@ -22,7 +24,7 @@ def load_domain_map(path: str | Path | None = None) -> dict[str, str | None]:
     return {
         str(host).casefold().strip(): value
         for host, value in raw.items()
-        if host != "_note" and host != "local_storefront_base"
+        if host != "_note" and (include_local_storefront or host != "local_storefront_base")
     }
 
 
@@ -65,3 +67,28 @@ def infer_client_id(
     if not matches:
         return None
     return normalized_map[max(matches, key=len)]
+
+
+def allowed_origins_for_client(
+    client_id: str, domain_map: Mapping[str, str | None]
+) -> frozenset[str]:
+    """Return exact HTTP(S) origins mapped to one client, plus local dev origin."""
+    origins: set[str] = set()
+    for host, mapped_client in domain_map.items():
+        if mapped_client != client_id or host == "local_storefront_base":
+            continue
+        normalized_host = str(host).casefold().strip().rstrip(".")
+        if normalized_host:
+            origins.update({f"http://{normalized_host}", f"https://{normalized_host}"})
+
+    local_base = domain_map.get("local_storefront_base")
+    if isinstance(local_base, str):
+        try:
+            parsed = urlsplit(local_base)
+            if parsed.scheme.casefold() == "http" and parsed.hostname == "localhost":
+                port = parsed.port
+                origin = f"http://localhost:{port}" if port is not None else "http://localhost"
+                origins.add(origin)
+        except ValueError:
+            pass
+    return frozenset(origins)
