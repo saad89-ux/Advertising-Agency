@@ -1,4 +1,5 @@
 "use client";
+import { API_BASE_URL, readError, requestErrorMessage } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
@@ -9,12 +10,13 @@ export default function AttributionPage() {
   const [ads, setAds] = useState([]);
   const [liveEvents, setLiveEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [filterPlatform, setFilterPlatform] = useState("");
   const [filterClient, setFilterClient] = useState("");
   const [selectedAdForFeed, setSelectedAdForFeed] = useState(null);
   const [simulatingId, setSimulatingId] = useState(null);
 
-  const apiBaseUrl = "http://localhost:8000";
+  const apiBaseUrl = API_BASE_URL;
 
   const fetchAttributionData = async () => {
     try {
@@ -27,11 +29,19 @@ export default function AttributionPage() {
         fetch(`${apiBaseUrl}/attribution/live-events`, { headers }),
       ]);
 
+      for (const response of [sumRes, adsRes, eventsRes]) {
+        if (!response.ok) throw new Error(await readError(response));
+      }
       if (sumRes.ok) setSummary(await sumRes.json());
       if (adsRes.ok) setAds(await adsRes.json());
       if (eventsRes.ok) setLiveEvents(await eventsRes.json());
+      setError("");
     } catch (err) {
       console.error("Failed to load attribution data:", err);
+      setError(requestErrorMessage(err));
+      setSummary(null);
+      setAds([]);
+      setLiveEvents([]);
     } finally {
       setLoading(false);
     }
@@ -43,6 +53,9 @@ export default function AttributionPage() {
     const interval = setInterval(fetchAttributionData, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  if (loading) return <main role="status" style={{ padding: 40, color: "#cbd5e1" }}>Loading attribution data...</main>;
+  if (error) return <main role="alert" style={{ padding: 40, color: "#fecaca" }}>{error}</main>;
 
   const handleSimulateSale = async (adId) => {
     setSimulatingId(adId);

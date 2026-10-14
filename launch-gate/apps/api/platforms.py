@@ -250,8 +250,7 @@ def automated_agent_launch_ad(
                     inbound_sales_usd, inbound_orders, impressions, clicks, ctr_percent, roas, spend_usd,
                     has_rule_violation, violation_details, last_event
                 ) VALUES (%s, %s, %s, %s, %s, NULL, NULL, 0, 0, NULL, NULL, 0.00, FALSE, NULL, %s)
-                ON CONFLICT (ad_id) DO UPDATE SET
-                    platform = EXCLUDED.platform,
+                ON CONFLICT (ad_id, platform) DO UPDATE SET
                     handle = EXCLUDED.handle,
                     updated_at = NOW();
                 """,

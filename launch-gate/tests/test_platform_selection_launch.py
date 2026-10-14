@@ -232,8 +232,10 @@ def test_launch_batch_strict_platform_isolation(mock_buyer_user):
             launch_batch(req, user=mock_buyer_user)
 
 
-def test_launch_batch_normalizes_aliases(mock_buyer_user):
+def test_launch_batch_normalizes_aliases(mock_buyer_user, monkeypatch):
     """Verify that Meta aliases are deduplicated and normalized."""
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "false")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "false")
     from apps.api.ingest import hash_normalized_row
     canonical = {"platform": "facebook", "headline": "Glow Offer", "ad_text": "Buy now", "destination_url": "https://example.com/offer", "creative_file": ""}
     row_hash = hash_normalized_row(canonical)
@@ -266,13 +268,14 @@ def test_launch_batch_normalizes_aliases(mock_buyer_user):
         mock_resp = MagicMock()
         mock_resp.success = False
         mock_resp.error = "connector_not_configured"
-        mock_mcp.call_tool.return_value = mock_resp
+        mock_mcp.dispatch_paused_ad.return_value = mock_resp
 
         res = launch_batch(req, user=mock_buyer_user)
 
     # fb and meta both normalize to facebook; ig -> instagram.
     assert res["target_platforms"] == ["facebook", "instagram"]
     assert len(res["target_platforms"]) == 2
+    assert [call.kwargs["platform"] for call in mock_mcp.dispatch_paused_ad.call_args_list] == ["facebook", "instagram"]
 
 
 # ---------------------------------------------------------------------------

@@ -435,21 +435,23 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
             try:
                 cur_p = conn.execute(
                     """
-                    SELECT ad_id, inbound_sales_usd, spend_usd, roas, inbound_orders, impressions, ctr_percent
+                    SELECT ad_id, inbound_sales_usd, spend_usd, inbound_orders, impressions, clicks
                     FROM ad_performance_tracking
                     WHERE ad_id = ANY(%s);
                     """,
                     (ad_ids,),
                 )
                 for pr in cur_p.fetchall():
-                    perf_map[str(pr[0])] = {
-                        "inbound_sales_usd": float(pr[1]) if pr[1] is not None else None,
-                        "spend_usd": float(pr[2]) if pr[2] is not None else None,
-                        "roas": float(pr[3]) if pr[3] is not None else None,
-                        "inbound_orders": int(pr[4]) if pr[4] is not None else None,
-                        "impressions": int(pr[5]) if pr[5] is not None else None,
-                        "ctr_percent": float(pr[6]) if pr[6] is not None else None,
-                    }
+                    performance = perf_map.setdefault(str(pr[0]), {
+                        "inbound_sales_usd": None, "spend_usd": None, "inbound_orders": None,
+                        "impressions": None, "clicks": None, "roas": None, "ctr_percent": None,
+                    })
+                    for field, value, cast in (
+                        ("inbound_sales_usd", pr[1], float), ("spend_usd", pr[2], float),
+                        ("inbound_orders", pr[3], int), ("impressions", pr[4], int), ("clicks", pr[5], int),
+                    ):
+                        if value is not None:
+                            performance[field] = (performance[field] or 0) + cast(value)
             except Exception:
                 pass
 
@@ -479,12 +481,16 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
         for ad in visible_ads:
             aid = ad["ad_id"]
             p = perf_map.get(aid, {})
+            spend = p.get("spend_usd")
+            sales = p.get("inbound_sales_usd")
+            impressions = p.get("impressions")
+            clicks = p.get("clicks")
             ad["inbound_sales_usd"] = p.get("inbound_sales_usd")
             ad["spend_usd"] = p.get("spend_usd")
-            ad["roas"] = p.get("roas")
+            ad["roas"] = round(sales / spend, 2) if sales is not None and spend and spend > 0 else None
             ad["inbound_orders"] = p.get("inbound_orders")
             ad["impressions"] = p.get("impressions")
-            ad["ctr_percent"] = p.get("ctr_percent")
+            ad["ctr_percent"] = round(clicks / impressions * 100, 2) if clicks is not None and impressions else None
 
             total_spend += ad["spend_usd"] or 0
             total_sales += ad["inbound_sales_usd"] or 0

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
 from dataclasses import dataclass
 import base64
 import hashlib
 import hmac
 import os
 import re
+import threading
 import time
+import uuid
 
 import jwt
 from dotenv import load_dotenv
@@ -16,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from apps.api import users
+from apps.api.client_ip import get_client_ip
 
 
 router = APIRouter()
@@ -24,6 +28,8 @@ _SCRYPT_N = 2**14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _SCRYPT_DKLEN = 64
+_AUTH_ATTEMPTS: dict[str, deque[float]] = defaultdict(deque)
+_AUTH_ATTEMPTS_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -111,6 +117,25 @@ def verify_password(password: str, encoded_hash: str) -> bool:
     if not isinstance(password, str) or not isinstance(encoded_hash, str):
         return False
     return _verify_scrypt_password(password, encoded_hash)
+
+
+def _enforce_auth_rate_limit(request: Request) -> None:
+    load_dotenv()
+    try:
+        limit = int(os.environ.get("AUTH_RATE_LIMIT_PER_HOUR", "20"))
+    except ValueError as exc:
+        raise RuntimeError("AUTH_RATE_LIMIT_PER_HOUR must be a positive integer") from exc
+    if limit < 1:
+        raise RuntimeError("AUTH_RATE_LIMIT_PER_HOUR must be a positive integer")
+
+    now = time.monotonic()
+    with _AUTH_ATTEMPTS_LOCK:
+        attempts = _AUTH_ATTEMPTS[get_client_ip(request)]
+        while attempts and now - attempts[0] >= 3600:
+            attempts.popleft()
+        if len(attempts) >= limit:
+            raise HTTPException(status_code=429, detail="Too many authentication attempts. Try again later.")
+        attempts.append(now)
 
 
 def create_access_token(user_id: str, role: str) -> str:
@@ -221,6 +246,7 @@ def require_role(*roles: str):
 
 @router.post("/auth/login")
 async def login(request: Request) -> dict[str, str]:
+    _enforce_auth_rate_limit(request)
     try:
         payload = await request.json()
     except Exception:
@@ -231,7 +257,7 @@ async def login(request: Request) -> dict[str, str]:
         or not isinstance(payload.get("password"), str)
     ):
         raise HTTPException(status_code=401, detail="invalid credentials")
-    email = payload["email"].strip()
+    email = payload["email"].strip().lower()
     password = payload["password"]
     record = users.get_user_by_email(email)
     valid = (
@@ -246,3 +272,45 @@ async def login(request: Request) -> dict[str, str]:
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="authentication is not configured") from exc
     return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/auth/register", status_code=status.HTTP_201_CREATED)
+async def register(request: Request) -> dict[str, str]:
+    _enforce_auth_rate_limit(request)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Enter a valid email, display name, and password.") from None
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Enter a valid email, display name, and password.")
+    email_value = payload.get("email")
+    display_name_value = payload.get("display_name")
+    password = payload.get("password")
+    if not isinstance(email_value, str) or not isinstance(display_name_value, str) or not isinstance(password, str):
+        raise HTTPException(status_code=422, detail="Enter a valid email, display name, and password.")
+
+    email = email_value.strip().lower()
+    display_name = display_name_value.strip()
+    if len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if not display_name or len(display_name) > 100:
+        raise HTTPException(status_code=422, detail="Enter a display name up to 100 characters.")
+    if len(password) < 12 or not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+        raise HTTPException(
+            status_code=422,
+            detail="Password must be at least 12 characters and include a letter and a number.",
+        )
+
+    user_id = str(uuid.uuid4())
+    client_id = f"usr_{user_id}"
+    created = users.register_buyer(
+        user_id=user_id,
+        email=email,
+        display_name=display_name,
+        password_hash=hash_password(password),
+        client_id=client_id,
+    )
+    if not created:
+        raise HTTPException(status_code=409, detail="Unable to create an account with these details.")
+    return {"email": email, "display_name": display_name}

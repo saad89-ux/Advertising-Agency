@@ -111,6 +111,21 @@ def test_email_only_launch_resolves_account_client_and_stores_contact(client):
         assert contact == ("alerts@example.com", "")
 
 
+def test_notification_delivery_status_is_scoped_and_redacts_recipient(client):
+    response = client.post("/campaign-flow/launch-batch", json=payload())
+    assert response.status_code == 201
+    batch_id = response.json()["batch_id"]
+    status = client.get(f"/notifications/delivery-status?client_id=real-client&batch_id={batch_id}")
+    assert status.status_code == 200, status.text
+    data = status.json()
+    assert data["total"] >= 1
+    assert data["by_status"]["pending"] >= 1
+    assert data["recent"]
+    assert all("recipient" not in item and "message_body" not in item for item in data["recent"])
+    denied = client.get("/notifications/delivery-status?client_id=other-client")
+    assert denied.status_code == 403
+
+
 def test_real_jwt_authentication_email_only_pipeline(client):
     from apps.api.auth import create_access_token
     app.dependency_overrides.clear()
@@ -131,6 +146,54 @@ def test_real_jwt_authentication_email_only_pipeline(client):
     assert detail.json()["summary"]["notification_contact"]["employee_email"] == campaign["employee_email"]
     assert client.get("/campaign-flow/chat-history", headers=headers).status_code == 200
     assert client.get("/alerts", headers=headers).status_code == 200
+
+
+def test_background_preflight_forwards_request_to_worker_callback(client, monkeypatch):
+    monkeypatch.setattr("apps.api.review_jobs.submit", lambda user_id, payload, review: review())
+    monkeypatch.setattr("apps.api.preflight.review_ad", lambda ad: [])
+    campaign = payload()
+    response = client.post(
+        "/campaign-flow/preflight-review?background=true",
+        json={
+            "client_id": campaign["client_id"],
+            "input_text": campaign["ad_text"],
+            "ad_overrides": {
+                **campaign,
+                "target_platforms": campaign["target_platforms"],
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready_for_review"
+
+
+def test_meta_preflight_reports_required_launch_details(client):
+    campaign = payload()
+    response = client.post(
+        "/campaign-flow/preflight-review",
+        json={
+            "client_id": campaign["client_id"],
+            "input_text": campaign["ad_text"],
+            "ad_overrides": {**campaign, "target_platforms": ["facebook", "instagram"], "meta_launch": True},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "missing_requirements"
+    missing_fields = {item["field"] for item in body["missing_items"]}
+    assert {"meta_page_id", "targeting_country", "daily_budget_minor_units", "special_ad_category", "instagram_user_id", "creative_file", "creative_mime_type"} <= missing_fields
+
+
+def test_live_launch_rejects_missing_meta_setup_details(client, monkeypatch):
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
+    monkeypatch.setenv("META_AD_ACCOUNT_ID", "123456")
+    response = client.post("/campaign-flow/launch-batch", json=payload())
+
+    assert response.status_code == 422
+    assert "Page ID" in response.json()["detail"]
 
 
 def test_account_manager_real_jwt_sheet_to_launch_pipeline(client, monkeypatch, tmp_path):
@@ -242,23 +305,57 @@ def test_real_preflight_reports_missing_and_failed(client):
 @pytest.mark.parametrize("outcomes,expected", [((True, True), "launched"), ((True, False), "partial"), ((False, False), "failed")])
 def test_launch_status_matches_connector_results(client, monkeypatch, outcomes, expected):
     from apps.worker.mcp_client import MCPPlatformDispatcher
-    def call(self, platform, tool_name, arguments):
-        if tool_name.endswith("track_performance"):
-            return SimpleNamespace(success=False, result={}, error="not available", rpc_id="test")
-        success = outcomes[0 if platform == "facebook" else 1]
-        assert arguments["destination_url"].startswith("https://example.com/")
-        assert arguments["ad_text"] == "Explore our collection."
+
+    def dispatch(self, *, platform, ad_id, **arguments):
+        if platform == "instagram":
+            index = 1
+        else:
+            index = 0
+        success = outcomes[index]
         with get_session() as conn:
-            approval = conn.execute("SELECT approved_by,content_hash FROM ad_approvals WHERE ad_id=%s", (arguments["ad_id"],)).fetchone()
+            approval = conn.execute("SELECT approved_by,content_hash FROM ad_approvals WHERE ad_id=%s", (ad_id,)).fetchone()
             assert approval[0] == "brief-user" and approval[1]
-        return SimpleNamespace(success=success, result={"platform_ad_id": "receipt-" + platform} if success else {}, error=None if success else "Platform rejected the submission", rpc_id="test")
+        return SimpleNamespace(
+            success=success,
+            result={"platform_ad_id": "receipt-" + platform, "campaign_id": "campaign-" + platform,
+                    "ad_set_id": "adset-" + platform, "creative_id": "creative-" + platform,
+                    "status": "active_live"} if success else {},
+            error=None if success else "Platform rejected the submission",
+            rpc_id="test",
+        )
+
+    def call(self, platform, tool_name, arguments):
+        if tool_name == "ads_get_ad_entities":
+            assert arguments["level"] == "ad"
+            assert arguments["object_ids"] == ["receipt-" + platform]
+            assert "amount_spent" in arguments["fields"]
+            assert len(arguments["client_conversation_id"]) == 20
+            return SimpleNamespace(success=True, result={"ad_entities": [{
+                "id": "receipt-" + platform,
+                "amount_spent": "12.50",
+                "impressions": "1200",
+                "clicks": "24",
+                "ctr": "2.0",
+                "omni_purchase": [{"value": "3"}],
+                "omni_purchase_values": [{"value": "125.00"}],
+            }]}, error=None, rpc_id="test")
+        return SimpleNamespace(success=False, result={}, error="unexpected MCP tool", rpc_id="test")
+
+    monkeypatch.setattr(MCPPlatformDispatcher, "dispatch_paused_ad", dispatch)
     monkeypatch.setattr(MCPPlatformDispatcher, "call_tool", call)
+    monkeypatch.setenv("META_AD_ACCOUNT_CURRENCY", "USD")
     response = client.post("/campaign-flow/launch-batch", json=payload())
     assert response.status_code == 201, response.text
     data = response.json()
     assert data["status"] == expected
     assert [result["status"] == "sent" for result in data["results"]] == list(outcomes)
     batch_id = data["batch_id"]
+    with get_session() as conn:
+        rows = conn.execute("SELECT platform,inbound_sales_usd,inbound_orders,impressions,clicks,spend_usd FROM ad_performance_tracking WHERE batch_id=%s ORDER BY platform", (batch_id,)).fetchall()
+    assert len(rows) == sum(outcomes)
+    assert all(row[1:] == (125.0, 3, 1200, 24, 12.5) for row in rows)
+    traces = client.get(f"/campaign-flow/mcp-traces?batch_id={batch_id}").json()["traces"]
+    assert traces and all(trace["tool"] == "Meta Ads create/activation chain" for trace in traces)
     if expected == "launched":
         # Recorded successful submissions are reused, so authorizing twice never sends twice.
         def unexpected(*args, **kwargs):
@@ -267,7 +364,8 @@ def test_launch_status_matches_connector_results(client, monkeypatch, outcomes, 
         repeated = client.post("/campaign-flow/launch-batch", json=payload(batch_id=batch_id))
         assert repeated.status_code == 201 and repeated.json()["status"] == "launched", repeated.text
     detail = client.get(f"/batches/{batch_id}").json()
-    assert detail["summary"]["total_spend_usd"] is None
+    expected_spend = 12.5 * sum(outcomes) if any(outcomes) else None
+    assert detail["summary"]["total_spend_usd"] == expected_spend
 
 
 def test_partially_reported_metrics_keep_missing_values_null(client):
@@ -275,7 +373,7 @@ def test_partially_reported_metrics_keep_missing_values_null(client):
     with get_session() as conn:
         ad_id = conn.execute("SELECT ad_id FROM ads WHERE batch_id=%s", (batch,)).fetchone()[0]
         conn.execute("INSERT INTO ad_performance_tracking (ad_id,batch_id,client_id,platform,handle,impressions,clicks) VALUES (%s,%s,'real-client','facebook','recorded-handle',100,5)", (ad_id,batch))
-    response = client.get("/campaign-flow/platform-performance")
+    response = client.get(f"/campaign-flow/platform-performance?batch_id={batch}")
     assert response.status_code == 200, response.text
     summary = response.json()["summary"]
     assert summary["total_sales_usd"] is None and summary["total_spend_usd"] is None
@@ -284,6 +382,27 @@ def test_partially_reported_metrics_keep_missing_values_null(client):
     assert detail["summary"]["total_spend_usd"] is None
     assert detail["ads"][0]["spend_usd"] is None
     assert detail["ads"][0]["impressions"] == 100
+
+
+def test_attribution_initializes_null_totals_and_requires_platform_for_multiple_destinations(client):
+    batch = client.post("/campaign-flow/launch-batch", json=payload()).json()["batch_id"]
+    with get_session() as conn:
+        ad_id = conn.execute("SELECT ad_id FROM ads WHERE batch_id=%s", (batch,)).fetchone()[0]
+        for platform in ("facebook", "instagram"):
+            conn.execute(
+                "INSERT INTO ad_performance_tracking (ad_id,batch_id,client_id,platform,handle) VALUES (%s,%s,'real-client',%s,%s)",
+                (ad_id, batch, platform, "@" + platform),
+            )
+
+    ambiguous = client.post("/attribution/simulate-sale", json={"ad_id": ad_id, "order_amount": 25})
+    assert ambiguous.status_code == 422
+    attributed = client.post("/attribution/simulate-sale", json={"ad_id": ad_id, "platform": "facebook", "order_amount": 25})
+    assert attributed.status_code == 200
+    assert attributed.json()["new_total_sales"] == 25
+    assert attributed.json()["new_orders_count"] == 1
+    with get_session() as conn:
+        rows = conn.execute("SELECT platform,inbound_sales_usd,inbound_orders FROM ad_performance_tracking WHERE ad_id=%s ORDER BY platform", (ad_id,)).fetchall()
+    assert rows == [("facebook", 25, 1), ("instagram", None, None)]
 
 
 def test_real_redis_worker_persists_findings_for_prompt_ad(client, monkeypatch):

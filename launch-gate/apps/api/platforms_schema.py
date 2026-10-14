@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_ad_live_dispatches_client ON ad_live_dispatches (
 
 -- 3. Inbound Sales & Continuous Attribution Tracking
 CREATE TABLE IF NOT EXISTS ad_performance_tracking (
-    ad_id TEXT PRIMARY KEY REFERENCES ads (ad_id) ON DELETE CASCADE,
+    ad_id TEXT NOT NULL REFERENCES ads (ad_id) ON DELETE CASCADE,
     batch_id TEXT NOT NULL REFERENCES batches (batch_id) ON DELETE CASCADE,
     client_id TEXT NOT NULL REFERENCES clients (client_id) ON DELETE CASCADE,
     platform TEXT NOT NULL,
@@ -67,8 +67,24 @@ CREATE TABLE IF NOT EXISTS ad_performance_tracking (
     has_rule_violation BOOLEAN NOT NULL DEFAULT FALSE,
     violation_details TEXT,
     last_event TEXT,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (ad_id, platform)
 );
+DO $$
+DECLARE
+    primary_key_name TEXT;
+    primary_key_definition TEXT;
+BEGIN
+    SELECT conname, pg_get_constraintdef(oid)
+    INTO primary_key_name, primary_key_definition
+    FROM pg_constraint
+    WHERE conrelid = 'ad_performance_tracking'::regclass AND contype = 'p';
+    IF primary_key_definition <> 'PRIMARY KEY (ad_id, platform)' THEN
+        EXECUTE format('ALTER TABLE ad_performance_tracking DROP CONSTRAINT %I', primary_key_name);
+        ALTER TABLE ad_performance_tracking
+            ADD CONSTRAINT ad_performance_tracking_pkey PRIMARY KEY (ad_id, platform);
+    END IF;
+END $$;
 ALTER TABLE ad_performance_tracking ALTER COLUMN inbound_sales_usd DROP NOT NULL;
 ALTER TABLE ad_performance_tracking ALTER COLUMN inbound_sales_usd DROP DEFAULT;
 ALTER TABLE ad_performance_tracking ALTER COLUMN inbound_orders DROP NOT NULL;

@@ -21,6 +21,7 @@ router = APIRouter(prefix="/attribution", tags=["attribution"])
 
 class SimulateSaleRequest(BaseModel):
     ad_id: str
+    platform: str | None = None
     order_amount: float = Field(default=89.50, description="Order value in USD")
     customer_city: str = Field(default="Austin, TX", description="Customer location")
 
@@ -239,18 +240,21 @@ def simulate_inbound_sale(
     with get_session() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT client_id, platform, handle, inbound_sales_usd, inbound_orders FROM ad_performance_tracking WHERE ad_id = %s;",
-                (req.ad_id,),
+                "SELECT client_id, platform, handle, inbound_sales_usd, inbound_orders FROM ad_performance_tracking WHERE ad_id = %s AND (%s::text IS NULL OR platform = %s) ORDER BY platform;",
+                (req.ad_id, req.platform, req.platform),
             )
-            row = cur.fetchone()
-            if not row:
+            rows = cur.fetchall()
+            if not rows:
                 raise HTTPException(status_code=404, detail="Ad tracking record not found")
+            if req.platform is None and len(rows) > 1:
+                raise HTTPException(status_code=422, detail="Choose a platform because this ad has multiple live destinations.")
+            row = rows[0]
             client_id, platform, handle, curr_sales, curr_orders = row
             require_client_access(user, client_id)
 
             order_id = random.randint(10900, 19999)
-            new_sales = float(curr_sales) + req.order_amount
-            new_orders = int(curr_orders) + 1
+            new_sales = float(curr_sales or 0) + req.order_amount
+            new_orders = int(curr_orders or 0) + 1
             event_msg = f"Inbound Order #{order_id} (${req.order_amount:.2f}) from {req.customer_city} attributed to {handle}"
 
             cur.execute(
@@ -260,9 +264,9 @@ def simulate_inbound_sale(
                     inbound_orders = %s,
                     last_event = %s,
                     updated_at = NOW()
-                WHERE ad_id = %s;
+                WHERE ad_id = %s AND platform = %s;
                 """,
-                (new_sales, new_orders, event_msg, req.ad_id),
+                (new_sales, new_orders, event_msg, req.ad_id, platform),
             )
         conn.commit()
 

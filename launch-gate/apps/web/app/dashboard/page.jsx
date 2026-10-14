@@ -1,11 +1,14 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
+import { readError, requestErrorMessage } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 
-export default function DashboardPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function DashboardPage({ apiBaseUrl = API_BASE_URL }) {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [selectedClient, setSelectedClient] = useState("all");
   const [timeframe, setTimeframe] = useState("daily"); // daily, weekly, monthly
 
@@ -14,12 +17,12 @@ export default function DashboardPage({ apiBaseUrl = "http://localhost:8000" }) 
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(`${apiBaseUrl}/campaign-flow/revenue-analytics`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setAnalytics(data);
-      }
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      setAnalytics(data);
     } catch (err) {
       console.error(err);
+      setError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -28,6 +31,9 @@ export default function DashboardPage({ apiBaseUrl = "http://localhost:8000" }) 
   useEffect(() => {
     fetchAnalytics();
   }, [apiBaseUrl]);
+
+  if (loading) return <main role="status" style={{ padding: 40, color: "#cbd5e1" }}>Loading revenue data...</main>;
+  if (error) return <main role="alert" style={{ padding: 40, color: "#fecaca" }}>{error}</main>;
 
   const activeSeries = analytics ? (timeframe === "daily" ? analytics.daily : (timeframe === "weekly" ? analytics.weekly : analytics.monthly)) : [];
   const maxSeriesSales = Math.max(...activeSeries.map((s) => s.sales || 1), 10000);

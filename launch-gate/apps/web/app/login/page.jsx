@@ -1,15 +1,28 @@
 "use client";
-import { readError } from "../../lib/api";
+import { API_BASE_URL } from "../../lib/api";
+import { readError, requestErrorMessage } from "../../lib/api";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function LoginPage({ apiBaseUrl = API_BASE_URL }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const registeredEmail = params.get("email");
+    if (registeredEmail) setEmail(registeredEmail);
+    if (params.get("registered") === "1") {
+      setNotice("Account created. Sign in with your email and password.");
+    }
+    if (localStorage.getItem("launch_gate_token")) router.replace("/");
+  }, [router]);
 
   const handleLogin = async (e) => {
     if (e) e.preventDefault();
@@ -24,6 +37,7 @@ export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
       });
 
       if (!res.ok) {
+        if (res.status === 401) throw new Error("Email or password is incorrect.");
         throw new Error(await readError(res));
       }
 
@@ -35,20 +49,23 @@ export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
           JSON.stringify({ email, role: data.role || "buyer" })
         );
         window.dispatchEvent(new Event("auth-changed"));
-        window.location.href = "/";
+        const requestedPath = new URLSearchParams(window.location.search).get("next");
+        let destination = "/";
+        if (requestedPath) {
+          const candidate = new URL(requestedPath, window.location.origin);
+          if (candidate.origin === window.location.origin) {
+            destination = `${candidate.pathname}${candidate.search}${candidate.hash}`;
+          }
+        }
+        window.location.href = destination;
       } else {
         router.push("/");
       }
     } catch (err) {
-      setError(err.message || "Failed to sign in. Please try again.");
+      setError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillCredentials = (demoEmail, demoPass) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
   };
 
   return (
@@ -107,6 +124,11 @@ export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
         </div>
 
         {/* Error Alert */}
+        {notice && (
+          <div role="status" style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.3)", borderRadius: "10px", padding: "12px 16px", marginBottom: "20px", color: "#6ee7b7", fontSize: "13px" }}>
+            {notice}
+          </div>
+        )}
         {error && (
           <div data-testid="login-error" style={{
             background: "rgba(239, 68, 68, 0.15)",
@@ -136,7 +158,7 @@ export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="buyer@launchgate.com"
+              placeholder="name@company.com"
               required
               style={{
                 width: "100%",
@@ -199,50 +221,10 @@ export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
           </button>
         </form>
 
-        {/* Quick Demo Fill Buttons */}
-        <div style={{ marginTop: "24px", paddingTop: "20px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-          <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "10px", textAlign: "center" }}>
-            Quick Demo Sign-In
-          </div>
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button
-              type="button"
-              data-testid="demo-buyer-btn"
-              onClick={() => fillCredentials("buyer@launchgate.com", "password123")}
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                background: "rgba(255, 255, 255, 0.05)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: "8px",
-                color: "#94a3b8",
-                fontSize: "12px",
-                fontWeight: "600",
-                cursor: "pointer",
-              }}
-            >
-              Demo Buyer
-            </button>
-            <button
-              type="button"
-              data-testid="demo-manager-btn"
-              onClick={() => fillCredentials("manager@launchgate.com", "password123")}
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                background: "rgba(255, 255, 255, 0.05)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: "8px",
-                color: "#94a3b8",
-                fontSize: "12px",
-                fontWeight: "600",
-                cursor: "pointer",
-              }}
-            >
-              Demo Manager
-            </button>
-          </div>
-        </div>
+        <p style={{ margin: "22px 0 0", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
+          New to Launch Gate? <Link href="/signup" style={{ color: "#a5b4fc", fontWeight: 600 }}>Create an account</Link>
+        </p>
+
       </div>
     </div>
   );

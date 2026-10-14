@@ -1,5 +1,5 @@
 "use client";
-import { readError } from "../../lib/api";
+import { API_BASE_URL, readError, requestErrorMessage } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import SocialFeedModal from "../../components/SocialFeedModal";
@@ -8,6 +8,7 @@ import GlassToast from "../../components/GlassToast";
 export default function PlatformsPage() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [testingId, setTestingId] = useState(null);
   const [testResult, setTestResult] = useState(null);
@@ -34,7 +35,7 @@ export default function PlatformsPage() {
   const [agentLogs, setAgentLogs] = useState([]);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
 
-  const apiBaseUrl = "http://localhost:8000";
+  const apiBaseUrl = API_BASE_URL;
 
   const fetchClients = async () => {
     try {
@@ -42,15 +43,15 @@ export default function PlatformsPage() {
       const res = await fetch(`${apiBaseUrl}/campaign-flow/clients`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (res.ok) {
-        const data = await res.json();
-        setClients(data);
-        if (data.length > 0) {
-          setFormData((prev) => ({ ...prev, client_id: prev.client_id || data[0].client_id }));
-        }
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      setClients(data);
+      if (data.length > 0) {
+        setFormData((prev) => ({ ...prev, client_id: prev.client_id || data[0].client_id }));
       }
     } catch (err) {
       console.warn("Failed to load clients:", err);
+      setLoadError(requestErrorMessage(err));
     }
   };
 
@@ -60,12 +61,12 @@ export default function PlatformsPage() {
       const res = await fetch(`${apiBaseUrl}/platforms/accounts`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (res.ok) {
-        const data = await res.json();
-        setAccounts(data);
-      }
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      setAccounts(data);
     } catch (err) {
       console.error("Failed to load accounts:", err);
+      setLoadError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -311,13 +312,15 @@ export default function PlatformsPage() {
         {/* Section 1: Connected Social Media Handles Grid */}
         <div style={{ marginBottom: "40px" }}>
           <h2 style={{ fontSize: "18px", fontWeight: 700, marginBottom: "16px", color: "#cbd5e1" }}>
-            CONNECTED SOCIAL PLATFORMS & HANDLES ({accounts.length})
+            CONNECTED SOCIAL PLATFORMS & HANDLES ({loadError ? "Unavailable" : accounts.length})
           </h2>
 
           {loading ? (
             <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
               Loading platform accounts...
             </div>
+          ) : loadError ? (
+            <div role="alert" style={{ padding: "40px", textAlign: "center", color: "#fecaca" }}>{loadError}</div>
           ) : accounts.length === 0 ? (
             <div style={{ padding: "48px 24px", textAlign: "center", background: "rgba(15, 23, 42, 0.4)", borderRadius: "16px", border: "1px dashed rgba(255, 255, 255, 0.1)" }}>
               <span style={{ fontSize: "32px", display: "block", marginBottom: "12px" }}>🔌</span>

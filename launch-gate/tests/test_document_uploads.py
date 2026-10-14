@@ -346,6 +346,37 @@ class TestCreativeAssetUploadEndpoint:
             assert data["filename"] == "skincare_ad.mp4"
             assert data["size_bytes"] == len(mp4_content)
 
+    @pytest.mark.parametrize(
+        ("filename", "content_type"),
+        [
+            ("screenshot.gif", "image/gif"),
+            ("screenshot.bmp", "image/bmp"),
+            ("screenshot.tiff", "image/tiff"),
+            ("screenshot.avif", "image/avif"),
+            ("screenshot.heic", "image/heic"),
+        ],
+    )
+    def test_upload_common_screenshot_formats(
+        self,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+        filename: str,
+        content_type: str,
+    ):
+        file_store = LocalFileStore(root=tmp_path)
+        client = TestClient(app)
+
+        with patch("apps.api.uploads.get_file_store", return_value=file_store):
+            response = client.post(
+                "/uploads/creative",
+                files={"file": (filename, b"synthetic screenshot bytes", content_type)},
+                data={"client_id": "aurora"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == filename
+
     def test_upload_creative_pdf(self, tmp_path: Path, auth_headers: dict[str, str]):
         file_store = LocalFileStore(root=tmp_path)
         client = TestClient(app)

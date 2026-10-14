@@ -2,8 +2,14 @@
 export function campaignScope() {
   if (typeof window === "undefined") return {};
   const query = new URLSearchParams(window.location.search);
-  const batchId = query.get("batch_id") || localStorage.getItem("launch_gate_active_batch") || "";
-  const clientId = query.get("client_id") || localStorage.getItem("launch_gate_active_client") || "";
+  let batchId = query.get("batch_id") || localStorage.getItem("launch_gate_active_batch") || "";
+  let clientId = query.get("client_id") || localStorage.getItem("launch_gate_active_client") || "";
+  if (batchId.startsWith("mock-") || clientId.startsWith("mock-")) {
+    batchId = "";
+    clientId = "";
+    localStorage.removeItem("launch_gate_active_batch");
+    localStorage.removeItem("launch_gate_active_client");
+  }
   return { batchId, clientId };
 }
 
@@ -24,7 +30,7 @@ export function campaignHref(path, scope = campaignScope()) {
 const SCOPED_READS = new Set([
   "/campaign-flow/all-campaigns", "/campaign-flow/mcp-traces",
   "/campaign-flow/platform-performance", "/campaign-flow/revenue-analytics",
-  "/campaign-flow/violations", "/attribution/summary", "/attribution/ads",
+  "/campaign-flow/violations", "/notifications/delivery-status", "/attribution/summary", "/attribution/ads",
   "/attribution/live-events", "/alerts", "/dead-letter", "/batches",
 ]);
 

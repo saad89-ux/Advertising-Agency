@@ -1,17 +1,22 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
+import { readError, requestErrorMessage } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import SocialFeedModal from "../../components/SocialFeedModal";
 
-export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function CampaignsPage({ apiBaseUrl = API_BASE_URL }) {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [filter, setFilter] = useState("all"); // 'all' | 'healthy' | 'issues'
   const [previewAd, setPreviewAd] = useState(null);
 
   const fetchCampaigns = async () => {
+    setLoading(true);
+    setError("");
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -19,12 +24,13 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
       const query = new URLSearchParams();
       for (const key of ["batch_id", "client_id"]) if (scope.get(key)) query.set(key, scope.get(key));
       const res = await fetch(`${apiBaseUrl}/campaign-flow/all-campaigns?${query}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(data);
-      }
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      setCampaigns(data);
     } catch (err) {
       console.error(err);
+      setCampaigns([]);
+      setError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -84,8 +90,8 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
               fontSize: "12px",
             }}>
               <span style={{ color: "#94a3b8" }}>Total Attributed Revenue: </span>
-              <strong style={{ color: campaigns.some(c => c.tracked && c.inbound_sales_usd != null) ? "#10b981" : "#94a3b8", fontSize: "14px" }}>
-                {campaigns.some(c => c.tracked && c.inbound_sales_usd != null) ? `$${totalRevenue.toLocaleString()}` : "Not tracked"}
+              <strong style={{ color: error ? "#fca5a5" : campaigns.some(c => c.tracked && c.inbound_sales_usd != null) ? "#10b981" : "#94a3b8", fontSize: "14px" }}>
+                {error ? "Unavailable" : campaigns.some(c => c.tracked && c.inbound_sales_usd != null) ? `$${totalRevenue.toLocaleString()}` : "Not tracked"}
               </strong>
             </div>
           </div>
@@ -94,9 +100,9 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
         {/* Filter Controls */}
         <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
           {[
-            { id: "all", label: `All Campaigns (${campaigns.length})` },
-            { id: "healthy", label: `✓ Healthy & Live Serving (${campaigns.length - issueCount})` },
-            { id: "issues", label: `⚠️ With Policy Issues (${issueCount})` },
+            { id: "all", label: `All Campaigns (${error ? "Unavailable" : campaigns.length})` },
+            { id: "healthy", label: `✓ Healthy & Live Serving (${error ? "Unavailable" : campaigns.length - issueCount})` },
+            { id: "issues", label: `⚠️ With Policy Issues (${error ? "Unavailable" : issueCount})` },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -141,7 +147,11 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
               </tr>
             </thead>
             <tbody>
-              {filteredCampaigns.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={9} role="status" style={{ padding: "48px 18px", textAlign: "center", color: "#94a3b8" }}>Loading campaigns...</td></tr>
+              ) : error ? (
+                <tr><td colSpan={9} role="alert" style={{ padding: "48px 18px", textAlign: "center", color: "#fecaca" }}>{error}</td></tr>
+              ) : filteredCampaigns.length === 0 ? (
                 <tr>
                   <td colSpan={9} style={{ padding: "48px 18px", textAlign: "center", color: "#64748b" }}>
                     <div style={{ fontSize: "16px", fontWeight: "600", color: "#cbd5e1", marginBottom: "6px" }}>

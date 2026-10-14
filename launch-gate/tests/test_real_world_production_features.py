@@ -106,22 +106,13 @@ def test_mcp_platform_dispatcher(monkeypatch):
     monkeypatch.delenv("MCP_X_SERVER_URL", raising=False)
     dispatcher = MCPPlatformDispatcher()
     tools = dispatcher.list_tools("instagram")
-    assert len(tools) == 3
+    assert len(tools) == 4
     tool_names = [t.name for t in tools]
-    assert "instagram_dispatch_ad" in tool_names
-    assert "instagram_track_performance" in tool_names
-
-    resp = dispatcher.call_tool(
-        platform="instagram",
-        tool_name="instagram_dispatch_ad",
-        arguments={
-            "ad_id": "ad-mcp-test-99",
-            "headline": "Glow Ritual",
-            "destination_url": "https://glowcare.com",
-        },
-    )
-    assert resp.success is False
-    assert resp.error == "real_platform_calls_disabled"
+    assert "ads_create_campaign" in tool_names
+    assert "ads_create_ad_set" in tool_names
+    assert "ads_create_creative" in tool_names
+    assert "ads_create_ad" in tool_names
+    assert "instagram_dispatch_ad" not in tool_names
 
 
 def test_meta_dispatch_stays_disabled_without_live_write_configuration(monkeypatch):
@@ -131,6 +122,7 @@ def test_meta_dispatch_stays_disabled_without_live_write_configuration(monkeypat
     monkeypatch.setenv("META_MCP_ALLOW_WRITES", "false")
     monkeypatch.setenv("MCP_META_SERVER_URL", "https://mcp.facebook.com/ads")
     monkeypatch.setenv("META_MCP_ACCESS_TOKEN", "test-token")
+    monkeypatch.setenv("META_AD_ACCOUNT_ID", "123456")
     monkeypatch.setattr(
         MetaMCPClient,
         "call_tool_sync",
@@ -139,7 +131,7 @@ def test_meta_dispatch_stays_disabled_without_live_write_configuration(monkeypat
 
     response = MCPPlatformDispatcher().call_tool(
         platform="facebook",
-        tool_name="facebook_dispatch_ad",
+        tool_name="ads_create_campaign",
         arguments={"ad_id": "test-ad"},
     )
 
@@ -147,13 +139,14 @@ def test_meta_dispatch_stays_disabled_without_live_write_configuration(monkeypat
     assert response.error == "real_platform_calls_disabled"
 
 
-def test_meta_mcp_client_refuses_writes_even_when_legacy_flag_is_true():
+def test_meta_mcp_client_refuses_writes_when_live_flag_is_false(monkeypatch):
     from apps.worker.meta_mcp_client import MetaMCPClient
 
     client = MetaMCPClient(
         server_url="https://mcp.facebook.com/ads",
         access_token="test-token",
         allow_writes=True,
+        enable_live=False,
     )
     result = client.call_tool_sync(
         "ads_create_ad", {}, tool_annotations=SimpleNamespace(readOnlyHint=True)
@@ -161,7 +154,26 @@ def test_meta_mcp_client_refuses_writes_even_when_legacy_flag_is_true():
 
     assert result.success is False
     assert result.is_write_refusal is True
-    assert "disabled by Launch Gate v1 policy" in result.error
+    assert "META_MCP_ENABLE_LIVE" in result.error
+
+
+def test_meta_mcp_client_requires_configured_account_before_write(monkeypatch):
+    from apps.worker.meta_mcp_client import MetaMCPClient
+
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
+    monkeypatch.setenv("META_AD_ACCOUNT_ID", "")
+    client = MetaMCPClient(
+        server_url="https://mcp.facebook.com/ads",
+        access_token="test-token",
+        allow_writes=True,
+        enable_live=True,
+    )
+    result = client.call_tool_sync("ads_create_ad", {})
+
+    assert result.success is False
+    assert result.is_write_refusal is False
+    assert "META_AD_ACCOUNT_ID" in result.error
 
 
 def test_dynamic_client_inference():

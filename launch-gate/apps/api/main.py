@@ -52,7 +52,9 @@ Employee operational endpoints require a Bearer token. Anonymous campaign review
 server-issued HttpOnly guest cookie through `/auth/guest-session`; dispatch and employee
 controls continue to require employee authentication.
 
-Create a real user with `python -m scripts.create_user` before signing in.
+Create an account with `POST /auth/register`, then sign in with `POST /auth/login`.
+Registration creates a buyer account and an isolated client workspace. The development
+provisioning command `python -m scripts.create_user` remains available for operators.
 
 To test authenticated endpoints in this Swagger interface:
 1. Call `POST /auth/login` with your account credentials.

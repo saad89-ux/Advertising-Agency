@@ -1,6 +1,7 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
-import { readError } from "../../lib/api";
+import { readError, requestErrorMessage } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -9,7 +10,7 @@ import Link from "next/link";
  * Next.js Page: /review
  * Lists recent batches visible to the reviewer and allows jumping straight into review.
  */
-export default function ReviewIndexPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function ReviewIndexPage({ apiBaseUrl = API_BASE_URL }) {
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -41,7 +42,7 @@ export default function ReviewIndexPage({ apiBaseUrl = "http://localhost:8000" }
       })
       .catch((err) => {
         if (isMounted) {
-          setError(err.message);
+          setError(requestErrorMessage(err));
           setLoading(false);
         }
       });
@@ -107,7 +108,7 @@ export default function ReviewIndexPage({ apiBaseUrl = "http://localhost:8000" }
         {loading && <p className="loading-text">Loading available batches...</p>}
         {error && <p className="error-text">Notice: {error}</p>}
 
-        {!loading && batches.length === 0 && (
+        {!loading && !error && batches.length === 0 && (
           <div className="empty-batches-state">
             <p>No batches found for your assigned clients.</p>
             <p>Upload a launch sheet first or enter a known batch ID above.</p>

@@ -1,12 +1,13 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
-import { readError } from "../../lib/api";
+import { readError, requestErrorMessage } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import GlassToast from "../../components/GlassToast";
 
-export default function AlertsPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function AlertsPage({ apiBaseUrl = API_BASE_URL }) {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -14,28 +15,29 @@ export default function AlertsPage({ apiBaseUrl = "http://localhost:8000" }) {
   const [resolvingId, setResolvingId] = useState(null);
   const [resolveNote, setResolveNote] = useState("");
   const [toast, setToast] = useState(null);
+  const [deliveryStatus, setDeliveryStatus] = useState(null);
 
-  const fetchAlerts = () => {
+  const fetchAlerts = async () => {
     setLoading(true);
     const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
     const headers = { Accept: "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    fetch(`${apiBaseUrl}/alerts`, { headers })
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(await readError(res));
-        }
-        return res.json();
-      })
-      .then((data) => {
-        setAlerts(data.alerts || []);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+    try {
+      const [alertsRes, deliveryRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/alerts`, { headers }),
+        fetch(`${apiBaseUrl}/notifications/delivery-status`, { headers }),
+      ]);
+      if (!alertsRes.ok) throw new Error(await readError(alertsRes));
+      if (!deliveryRes.ok) throw new Error(await readError(deliveryRes));
+      const [alertsData, deliveryData] = await Promise.all([alertsRes.json(), deliveryRes.json()]);
+      setAlerts(alertsData.alerts || []);
+      setDeliveryStatus(deliveryData);
+    } catch (err) {
+      setError(requestErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -118,6 +120,32 @@ export default function AlertsPage({ apiBaseUrl = "http://localhost:8000" }) {
           ↻ Refresh Alerts
         </button>
       </div>
+
+      <section aria-label="Employee email delivery status" style={{ marginBottom: "24px", padding: "18px 20px", borderTop: "1px solid rgba(255,255,255,0.12)", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", flexWrap: "wrap", marginBottom: "12px" }}>
+          <h2 style={{ margin: 0, fontSize: "16px", color: "#f8fafc" }}>Employee email delivery</h2>
+          <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+            {deliveryStatus ? `${deliveryStatus.total} recorded deliveries` : "Delivery status unavailable"}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", color: "#cbd5e1", fontSize: "12px", marginBottom: deliveryStatus?.recent?.length ? "12px" : 0 }}>
+          {[["Queued", "pending"], ["Sending", "processing"], ["Delivered", "delivered"], ["Retrying", "retryable_failed"], ["Failed", "permanently_failed"]].map(([label, key]) => (
+            <span key={key}>{label}: <strong>{deliveryStatus?.by_status?.[key] ?? "-"}</strong></span>
+          ))}
+        </div>
+        {deliveryStatus?.recent?.length > 0 && (
+          <div style={{ display: "grid", gap: "6px" }}>
+            {deliveryStatus.recent.slice(0, 5).map((item) => (
+              <div key={item.delivery_id} style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", fontSize: "12px", color: "#94a3b8" }}>
+                <span>{item.subject} · {item.client_id}{item.batch_id ? ` · ${item.batch_id}` : ""}</span>
+                <span style={{ color: item.status === "delivered" ? "#34d399" : item.status === "permanently_failed" ? "#f87171" : "#fbbf24" }}>
+                  {item.status.replaceAll("_", " ")}{item.error_category ? ` · ${item.error_category}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Filter Tabs */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px", flexWrap: "wrap" }}>

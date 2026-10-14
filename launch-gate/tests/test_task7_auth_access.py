@@ -17,6 +17,9 @@ def configured_auth(monkeypatch):
     monkeypatch.setattr(main, "init_schema", lambda: None)
     monkeypatch.setenv("JWT_SECRET", "test-secret-only-not-for-production")
     monkeypatch.setenv("JWT_EXPIRE_MINUTES", "60")
+    monkeypatch.setenv("AUTH_RATE_LIMIT_PER_HOUR", "20")
+    with auth._AUTH_ATTEMPTS_LOCK:
+        auth._AUTH_ATTEMPTS.clear()
 
 
 def test_login_returns_signed_token_but_never_password(monkeypatch, caplog):
@@ -77,6 +80,88 @@ def test_login_errors_are_generic(monkeypatch, case):
     assert response.status_code == 401
     assert response.json() == {"detail": "invalid credentials"}
     assert submitted_password not in response.text
+
+
+def test_register_then_login_uses_same_credentials_and_creates_buyer_workspace(monkeypatch):
+    password = "long-test-password-123"
+    saved = {}
+
+    def register_buyer(**values):
+        saved.update(values)
+        return True
+
+    def get_user_by_email(email):
+        return {
+            "user_id": saved["user_id"],
+            "email": email,
+            "display_name": saved["display_name"],
+            "password_hash": saved["password_hash"],
+            "role": "buyer",
+            "is_active": True,
+        }
+
+    monkeypatch.setattr(auth.users, "register_buyer", register_buyer)
+    monkeypatch.setattr(auth.users, "get_user_by_email", get_user_by_email)
+
+    with TestClient(app) as client:
+        registration = client.post(
+            "/auth/register",
+            json={
+                "email": "New.User@Example.test",
+                "display_name": "New User",
+                "password": password,
+                "role": "account_manager",
+            },
+        )
+        login = client.post(
+            "/auth/login",
+            json={"email": "new.user@example.test", "password": password},
+        )
+
+    assert registration.status_code == 201
+    assert registration.json() == {"email": "new.user@example.test", "display_name": "New User"}
+    assert login.status_code == 200
+    claims = jwt.decode(
+        login.json()["access_token"],
+        "test-secret-only-not-for-production",
+        algorithms=["HS256"],
+    )
+    assert claims["sub"] == saved["user_id"]
+    assert saved["client_id"] == f"usr_{saved['user_id']}"
+    assert saved["password_hash"] != password
+    assert "role" not in saved
+
+
+def test_register_rejects_invalid_email_weak_password_and_duplicate(monkeypatch):
+    monkeypatch.setattr(auth.users, "register_buyer", lambda **values: False)
+    with TestClient(app) as client:
+        invalid_email = client.post(
+            "/auth/register",
+            json={"email": "invalid", "display_name": "Buyer", "password": "long-password-123"},
+        )
+        weak_password = client.post(
+            "/auth/register",
+            json={"email": "buyer@example.test", "display_name": "Buyer", "password": "weak"},
+        )
+        duplicate = client.post(
+            "/auth/register",
+            json={"email": "buyer@example.test", "display_name": "Buyer", "password": "long-password-123"},
+        )
+
+    assert invalid_email.status_code == 422
+    assert weak_password.status_code == 422
+    assert duplicate.status_code == 409
+    assert duplicate.json() == {"detail": "Unable to create an account with these details."}
+
+
+def test_auth_routes_rate_limit_attempts_by_client_ip(monkeypatch):
+    monkeypatch.setenv("AUTH_RATE_LIMIT_PER_HOUR", "1")
+    with TestClient(app) as client:
+        first = client.post("/auth/register", json={})
+        second = client.post("/auth/login", json={})
+
+    assert first.status_code == 422
+    assert second.status_code == 429
 
 
 @pytest.mark.parametrize("token_kind", ["missing", "expired", "tampered"])

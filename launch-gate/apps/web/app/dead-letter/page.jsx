@@ -1,12 +1,13 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
-import { readError } from "../../lib/api";
+import { readError, requestErrorMessage } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import GlassToast from "../../components/GlassToast";
 
-export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function DeadLetterPage({ apiBaseUrl = API_BASE_URL }) {
   const [ads, setAds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -31,7 +32,7 @@ export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" })
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.message);
+        setError(requestErrorMessage(err));
         setLoading(false);
       });
   };
@@ -61,8 +62,8 @@ export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" })
       } else {
         setToast({ message: await readError(res), type: "error" });
       }
-    } catch {
-      setToast({ message: "Network error contacting API to return ad to review.", type: "error" });
+    } catch (err) {
+      setToast({ message: requestErrorMessage(err), type: "error" });
     }
   };
 
@@ -86,8 +87,8 @@ export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" })
       } else {
         setToast({ message: await readError(res), type: "error" });
       }
-    } catch {
-      setToast({ message: "Network error contacting API to retry dispatch.", type: "error" });
+    } catch (err) {
+      setToast({ message: requestErrorMessage(err), type: "error" });
     }
   };
 

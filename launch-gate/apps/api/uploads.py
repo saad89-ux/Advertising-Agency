@@ -432,12 +432,21 @@ class UploadBodyLimitMiddleware:
         await send({"type": "http.response.body", "body": message})
 
 
-SUPPORTED_CREATIVE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".pdf"}
+SUPPORTED_CREATIVE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff",
+    ".avif", ".heic", ".heif", ".mp4", ".pdf",
+}
 SUPPORTED_CREATIVE_MIMES = {
     "image/png",
     "image/jpeg",
     "image/jpg",
     "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
+    "image/avif",
+    "image/heic",
+    "image/heif",
     "video/mp4",
     "application/pdf",
 }
@@ -460,7 +469,7 @@ async def upload_creative(
             status_code=415,
             detail={
                 "reason_code": "unsupported_file_type",
-                "message": "Unsupported creative file type. Supported formats are: PNG, JPG, WEBP, MP4, PDF.",
+                "message": "Unsupported creative file type. Supported formats include common raster images, MP4, and PDF.",
             },
         )
 

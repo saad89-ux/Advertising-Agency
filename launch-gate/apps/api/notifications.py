@@ -1293,9 +1293,72 @@ class NotificationDispatcher:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from apps.api.auth import CurrentUser, require_role
+from apps.api.auth import CurrentUser, get_current_user, require_role
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+@router.get("/delivery-status")
+def get_notification_delivery_status(
+    client_id: str | None = None,
+    batch_id: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return delivery outcomes for the user's clients without exposing recipients or message bodies."""
+    from apps.api.access import require_client_access
+    from apps.api.database import get_session
+
+    if client_id:
+        require_client_access(user, client_id)
+    clients = [client_id] if client_id else list(user.assigned_client_ids)
+    with get_session() as conn:
+        create_notification_tables(conn)
+        counts = conn.execute(
+            """
+            SELECT status, COUNT(*)
+            FROM notification_deliveries
+            WHERE client_id = ANY(%s) AND (%s::text IS NULL OR batch_id = %s)
+            GROUP BY status;
+            """,
+            (clients, batch_id, batch_id),
+        ).fetchall()
+        recent = conn.execute(
+            """
+            SELECT delivery_id, client_id, batch_id, event_type, subject, status,
+                   error_category, provider, attempt_count, max_attempts, created_at, delivered_at
+            FROM notification_deliveries
+            WHERE client_id = ANY(%s) AND (%s::text IS NULL OR batch_id = %s)
+            ORDER BY created_at DESC
+            LIMIT %s;
+            """,
+            (clients, batch_id, batch_id, limit),
+        ).fetchall()
+
+    by_status = {str(status): int(count) for status, count in counts}
+    for status_name in ("pending", "processing", "delivered", "retryable_failed", "permanently_failed"):
+        by_status.setdefault(status_name, 0)
+    return {
+        "total": sum(by_status.values()),
+        "by_status": by_status,
+        "recent": [
+            {
+                "delivery_id": str(row[0]),
+                "client_id": str(row[1]),
+                "batch_id": str(row[2]) if row[2] else None,
+                "event_type": str(row[3]),
+                "subject": str(row[4]),
+                "status": str(row[5]),
+                "error_category": str(row[6]) if row[6] else None,
+                "provider": str(row[7]) if row[7] else None,
+                "attempt_count": int(row[8]),
+                "max_attempts": int(row[9]),
+                "created_at": row[10].isoformat() if hasattr(row[10], "isoformat") else str(row[10]),
+                "delivered_at": row[11].isoformat() if hasattr(row[11], "isoformat") else str(row[11]) if row[11] else None,
+            }
+            for row in recent
+        ],
+    }
 
 
 class RetentionMaintenanceRequest(BaseModel):

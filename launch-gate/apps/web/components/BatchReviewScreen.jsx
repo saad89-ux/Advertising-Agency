@@ -1,4 +1,5 @@
 "use client";
+import { API_BASE_URL } from "../lib/api";
 
 import React, { useState, useEffect, useMemo } from "react";
 import BatchSummary from "./BatchSummary";
@@ -13,7 +14,7 @@ import RejectedRowsList from "./RejectedRowsList";
 export default function BatchReviewScreen({
   batchId,
   initialBatch = null,
-  apiBaseUrl = "http://localhost:8000",
+  apiBaseUrl = API_BASE_URL,
   authToken = null,
   onApproveAd,
   onEditAd,

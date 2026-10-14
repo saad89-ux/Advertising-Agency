@@ -1,16 +1,17 @@
 "use client";
+import { API_BASE_URL } from "../../../lib/api";
 
 import React, { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import SocialFeedModal from "../../../components/SocialFeedModal";
 import GlassToast from "../../../components/GlassToast";
-import { readError, notificationLabel } from "../../../lib/api";
+import { readError, notificationLabel, requestErrorMessage } from "../../../lib/api";
 
 /**
  * Next.js Dynamic Route Page: /batches/[batchId]
  * High-performance, photorealistic dark glassmorphic Batch Review & Live Telemetry Console.
  */
-function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
+function BatchReviewScreen({ params, apiBaseUrl = API_BASE_URL }) {
   const resolvedParams = params && typeof params.then === "function" ? use(params) : params;
   const batchId = resolvedParams?.batchId;
 
@@ -42,7 +43,7 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
 
       const res = await fetch(`${apiBaseUrl}/batches/${batchId}`, { headers, credentials: "include" });
       if (!res.ok) {
-        if (res.status === 401) throw new Error("Your guest session expired. The saved campaign is available only with its original session cookie.");
+        if (res.status === 401) throw new Error(await readError(res));
         throw new Error(await readError(res));
       }
 
@@ -51,7 +52,7 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
       setNotificationEmail(data.summary?.notification_contact?.employee_email || "");
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to load batch details.");
+      setError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }

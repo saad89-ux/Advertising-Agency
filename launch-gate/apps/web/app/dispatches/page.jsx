@@ -1,13 +1,15 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
-import { readError } from "../../lib/api";
+import { campaignScope } from "../../lib/campaign-scope";
+import { readError, requestErrorMessage } from "../../lib/api";
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import SocialFeedModal from "../../components/SocialFeedModal";
 
-function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
+function DispatchesContent({ apiBaseUrl = API_BASE_URL }) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -15,8 +17,11 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
   const [allAds, setAllAds] = useState([]);
   const [groupedClients, setGroupedClients] = useState([]);
   const [availableClients, setAvailableClients] = useState([]);
-  const [selectedClientId, setSelectedClientId] = useState(searchParams?.get("client_id") || "");
-  const [selectedBatchId, setSelectedBatchId] = useState(searchParams?.get("batch_id") || "");
+  const activeScope = campaignScope();
+  const initialClientId = searchParams?.get("client_id") || activeScope.clientId || "";
+  const initialBatchId = searchParams?.get("batch_id") || activeScope.batchId || "";
+  const [selectedClientId, setSelectedClientId] = useState(initialClientId.startsWith("mock-") ? "" : initialClientId);
+  const [selectedBatchId, setSelectedBatchId] = useState(initialBatchId.startsWith("mock-") ? "" : initialBatchId);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [previewAd, setPreviewAd] = useState(null);
@@ -26,10 +31,10 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
     const qClient = searchParams?.get("client_id");
     const qBatch = searchParams?.get("batch_id");
     if (qClient !== null && qClient !== undefined) {
-      setSelectedClientId(qClient);
+      setSelectedClientId(qClient.startsWith("mock-") ? "" : qClient);
     }
     if (qBatch !== null && qBatch !== undefined) {
-      setSelectedBatchId(qBatch);
+      setSelectedBatchId(qBatch.startsWith("mock-") ? "" : qBatch);
     }
   }, [searchParams]);
 
@@ -105,7 +110,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
         setGroupedClients(Object.values(map));
       }
     } catch (err) {
-      setLoadError(err.message || "Unable to load this campaign.");
+      setLoadError(requestErrorMessage(err));
       setAllAds([]);
       setGroupedClients([]);
       console.error("Dispatches fetch error:", err);
@@ -216,7 +221,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
                 background: activeListenersCount > 0 ? "#10b981" : "#64748b",
                 boxShadow: activeListenersCount > 0 ? "0 0 10px #10b981" : "none"
               }}></span>
-              {activeListenersCount > 0 ? "Meta MCP Connected" : "Local Development Mode"}
+              {loadError ? "Dispatch status unavailable" : activeListenersCount > 0 ? "Meta MCP Connected" : "No active MCP listeners"}
             </div>
           </div>
         </div>
@@ -253,7 +258,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
               whiteSpace: "nowrap",
             }}
           >
-            🌟 All Campaigns ({allAds.length})
+            🌟 All Campaigns ({loadError ? "Unavailable" : allAds.length})
           </button>
 
           {availableClients.map((client) => {
@@ -370,13 +375,13 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
               </span>
             </div>
             <span style={{ fontSize: "13px", fontWeight: "600", color: activeTraces.length > 0 ? "#10b981" : "#94a3b8" }}>
-              {activeTraces.length > 0 ? `Active (${activeTraces.length} recorded events)` : "Ready / Stand-in Execution"}
+              {loadError ? "Audit data unavailable" : activeTraces.length > 0 ? `${activeTraces.length} recorded events` : "No recorded events"}
             </span>
           </div>
           <p style={{ fontSize: "13px", color: "#64748b", margin: 0 }}>
             {activeTraces.length > 0
               ? "Platform dispatch events recorded in audit log. Meta API execution details are tracked below."
-              : "Platform dispatch listeners are active. Dispatched ads automatically register MCP server events."}
+              : "No platform dispatch activity is recorded for this view."}
           </p>
         </div>
 
@@ -399,7 +404,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
               </span>
             </div>
             <span style={{ fontSize: "11px", color: "#64748b" }}>
-              {activeTraces.length > 0 ? "Live Audit Stream" : "Ready for Events"}
+              {loadError ? "Audit data unavailable" : activeTraces.length > 0 ? "Recorded Audit Events" : "No Recorded Events"}
             </span>
           </div>
 
@@ -428,7 +433,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
             </div>
           ) : (
             <div style={{ padding: "24px 12px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
-              No platform dispatch errors recorded. All ads running smoothly through Meta dispatch connectors.
+              {loadError ? "Dispatch error data is unavailable because the server request failed." : "No dispatch error data is currently recorded."}
             </div>
           )}
         </div>
@@ -440,13 +445,17 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
               Live Platform Deployments {selectedClientId ? `(${displayedClients.length > 0 ? displayedClients[0].client_name : selectedClientId})` : "Across Clients"}
             </h2>
             <span style={{ fontSize: "13px", color: "#64748b" }}>
-              {displayedClients.reduce((acc, c) => acc + (c.campaigns || []).length, 0)} Total Ads Active
+              {loadError ? "Unavailable" : displayedClients.reduce((acc, c) => acc + (c.campaigns || []).length, 0)} Total Ads Active
             </span>
           </div>
 
           {loading ? (
             <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
               Loading live campaign deployments...
+            </div>
+          ) : loadError ? (
+            <div role="alert" style={{ padding: "40px", textAlign: "center", color: "#fecaca" }}>
+              Dispatch data is unavailable: {loadError}
             </div>
           ) : displayedClients.length === 0 || !displayedClients.some((c) => (c.campaigns || []).length > 0) ? (
             <div style={{

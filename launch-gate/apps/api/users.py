@@ -57,6 +57,41 @@ def create_user(
         )
 
 
+def register_buyer(
+    *,
+    user_id: str,
+    email: str,
+    display_name: str,
+    password_hash: str,
+    client_id: str,
+) -> bool:
+    """Create a buyer and its isolated client workspace atomically."""
+    if not all(
+        isinstance(value, str) and value.strip()
+        for value in (user_id, email, display_name, password_hash, client_id)
+    ):
+        raise ValueError("user, workspace, and password hash values are required")
+    with get_session() as connection:
+        inserted = connection.execute(
+            """INSERT INTO users (user_id, email, display_name, password_hash, role, is_active)
+               VALUES (%s, %s, %s, %s, 'buyer', TRUE)
+               ON CONFLICT (email) DO NOTHING
+               RETURNING user_id""",
+            (user_id, email, display_name, password_hash),
+        ).fetchone()
+        if inserted is None:
+            return False
+        connection.execute(
+            "INSERT INTO clients (client_id, name) VALUES (%s, %s)",
+            (client_id, display_name),
+        )
+        connection.execute(
+            "INSERT INTO user_client_assignments (user_id, client_id) VALUES (%s, %s)",
+            (user_id, client_id),
+        )
+    return True
+
+
 def get_user_by_email(email: str) -> dict[str, object] | None:
     with get_session() as connection:
         row = connection.execute(

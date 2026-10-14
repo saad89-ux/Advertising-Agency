@@ -1,14 +1,17 @@
 "use client";
+import { API_BASE_URL } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import GlassToast from "../../components/GlassToast";
 import { readError, notificationLabel } from "../../lib/api";
+import { requestErrorMessage } from "../../lib/api";
 
-export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function RemediationPage({ apiBaseUrl = API_BASE_URL }) {
   const [violations, setViolations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [remediatingId, setRemediatingId] = useState(null);
   const [successNotif, setSuccessNotif] = useState(null);
   const [toast, setToast] = useState(null);
@@ -18,6 +21,8 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
   const [launcherEmail, setLauncherEmail] = useState("");
 
   const fetchIssues = async () => {
+    setLoading(true);
+    setLoadError("");
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -39,7 +44,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
       }
     } catch (err) {
       console.error(err);
-      setToast({message: err.message, type: "error"});
+      setLoadError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -187,7 +192,11 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
         )}
 
         {/* Issues List */}
-        {violations.length === 0 ? (
+        {loading ? (
+          <div role="status" style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>Loading remediation issues...</div>
+        ) : loadError ? (
+          <div role="alert" style={{ padding: "20px", color: "#fecaca" }}>{loadError}</div>
+        ) : violations.length === 0 ? (
           <div style={{
             background: "rgba(15, 23, 42, 0.6)",
             border: "1px solid rgba(255, 255, 255, 0.08)",

@@ -4,22 +4,34 @@ import React, { useState, useEffect } from "react";
 import { campaignHref, campaignScope, selectCampaign } from "../lib/campaign-scope";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { API_BASE_URL } from "../lib/api";
 
-export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
+export default function Navbar({ apiBaseUrl = API_BASE_URL }) {
   const pathname = usePathname();
   const [scope, setScope] = useState({});
   useEffect(() => {
     const sync = () => setScope(campaignScope());
     const query = new URLSearchParams(window.location.search);
-    if (query.get("batch_id")) selectCampaign(query.get("batch_id"), query.get("client_id") || "");
+    const queryBatch = query.get("batch_id") || "";
+    const queryClient = query.get("client_id") || "";
+    if (queryBatch.startsWith("mock-") || queryClient.startsWith("mock-")) {
+      selectCampaign("", "");
+      query.delete("batch_id");
+      query.delete("client_id");
+      const search = query.toString();
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
+    } else if (queryBatch) {
+      selectCampaign(queryBatch, queryClient);
+    }
     sync();
     window.addEventListener("campaign-changed", sync);
     return () => window.removeEventListener("campaign-changed", sync);
   }, [pathname]);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-  const [backendOnline, setBackendOnline] = useState(true);
+  const [backendOnline, setBackendOnline] = useState(null);
   const [diagInfo, setDiagInfo] = useState(null);
+  const [apiUnreachable, setApiUnreachable] = useState(false);
 
   const checkAuth = () => {
     if (typeof window !== "undefined") {
@@ -56,14 +68,36 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
 
   useEffect(() => {
     checkAuth();
+    const handleAuthExpired = (event) => {
+      localStorage.removeItem("launch_gate_token");
+      localStorage.removeItem("launch_gate_user");
+      setToken(null);
+      setUser(null);
+      if (window.location.pathname !== "/login") {
+        const returnTo = event.detail?.returnTo || "/";
+        window.location.replace(`/login?next=${encodeURIComponent(returnTo)}`);
+      }
+    };
     if (typeof window !== "undefined") {
       window.addEventListener("auth-changed", checkAuth);
       window.addEventListener("storage", checkAuth);
+      window.addEventListener("launch-gate-auth-expired", handleAuthExpired);
     }
-    // Health & diagnostics polling
-    fetch(`${apiBaseUrl}/health`)
-      .then((res) => setBackendOnline(res.ok))
-      .catch(() => setBackendOnline(false));
+    const checkBackend = () => {
+      fetch(`${apiBaseUrl}/health`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Health check failed");
+          return res.json();
+        })
+        .then((health) => {
+          const online = health?.status === "ok" && health?.app === "Launch Gate API";
+          setBackendOnline(online);
+          setApiUnreachable(!online);
+        })
+        .catch(() => { setBackendOnline(false); setApiUnreachable(true); });
+    };
+    checkBackend();
+    const healthInterval = window.setInterval(checkBackend, 10000);
 
     fetch(`${apiBaseUrl}/diagnostics/ai-tracing`)
       .then((res) => res.ok ? res.json() : null)
@@ -74,6 +108,8 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
       if (typeof window !== "undefined") {
         window.removeEventListener("auth-changed", checkAuth);
         window.removeEventListener("storage", checkAuth);
+        window.removeEventListener("launch-gate-auth-expired", handleAuthExpired);
+        window.clearInterval(healthInterval);
       }
     };
   }, [apiBaseUrl]);
@@ -91,7 +127,11 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
     { label: "Revenue Dashboard", href: "/dashboard" },
   ];
 
+  if (["/login", "/signup", "/auth/login"].includes(pathname)) return null;
+
   return (
+    <>
+    {apiUnreachable && <div role="alert" style={{ padding: "10px 20px", textAlign: "center", color: "#fff", background: "#991b1b" }}>Cannot reach the server. Check that the Launch Gate API is running.</div>}
     <header style={{
       background: "rgba(8, 12, 20, 0.75)",
       backdropFilter: "blur(20px) saturate(180%)",
@@ -195,11 +235,11 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
               width: "7px",
               height: "7px",
               borderRadius: "50%",
-              background: backendOnline ? "#10b981" : "#f59e0b",
-              boxShadow: "0 0 8px rgba(16, 185, 129, 0.6)",
+              background: backendOnline === null ? "#64748b" : backendOnline ? "#10b981" : "#f59e0b",
+              boxShadow: backendOnline ? "0 0 8px rgba(16, 185, 129, 0.6)" : "none",
             }} />
             <span style={{ fontSize: "12px", fontWeight: "600", color: "#e2e8f0", letterSpacing: "0.02em" }}>
-              {backendOnline ? "API online" : "API offline"}
+              {backendOnline === null ? "Checking API..." : backendOnline ? "API online" : "API offline"}
             </span>
           </div>
 
@@ -223,5 +263,6 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
         </div>
       </div>
     </header>
+    </>
   );
 }

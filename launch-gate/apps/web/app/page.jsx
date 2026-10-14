@@ -6,21 +6,28 @@ import { useRouter } from "next/navigation";
 import { selectCampaign } from "../lib/campaign-scope";
 import GlassToast from "../components/GlassToast";
 import { readError, notificationLabel } from "../lib/api";
+import { API_BASE_URL, requestErrorMessage } from "../lib/api";
 
 const AVAILABLE_PLATFORMS = [
   { id: "facebook", label: "Facebook", icon: "📘" },
   { id: "instagram", label: "Instagram", icon: "📸" },
 ];
+const TEXT_FILE_EXTENSIONS = new Set([".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".xml", ".html", ".htm", ".log"]);
+const CREATIVE_FILE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif", ".heic", ".heif", ".mp4", ".pdf"]);
+const CREATIVE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif", "image/heic", "image/heif", "video/mp4", "application/pdf"]);
 
-export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
   const router = useRouter();
 
   // Glass Toast notification state
   const [toast, setToast] = useState(null);
   const [hasEmployeeSession, setHasEmployeeSession] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   // Chat / Batch history state for sidebar
   const [chatHistory, setChatHistory] = useState([]);
+  const [chatHistoryLoading, setChatHistoryLoading] = useState(true);
+  const [chatHistoryError, setChatHistoryError] = useState("");
   const [activeBatchId, setActiveBatchId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -28,16 +35,24 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   const [inputTab, setInputTab] = useState("prompt"); // 'prompt' | 'file' | 'media'
   const [promptText, setPromptText] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedTextFile, setSelectedTextFile] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [fileError, setFileError] = useState("");
 
   // Preflight & LLM Review state
   const [reviewResult, setReviewResult] = useState(null);
+  const [launchDraft, setLaunchDraft] = useState(null);
   const [missingForm, setMissingForm] = useState({});
 
   // HITL Launch Modal & Notification Contact Settings
   const [showLaunchModal, setShowLaunchModal] = useState(false);
   const [employeeEmail, setEmployeeEmail] = useState("");
   const [selectedPlatforms, setSelectedPlatforms] = useState(["facebook", "instagram"]);
+  const [metaPageId, setMetaPageId] = useState("");
+  const [instagramUserId, setInstagramUserId] = useState("");
+  const [targetingCountry, setTargetingCountry] = useState("");
+  const [dailyBudgetMinorUnits, setDailyBudgetMinorUnits] = useState("");
+  const [specialAdCategory, setSpecialAdCategory] = useState("");
   const [isLaunching, setIsLaunching] = useState(false);
   const [launchStage, setLaunchStage] = useState("");
   const [uploadedSheet, setUploadedSheet] = useState(null);
@@ -51,30 +66,112 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
     if (typeof window !== "undefined") localStorage.setItem("launcher_email", val);
   };
 
+  const handleFileSelection = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const extension = `.${file.name.split(".").pop()?.toLowerCase() || ""}`;
+    setFileError("");
+
+    if ([".csv", ".xlsx"].includes(extension)) {
+      setSelectedFile(file);
+      setSelectedTextFile(null);
+      setUploadedSheet(null);
+      setReviewResult(null);
+      setLaunchDraft(null);
+      return;
+    }
+
+    if (CREATIVE_FILE_EXTENSIONS.has(extension) || CREATIVE_MIME_TYPES.has(file.type)) {
+      setSelectedFile(null);
+      setSelectedTextFile(null);
+      setUploadedSheet(null);
+      setSelectedImage(file);
+      setCreativeRef(null);
+      setReviewResult(null);
+      setInputTab("media");
+      return;
+    }
+
+    if (TEXT_FILE_EXTENSIONS.has(extension) || file.type.startsWith("text/") || file.type === "application/json") {
+      if (file.size > 2 * 1024 * 1024) {
+        setFileError("Text files must be 2 MiB or smaller.");
+        setSelectedTextFile(null);
+        return;
+      }
+      try {
+        const text = await file.text();
+        if (!text.trim()) throw new Error("The selected text file is empty.");
+        setSelectedFile(null);
+        setUploadedSheet(null);
+        setSelectedTextFile(file);
+        setPromptText(text);
+        setReviewResult(null);
+        setLaunchDraft(null);
+        return;
+      } catch (error) {
+        setFileError(error.message || "Unable to read this text file.");
+        setSelectedTextFile(null);
+        return;
+      }
+    }
+
+    setFileError("Choose a CSV/XLSX sheet, a readable text file, or an image/screenshot in the creative tab.");
+    setSelectedFile(null);
+    setSelectedTextFile(null);
+  };
+
+  const handleCreativeSelection = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const extension = `.${file.name.split(".").pop()?.toLowerCase() || ""}`;
+    if (!CREATIVE_FILE_EXTENSIONS.has(extension) && !CREATIVE_MIME_TYPES.has(file.type)) {
+      setFileError("Supported creative files are common image formats, MP4 video, and PDF.");
+      setSelectedImage(null);
+      return;
+    }
+    setFileError("");
+    setSelectedImage(file);
+    setCreativeRef(null);
+    setReviewResult(null);
+    setLaunchDraft(null);
+    setLaunchDraft(null);
+  };
+
   // Fetch batch chat history
   const fetchChatHistory = async () => {
+    setChatHistoryLoading(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      if (!token) {
-        const session = await fetch(`${apiBaseUrl}/auth/guest-session`, { method: "POST", credentials: "include" });
-        if (!session.ok) throw new Error("Unable to start a guest session. Refresh and try again.");
-      }
       const res = await fetch(`${apiBaseUrl}/campaign-flow/chat-history`, { headers, credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setChatHistory(data);
-      } else if (res.status === 401) setToast({ message: "Your guest session expired. Refresh this page to start a new session.", type: "error" });
+        setChatHistoryError("");
+      } else if (res.status === 401) {
+        const message = await readError(res);
+        setChatHistoryError(message);
+        setToast({ message, type: "error" });
+      }
+      else throw new Error(await readError(res));
     } catch (err) {
       console.warn("Failed to fetch chat history:", err);
-      setToast({ message: "Your guest session expired or could not be validated. Your saved campaigns need the original session cookie; refresh only if you want to start a new session.", type: "error" });
+      const message = requestErrorMessage(err);
+      setChatHistory([]);
+      setChatHistoryError(message);
+      setToast({ message, type: "error" });
+    } finally {
+      setChatHistoryLoading(false);
     }
   };
 
   // Fetch launcher contact from DB or localStorage on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setHasEmployeeSession(Boolean(localStorage.getItem("launch_gate_token")));
+      const hasToken = Boolean(localStorage.getItem("launch_gate_token"));
+      setHasEmployeeSession(hasToken);
+      if (hasToken) setAuthChecked(true);
+      else router.replace("/signup");
       const savedEmail = localStorage.getItem("launcher_email");
 
       if (savedEmail) {
@@ -85,15 +182,15 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   }, []);
 
   useEffect(() => {
-    fetchChatHistory();
-  }, [apiBaseUrl]);
+    if (authChecked) fetchChatHistory();
+  }, [apiBaseUrl, authChecked]);
 
   // Open the shared form first; requirements are checked after contact entry.
   const handleReviewAndCheck = (e) => {
     if (e) e.preventDefault();
     // Guard: require at least one input before opening the modal
     const hasPrompt = typeof promptText === "string" && promptText.trim().length > 0;
-    const hasFile = Boolean(selectedFile && selectedFile.size > 0);
+    const hasFile = Boolean((selectedFile && selectedFile.size > 0) || (selectedTextFile && selectedTextFile.size > 0));
     const hasImage = Boolean(selectedImage && selectedImage.size > 0);
     if (!hasPrompt && !hasFile && !hasImage) {
       setToast({ message: "Please add a prompt, file, or image before launching.", type: "error" });
@@ -101,11 +198,13 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
     }
     setFormError("");
     setNeedsSignIn(false);
+    setReviewResult(null);
+    setLaunchDraft(null);
     setShowLaunchModal(true);
   };
 
   // Launch Campaign & Capture Employee Contact
-  const submitCampaign = async () => {
+  const prepareCampaign = async () => {
     if (hasEmployeeSession && (!employeeEmail || !employeeEmail.includes("@"))) {
       setToast({ message: "Please enter a valid launcher email address.", type: "error" });
       return;
@@ -113,179 +212,225 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
 
     setFormError("");
     setNeedsSignIn(false);
-    if (isLaunching) return;
-    setIsLaunching(true);
-    setLaunchStage("Preparing campaign...");
-    try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
-      const headers = {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
+                if (isLaunching) return;
+                setLaunchDraft(null);
+                setReviewResult(null);
+                setIsLaunching(true);
+                setLaunchStage("Preparing campaign preview...");
+                try {
+                  const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
+                  const headers = {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                  };
 
-      let clientId = "";
-      if (!selectedPlatforms.length) throw new Error("Select at least one platform.");
-      const metaPlatforms = selectedPlatforms.length > 0 ? selectedPlatforms : ["facebook", "instagram"];
-      let currentBatchId = activeBatchId || `batch_${Date.now()}`;
-      let uploadedCreativeRef = creativeRef;
+                  let clientId = "";
+                  if (!selectedPlatforms.length) throw new Error("Select at least one platform.");
+                  const metaPlatforms = selectedPlatforms;
+                  let currentBatchId = activeBatchId || `batch_${Date.now()}`;
+                  let uploadedCreativeRef = creativeRef;
 
-      // 1. If user uploaded a campaign sheet (Method 2: CSV/XLSX), persist it to batch table
-      if (inputTab === "file" && !selectedFile) throw new Error("Attach a campaign sheet for this new campaign.");
-      if (inputTab === "file" && selectedFile && uploadedSheet?.file === selectedFile) currentBatchId = uploadedSheet.batchId;
-      if (inputTab === "file" && selectedFile && uploadedSheet?.file !== selectedFile) {
-        setLaunchStage("Uploading campaign sheet...");
-        try {
-          const fileFormData = new FormData();
-          fileFormData.append("file", selectedFile);
-          fileFormData.append("batch_id", currentBatchId);
-          const uploadRes = await fetch(`${apiBaseUrl}/uploads`, {
-            method: "POST",
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            credentials: "include",
-            body: fileFormData,
-          });
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json();
-            if (uploadData.accepted_count === 0 && !uploadData.duplicate_sheet) {
-              const reasons = (uploadData.rejected_rows || [])
-                .map((row) => row.reason || row.reason_code)
-                .filter(Boolean)
-                .join("; ");
-              throw new Error(reasons || "No valid ads were accepted from the uploaded sheet.");
-            }
-            if (uploadData.batch_id) {
-              currentBatchId = uploadData.batch_id;
-              setActiveBatchId(currentBatchId);
-              setUploadedSheet({file: selectedFile, batchId: currentBatchId});
-            }
-          } else {
-            throw new Error(await readError(uploadRes));
-          }
-        } catch (uploadErr) {
-          throw uploadErr;
-        }
-      }
+                  if (inputTab === "file" && !selectedFile && !selectedTextFile) throw new Error("Attach a campaign sheet or text file for this new campaign.");
+                  if (inputTab === "file" && selectedFile && uploadedSheet?.file === selectedFile) currentBatchId = uploadedSheet.batchId;
+                  if (inputTab === "file" && selectedFile && uploadedSheet?.file !== selectedFile) {
+                    setLaunchStage("Uploading campaign sheet...");
+                    const fileFormData = new FormData();
+                    fileFormData.append("file", selectedFile);
+                    fileFormData.append("batch_id", currentBatchId);
+                    const uploadRes = await fetch(`${apiBaseUrl}/uploads`, {
+                      method: "POST",
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      credentials: "include",
+                      body: fileFormData,
+                    });
+                    if (!uploadRes.ok) throw new Error(await readError(uploadRes));
+                    const uploadData = await uploadRes.json();
+                    if (uploadData.accepted_count === 0 && !uploadData.duplicate_sheet) {
+                      const reasons = (uploadData.rejected_rows || [])
+                        .map((row) => row.reason || row.reason_code)
+                        .filter(Boolean)
+                        .join("; ");
+                      throw new Error(reasons || "No valid ads were accepted from the uploaded sheet.");
+                    }
+                    if (uploadData.batch_id) {
+                      currentBatchId = uploadData.batch_id;
+                      setActiveBatchId(currentBatchId);
+                      setUploadedSheet({file: selectedFile, batchId: currentBatchId});
+                    }
+                  }
 
-      const clientResponse = await fetch(`${apiBaseUrl}/campaign-flow/resolve-client`, {
-        method: "POST", headers, credentials: "include", body: JSON.stringify({
-          batch_id: inputTab === "file" ? currentBatchId : null,
-          input_text: promptText,
-          ad_overrides: {destination_url: missingForm.destination_url || ""}
-        })
-      });
-      if (clientResponse.status === 401) {
-        setNeedsSignIn(true);
-        throw new Error("Please sign in to continue. Your notification email has been kept.");
-      }
-      if (!clientResponse.ok) throw new Error(await readError(clientResponse));
-      clientId = (await clientResponse.json()).client_id;
+                  const clientResponse = await fetch(`${apiBaseUrl}/campaign-flow/resolve-client`, {
+                    method: "POST", headers, credentials: "include", body: JSON.stringify({
+                      batch_id: inputTab === "file" && selectedFile ? currentBatchId : null,
+                      input_text: promptText,
+                      ad_overrides: {destination_url: missingForm.destination_url || ""}
+                    })
+                  });
+                  if (clientResponse.status === 401) {
+                    setNeedsSignIn(true);
+                    throw new Error("Please sign in to continue. Your notification email has been kept.");
+                  }
+                  if (!clientResponse.ok) throw new Error(await readError(clientResponse));
+                  clientId = (await clientResponse.json()).client_id;
 
-      if (!token) {
-        if (inputTab !== "file" || !selectedFile) throw new Error("Guest campaigns currently need a CSV or XLSX campaign sheet.");
-        setShowLaunchModal(false);
-        await fetchChatHistory();
-        router.push(`/batches/${encodeURIComponent(currentBatchId)}`);
-        setToast({ message: "Campaign saved for review. Sign in to dispatch through connected platforms.", type: "success" });
-        return;
-      }
+                  if (!token) {
+                    if (!selectedFile) throw new Error("Sign in is required before preparing this campaign.");
+                    setShowLaunchModal(false);
+                    await fetchChatHistory();
+                    router.push(`/batches/${encodeURIComponent(currentBatchId)}`);
+                    setToast({ message: "Campaign saved for review. Sign in to dispatch through connected platforms.", type: "success" });
+                    return;
+                  }
 
-      // 2. If user attached a creative asset (Method 3: Image/Video), persist to Cloud creative storage
-      if (inputTab === "media" && selectedImage && !uploadedCreativeRef) {
-        try {
-          const creativeFormData = new FormData();
-          creativeFormData.append("file", selectedImage);
-          creativeFormData.append("client_id", clientId);
-          const creativeRes = await fetch(`${apiBaseUrl}/uploads/creative`, {
-            method: "POST",
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            credentials: "include",
-            body: creativeFormData,
-          });
-          if (creativeRes.ok) { uploadedCreativeRef = (await creativeRes.json()).file_ref; setCreativeRef(uploadedCreativeRef); }
-          if (!creativeRes.ok) {
-            throw new Error(await readError(creativeRes));
-          }
-        } catch (creativeErr) {
-          throw creativeErr;
-        }
-      }
+                  if (selectedImage && !uploadedCreativeRef) {
+                    setLaunchStage("Uploading creative asset...");
+                    const creativeFormData = new FormData();
+                    creativeFormData.append("file", selectedImage);
+                    creativeFormData.append("client_id", clientId);
+                    const creativeRes = await fetch(`${apiBaseUrl}/uploads/creative`, {
+                      method: "POST",
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      credentials: "include",
+                      body: creativeFormData,
+                    });
+                    if (!creativeRes.ok) throw new Error(await readError(creativeRes));
+                    uploadedCreativeRef = (await creativeRes.json()).file_ref;
+                    setCreativeRef(uploadedCreativeRef);
+                  }
 
-      // 3. Dispatch to Meta Platforms (Instagram & Facebook)
-      const campaignTitle = promptText && promptText.trim().length > 0
-        ? (promptText.trim().split("\n")[0].slice(0, 60))
-        : (selectedFile?.name?.replace(/\.[^.]+$/, "") || `${clientId} Campaign`);
+                  const campaignTitle = promptText && promptText.trim().length > 0
+                    ? promptText.trim().split("\n")[0].slice(0, 60)
+                    : ((selectedFile || selectedTextFile)?.name?.replace(/\.[^.]+$/, "") || `${clientId} Campaign`);
+                  const launchPayload = {
+                    client_id: clientId,
+                    batch_id: currentBatchId,
+                    campaign_name: campaignTitle,
+                    employee_email: employeeEmail,
+                    target_platforms: metaPlatforms,
+                    headline: missingForm.headline || reviewResult?.campaign_summary?.headline || promptText.trim().split("\n")[0] || null,
+                    ad_text: missingForm.ad_text || reviewResult?.campaign_summary?.ad_text || promptText || null,
+                    destination_url: missingForm.destination_url || reviewResult?.campaign_summary?.destination_url || null,
+                    creative_file: uploadedCreativeRef || null,
+                    creative_mime_type: selectedImage?.type || null,
+                    meta_page_id: metaPageId.trim(),
+                    instagram_user_id: instagramUserId.trim() || null,
+                    targeting_country: targetingCountry.trim().toUpperCase(),
+                    daily_budget_minor_units: dailyBudgetMinorUnits ? Number(dailyBudgetMinorUnits) : null,
+                    special_ad_category: specialAdCategory,
+                    meta_launch: true,
+                  };
 
-      const launchPayload = {
-        client_id: clientId,
-        batch_id: currentBatchId,
-        campaign_name: campaignTitle,
-        employee_email: employeeEmail,
-        target_platforms: metaPlatforms,
-        headline: missingForm.headline || reviewResult?.campaign_summary?.headline || promptText.trim().split("\n")[0] || null,
-        ad_text: missingForm.ad_text || reviewResult?.campaign_summary?.ad_text || promptText || null,
-        destination_url: missingForm.destination_url || reviewResult?.campaign_summary?.destination_url || null,
-        creative_file: uploadedCreativeRef || null,
-      };
+                  setLaunchStage("Running preflight checks...");
+                  const reviewRequest = {
+                    client_id: clientId,
+                    batch_id: inputTab === "file" && selectedFile ? currentBatchId : null,
+                    input_text: promptText,
+                    ad_overrides: {...launchPayload, target_platforms: metaPlatforms},
+                  };
+                  let checked;
+                  for (;;) {
+                    const preflightRes = await fetch(`${apiBaseUrl}/campaign-flow/preflight-review?background=true`, {
+                      method: "POST", headers, credentials: "include", body: JSON.stringify(reviewRequest)
+                    });
+                    if (!preflightRes.ok) throw new Error(await readError(preflightRes));
+                    checked = await preflightRes.json();
+                    if (checked.status !== "reviewing") break;
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                  }
 
-      setLaunchStage("Reviewing campaign ads...");
-      const reviewRequest = {client_id: clientId,
-        batch_id: inputTab === "file" ? currentBatchId : null,
-        input_text: promptText, ad_overrides: {...launchPayload, target_platforms: metaPlatforms}};
-      let checked;
-      for (;;) {
-      const preflightRes = await fetch(`${apiBaseUrl}/campaign-flow/preflight-review?background=true`, {
-        method: "POST", headers, credentials: "include", body: JSON.stringify(reviewRequest)
-      });
-      if (!preflightRes.ok) throw new Error(await readError(preflightRes));
-      checked = await preflightRes.json();
-      if (checked.status !== "reviewing") break;
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      }
-      setReviewResult(checked);
-      if (checked.status !== "ready_for_review") {
-        throw new Error("Review the campaign requirements and checks below before launch.");
-      }
-      setLaunchStage("Dispatching through Meta MCP...");
-      const launchRes = await fetch(`${apiBaseUrl}/campaign-flow/launch-batch`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(launchPayload),
-      });
+                  setReviewResult(checked);
+                  if (checked.status !== "ready_for_review") {
+                    setLaunchDraft(null);
+                    setFormError(checked.message || "Review the findings and update the campaign before continuing.");
+                    return;
+                  }
+                  setLaunchDraft(launchPayload);
+                  setFormError("");
+                  setLaunchStage("Preview ready for human review.");
+                } catch (err) {
+                  console.warn(err);
+                  setReviewResult(null);
+                  setLaunchDraft(null);
+                  setFormError(requestErrorMessage(err));
+                } finally {
+                  setIsLaunching(false);
+                }
+              };
 
-      if (launchRes.ok) {
-        const launchData = await launchRes.json();
-        setShowLaunchModal(false);
-        setActiveBatchId(launchData.batch_id);
-        setToast({
-          message: (launchData.status === "blocked"
-            ? "Meta connector not configured — nothing was sent."
-            : launchData.status === "partial"
-            ? "Campaign partially dispatched. Review the failed Meta destinations."
-            : launchData.status === "launched"
-            ? "Campaign dispatched to the configured Meta destinations."
-            : "Meta launch failed. Review the recorded dispatch results.") + " " + (launchData.notifications || []).map(notificationLabel).join(" "),
-          type: launchData.status === "launched" ? "success" : launchData.status === "blocked" ? "warning" : "error",
-        });
-        // Refresh IP-scoped sidebar batches
-        fetchChatHistory();
-        selectCampaign(launchData.batch_id, clientId);
-        setSelectedFile(null);
-        setUploadedSheet(null);
-        setSelectedImage(null);
-        setCreativeRef(null);
-        {
-          router.push(`/dispatches?batch_id=${encodeURIComponent(launchData.batch_id)}&client_id=${encodeURIComponent(clientId)}`);
-        }
-      } else {
-        throw new Error(await readError(launchRes));
-      }
-    } catch (err) {
-      console.warn(err);
-      setFormError(err?.message || "The server could not confirm the campaign. Please try again.");
-    } finally {
-      setIsLaunching(false);
-    }
-  };
+              const confirmLaunch = async () => {
+                if (!launchDraft || reviewResult?.status !== "ready_for_review") {
+                  setFormError("Prepare and review a campaign preview before confirming launch.");
+                  return;
+                }
+                if (!selectedPlatforms.length) {
+                  setFormError("Select at least one platform before confirming launch.");
+                  return;
+                }
+                if (!employeeEmail || !employeeEmail.includes("@")) {
+                  setFormError("Please enter a valid launcher email address.");
+                  return;
+                }
+                if (isLaunching) return;
+
+                setFormError("");
+                setIsLaunching(true);
+                setLaunchStage("Dispatching to selected Meta platforms...");
+                try {
+                  const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
+                  const launchPayload = {
+                    ...launchDraft,
+                    employee_email: employeeEmail,
+                    target_platforms: selectedPlatforms,
+                    headline: missingForm.headline || launchDraft.headline,
+                    ad_text: missingForm.ad_text || launchDraft.ad_text,
+                    destination_url: missingForm.destination_url || launchDraft.destination_url,
+                    meta_page_id: metaPageId.trim(),
+                    instagram_user_id: selectedPlatforms.includes("instagram") ? instagramUserId.trim() : null,
+                    targeting_country: targetingCountry.trim().toUpperCase(),
+                    daily_budget_minor_units: dailyBudgetMinorUnits ? Number(dailyBudgetMinorUnits) : null,
+                    special_ad_category: specialAdCategory,
+                    meta_launch: true,
+                  };
+                  const launchRes = await fetch(`${apiBaseUrl}/campaign-flow/launch-batch`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                    body: JSON.stringify(launchPayload),
+                  });
+                  if (!launchRes.ok) throw new Error(await readError(launchRes));
+
+                  const launchData = await launchRes.json();
+                  setShowLaunchModal(false);
+                  setActiveBatchId(launchData.batch_id);
+                  setToast({
+                    message: (launchData.status === "blocked"
+                      ? "Meta connector not configured — nothing was sent."
+                      : launchData.status === "partial"
+                      ? "Campaign partially dispatched. Review the failed Meta destinations."
+                      : launchData.status === "launched"
+                      ? "Campaign dispatched to the configured Meta destinations."
+                      : "Meta launch failed. Review the recorded dispatch results.") + " " + (launchData.notifications || []).map(notificationLabel).join(" "),
+                    type: launchData.status === "launched" ? "success" : launchData.status === "blocked" ? "warning" : "error",
+                  });
+                  fetchChatHistory();
+                  selectCampaign(launchData.batch_id, launchDraft.client_id);
+                  setSelectedFile(null);
+                  setSelectedTextFile(null);
+                  setUploadedSheet(null);
+                  setSelectedImage(null);
+                  setCreativeRef(null);
+                  setReviewResult(null);
+                  setLaunchDraft(null);
+                  router.push(`/dispatches?batch_id=${encodeURIComponent(launchData.batch_id)}&client_id=${encodeURIComponent(launchDraft.client_id)}`);
+                } catch (err) {
+                  console.warn(err);
+                  setFormError(requestErrorMessage(err));
+                } finally {
+                  setIsLaunching(false);
+                }
+              };
 
   const handleStartNewBatch = () => {
     const newId = `batch_${Date.now().toString(36)}`;
@@ -293,12 +438,18 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
     selectCampaign("", "");
     setUploadedSheet(null);
     setReviewResult(null);
+    setLaunchDraft(null);
     setPromptText("");
     setSelectedFile(null);
+    setSelectedTextFile(null);
     setSelectedImage(null);
     setCreativeRef(null);
     setMissingForm({});
   };
+
+  if (!authChecked) {
+    return <main role="status" style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "#cbd5e1" }}>Opening signup...</main>;
+  }
 
   return (
     <div style={{
@@ -341,7 +492,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 borderRadius: "999px",
                 fontWeight: "600",
               }}>
-                {chatHistory.length} Saved Batches
+                {chatHistoryError ? "Unavailable" : `${chatHistory.length} Saved Batches`}
               </span>
             </div>
           )}
@@ -399,8 +550,16 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
           {chatHistory.length === 0 ? (
             sidebarOpen && (
               <div style={{ padding: "24px 12px", textAlign: "center", color: "#64748b", fontSize: "12px" }}>
-                <p style={{ margin: "0 0 6px 0", color: "#94a3b8", fontWeight: "600" }}>No batches uploaded yet</p>
-                <p style={{ margin: 0, fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>Upload a CSV or run preflight review to validate your first ad batch.</p>
+                {chatHistoryLoading ? (
+                  <p role="status" style={{ margin: 0, color: "#94a3b8" }}>Loading batches...</p>
+                ) : chatHistoryError ? (
+                  <p role="alert" style={{ margin: 0, color: "#fecaca" }}>{chatHistoryError}</p>
+                ) : (
+                  <>
+                    <p style={{ margin: "0 0 6px 0", color: "#94a3b8", fontWeight: "600" }}>No batches uploaded yet</p>
+                    <p style={{ margin: 0, fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>Upload a CSV or run preflight review to validate your first ad batch.</p>
+                  </>
+                )}
               </div>
             )
           ) : (
@@ -517,7 +676,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
               {[
                 { id: "prompt", label: "Direct Prompt & Copy", icon: "💬" },
-                { id: "file", label: "Campaign Sheet (CSV, XLSX)", icon: "📄" },
+                { id: "file", label: "Campaign Sheet or Text File", icon: "📄" },
                 { id: "media", label: "Creative Asset / Screenshot", icon: "🖼️" },
               ].map((tab) => (
                 <button
@@ -543,7 +702,11 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             {inputTab === "prompt" && (
               <textarea
                 value={promptText}
-                onChange={(e) => setPromptText(e.target.value)}
+                onChange={(e) => {
+                  setPromptText(e.target.value);
+                  setReviewResult(null);
+                  setLaunchDraft(null);
+                }}
                 placeholder="Enter campaign prompt, headline, ad copy, or creative instructions (e.g. 'Launch our summer campaign across Meta placements targeting skincare buyers')..."
                 rows={5}
                 style={{
@@ -574,18 +737,19 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 <input
                   type="file"
                   id="sheet-upload"
-                  accept=".csv,.xlsx"
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
+                  accept=".csv,.xlsx,.txt,.md,.markdown,.json,.yaml,.yml,.xml,.html,.htm,.log,text/*,application/json,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif,.mp4,video/mp4,.pdf,application/pdf"
+                  onChange={handleFileSelection}
                   style={{ display: "none" }}
                 />
                 <label htmlFor="sheet-upload" style={{ cursor: "pointer" }}>
                   <div style={{ fontSize: "32px", marginBottom: "8px" }}>📊</div>
                   <div style={{ fontSize: "14px", fontWeight: "600", color: "#e2e8f0", marginBottom: "4px" }}>
-                    {selectedFile ? selectedFile.name : "Click to attach campaign sheet (CSV, XLSX, JSON, TXT)"}
+                    {selectedFile?.name || selectedTextFile?.name || "Choose a campaign sheet or text file"}
                   </div>
                   <div style={{ fontSize: "12px", color: "#64748b" }}>
-                    Supports multi-row ad specs with headlines, copy, destination URLs, and UTM codes
+                    CSV/XLSX sheets are parsed as ads. Text and JSON documents are added to the review prompt.
                   </div>
+                  {fileError && <div role="alert" style={{ marginTop: 10, color: "#fca5a5", fontSize: 12 }}>{fileError}</div>}
                 </label>
               </div>
             )}
@@ -602,8 +766,8 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 <input
                   type="file"
                   id="media-upload"
-                  accept="image/*,video/*"
-                  onChange={(e) => {setSelectedImage(e.target.files[0]); setCreativeRef(null); setReviewResult(null);}}
+                  accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif,.mp4,video/mp4,.pdf,application/pdf"
+                  onChange={handleCreativeSelection}
                   style={{ display: "none" }}
                 />
                 <label htmlFor="media-upload" style={{ cursor: "pointer" }}>
@@ -612,8 +776,9 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                     {selectedImage ? selectedImage.name : "Attach creative visual, video asset, or ad screenshot"}
                   </div>
                   <div style={{ fontSize: "12px", color: "#64748b" }}>
-                    Uploaded image dimensions are checked when available. Unsupported creative checks are marked not checked.
+                    Images, screenshots, MP4, and PDF can be attached. Meta launch currently requires a PNG or JPEG image.
                   </div>
+                  {fileError && <div role="alert" style={{ marginTop: 10, color: "#fca5a5", fontSize: 12 }}>{fileError}</div>}
                 </label>
               </div>
             )}
@@ -750,12 +915,12 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             overflowY: "auto",
             boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
           }}>
-            <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: "800", color: "#f8fafc" }}>
-              {hasEmployeeSession ? "Review and Launch Campaign" : "Save Campaign for Review"}
+              <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: "800", color: "#f8fafc" }}>
+              {hasEmployeeSession ? (launchDraft ? "Review Campaign Preview" : "Prepare Campaign Preview") : "Save Campaign for Review"}
             </h2>
             <p style={{ fontSize: "13px", color: "#94a3b8", lineHeight: "1.5", margin: "0 0 20px 0" }}>
               {hasEmployeeSession
-                ? "Enter the responsible media buyer email address before launch. Launch Gate dispatches rejection, blocker, and suspension alerts directly to this address via SMTP email."
+                ? "Review and edit campaign details and checks first. Nothing is sent until you confirm the final launch."
                 : "Upload a CSV or XLSX campaign sheet to save an isolated review batch. Sign in with an employee account to dispatch campaigns."}
             </p>
 
@@ -826,6 +991,8 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                           setSelectedPlatforms((prev) =>
                             prev.includes(p.id) ? prev.filter((item) => item !== p.id) : [...prev, p.id]
                           );
+                          setReviewResult(null);
+                          setLaunchDraft(null);
                         }}
                         style={{ cursor: "pointer", accentColor: "#38bdf8" }}
                       />
@@ -874,16 +1041,40 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
 
             </div>}
 
-            {inputTab !== "file" && <div style={{display: "grid", gap: 12, marginBottom: 20}}>
-              <p style={{margin: 0, fontSize: 13, color: "#cbd5e1"}}>Confirm the campaign details before authorization.</p>
+            {hasEmployeeSession && <div style={{display: "grid", gap: 12, marginBottom: 20}}>
+              <p style={{margin: 0, fontSize: 13, color: "#cbd5e1"}}>Campaign details for the human review preview.</p>
               {[{key: "headline", label: "Headline"}, {key: "ad_text", label: "Ad copy"}, {key: "destination_url", label: "Landing page URL"}].map(({key, label}) => <label key={key}>
                 {label}
                 <input type={key === "destination_url" ? "url" : "text"}
-                  value={missingForm[key] ?? (key === "headline" ? promptText.trim().split("\n")[0] || "" : key === "ad_text" ? promptText : "")}
-                  onChange={e => {setMissingForm({...missingForm, [key]: e.target.value}); setReviewResult(null);}}
+                  value={missingForm[key] ?? (key === "headline" ? launchDraft?.headline || reviewResult?.campaign_summary?.headline || promptText.trim().split("\n")[0] || "" : key === "ad_text" ? launchDraft?.ad_text || reviewResult?.campaign_summary?.ad_text || promptText : launchDraft?.destination_url || reviewResult?.campaign_summary?.destination_url || "")}
+                  onChange={e => {setMissingForm({...missingForm, [key]: e.target.value}); setReviewResult(null); setLaunchDraft(null);}}
                   style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}} />
               </label>)}
+              <label>Facebook Page ID
+                <input value={metaPageId} onChange={event => {setMetaPageId(event.target.value); setReviewResult(null); setLaunchDraft(null);}} style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}} />
+              </label>
+              {selectedPlatforms.includes("instagram") && <label>Instagram account ID
+                <input value={instagramUserId} onChange={event => {setInstagramUserId(event.target.value); setReviewResult(null); setLaunchDraft(null);}} style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}} />
+              </label>}
+              <label>Targeting country (2-letter code)
+                <input maxLength={2} value={targetingCountry} onChange={event => {setTargetingCountry(event.target.value.toUpperCase()); setReviewResult(null); setLaunchDraft(null);}} placeholder="US" style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}} />
+              </label>
+              <label>Daily budget (account currency minor units)
+                <input type="number" min="1" step="1" value={dailyBudgetMinorUnits} onChange={event => {setDailyBudgetMinorUnits(event.target.value); setReviewResult(null); setLaunchDraft(null);}} placeholder="For USD, 500 = $5.00" style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}} />
+              </label>
+              <label>Meta special ad category
+                <select value={specialAdCategory} onChange={event => {setSpecialAdCategory(event.target.value); setReviewResult(null); setLaunchDraft(null);}} style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}}>
+                  <option value="">Select a category</option>
+                  <option value="NONE">None</option>
+                  <option value="HOUSING">Housing</option>
+                  <option value="EMPLOYMENT">Employment</option>
+                  <option value="FINANCIAL_PRODUCTS_SERVICES">Financial products or services</option>
+                  <option value="ISSUES_ELECTIONS_POLITICS">Issues, elections, or politics</option>
+                </select>
+              </label>
+              <p style={{ margin: 0, color: "#94a3b8", fontSize: 12 }}>Objective: Website traffic. Other objectives need additional Meta account configuration.</p>
             </div>}
+            {reviewResult?.status === "ready_for_review" && launchDraft && <p role="status" style={{ color: "#6ee7b7", fontSize: 13 }}>Preview is ready. Review the report and confirm only when the details are correct.</p>}
             {reviewResult?.missing_items?.length > 0 && <div role="alert" style={{color: "#fcd34d", marginBottom: 16}}>
               {reviewResult.missing_items.map(item => <p key={item.field}>{item.label}: {item.reason}</p>)}
             </div>}
@@ -916,7 +1107,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   (hasEmployeeSession && (!employeeEmail || !employeeEmail.includes("@")));
                 return (
                   <button
-                    onClick={submitCampaign}
+                    onClick={launchDraft ? confirmLaunch : prepareCampaign}
                     disabled={isLaunchDisabled}
                     style={{
                       padding: "10px 24px",
@@ -933,7 +1124,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       transition: "all 0.2s ease",
                     }}
                   >
-                    {isLaunching ? launchStage : hasEmployeeSession ? "Authorize & Launch via MCP Agents 🚀" : "Save Campaign for Review"}
+                    {isLaunching ? launchStage : hasEmployeeSession ? (launchDraft ? "Confirm & Launch via Meta MCP" : "Prepare Preview") : "Save Campaign for Review"}
                   </button>
                 );
               })()}

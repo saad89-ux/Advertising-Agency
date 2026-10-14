@@ -1,4 +1,5 @@
 "use client";
+import { API_BASE_URL, requestErrorMessage } from "../lib/api";
 
 import React, { useState, useEffect, useMemo } from "react";
 
@@ -10,7 +11,7 @@ import React, { useState, useEffect, useMemo } from "react";
 export default function MetricsScreen({
   batchId: initialBatchId = null,
   initialMetrics = null,
-  apiBaseUrl = "http://localhost:8000",
+  apiBaseUrl = API_BASE_URL,
   authToken = null,
 }) {
   const [activeBatchId, setActiveBatchId] = useState(initialBatchId);
@@ -91,7 +92,7 @@ export default function MetricsScreen({
       setLastRefreshed(new Date().toLocaleTimeString());
       setLoading(false);
     } catch (err) {
-      setError(err.message);
+      setError(requestErrorMessage(err));
       setLoading(false);
     }
   }, [apiBaseUrl, token, viewMode, activeBatchId, selectedClient]);

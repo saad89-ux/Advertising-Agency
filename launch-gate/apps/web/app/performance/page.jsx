@@ -1,11 +1,13 @@
 "use client";
+import { API_BASE_URL, readError, requestErrorMessage } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 
-export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function PerformancePage({ apiBaseUrl = API_BASE_URL }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("sales");
 
   const fetchPerformance = async () => {
@@ -13,12 +15,12 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(`${apiBaseUrl}/campaign-flow/platform-performance`, { headers });
-      if (res.ok) {
-        const perf = await res.json();
-        setData(perf);
-      }
+      if (!res.ok) throw new Error(await readError(res));
+      const perf = await res.json();
+      setData(perf);
     } catch (err) {
       console.error(err);
+      setError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -27,6 +29,9 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
   useEffect(() => {
     fetchPerformance();
   }, [apiBaseUrl]);
+
+  if (loading) return <main role="status" style={{ padding: 40, color: "#cbd5e1" }}>Loading performance data...</main>;
+  if (error) return <main role="alert" style={{ padding: 40, color: "#fecaca" }}>{error}</main>;
 
   const liveOrders = [];
   const platforms = data?.platform_breakdown || [];

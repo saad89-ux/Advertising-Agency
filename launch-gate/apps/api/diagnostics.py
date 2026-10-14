@@ -33,6 +33,21 @@ def get_ai_and_tracing_status() -> dict[str, Any]:
     lf_sec = (os.environ.get("LANGFUSE_SECRET_KEY") or "").strip(" \t\r\n\"'")
     lf_host = (os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com").strip(" \t\r\n\"'")
     lf_enabled = bool(lf_pub and lf_sec and "placeholder" not in lf_pub.lower())
+    notification_sink = os.environ.get("NOTIFICATION_DELIVERY_SINK", "").strip().lower()
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port = os.environ.get("SMTP_PORT", "587").strip()
+    smtp_from = (os.environ.get("NOTIFICATION_FROM_EMAIL") or os.environ.get("SMTP_FROM_EMAIL") or "").strip()
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+    smtp_configured = bool(smtp_host and smtp_from and "@" in smtp_from and smtp_port.isdigit()) and bool(smtp_user) == bool(smtp_password)
+    email_configured = notification_sink == "smtp" and smtp_configured
+    meta_connection_configured = all(
+        os.environ.get(key, "").strip()
+        for key in ("MCP_META_SERVER_URL", "META_MCP_ACCESS_TOKEN", "META_AD_ACCOUNT_ID")
+    )
+    meta_live_enabled = os.environ.get("META_MCP_ENABLE_LIVE", "false").strip().lower() in {"true", "1", "yes"}
+    meta_writes_enabled = os.environ.get("META_MCP_ALLOW_WRITES", "false").strip().lower() in {"true", "1", "yes"}
+    account_currency = os.environ.get("META_AD_ACCOUNT_CURRENCY", "").strip().upper()
 
     # 3. Redis Queue
     queue_length = 0
@@ -66,11 +81,16 @@ def get_ai_and_tracing_status() -> dict[str, Any]:
 
     return {
         "meta": {
-            "is_configured": all(os.getenv(key, "").strip() for key in ("MCP_META_SERVER_URL", "META_MCP_ACCESS_TOKEN", "META_AD_ACCOUNT_ID"))
-            and all(os.getenv(key, "false").lower() in {"true", "1", "yes"} for key in ("META_MCP_ENABLE_LIVE", "META_MCP_ALLOW_WRITES")),
+            "is_configured": meta_connection_configured and meta_live_enabled,
+            "reads_enabled": meta_connection_configured and meta_live_enabled,
+            "writes_enabled": meta_connection_configured and meta_live_enabled and meta_writes_enabled,
+            "account_currency": account_currency or None,
+            "usd_metrics_enabled": account_currency == "USD",
         },
         "email_alerts": {
-            "is_configured": all(os.getenv(key, "").strip() for key in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "NOTIFICATION_FROM_EMAIL")),
+            "is_configured": email_configured,
+            "sink": notification_sink or "unset",
+            "status": "ready" if email_configured else "sink_not_selected" if notification_sink != "smtp" else "smtp_not_configured",
         },
         "gemini_api": {
             "is_configured": gemini_active,

@@ -86,15 +86,16 @@ def is_write_tool(tool_name: str, description: str = "", annotations: Any = None
     name_clean = tool_name.casefold()
     desc_clean = (description or "").casefold()
 
-    # If annotations declare read-only hint explicitly
-    if annotations is not None and getattr(annotations, "readOnlyHint", False) is True:
-        return False
-
     name_tokens = set(re.split(r"[_\W]+", name_clean))
 
     # 1. Check for explicit write action tokens
     if any(token in _WRITE_ACTION_PATTERNS for token in name_tokens):
         return True
+
+    # A read-only annotation may classify otherwise ambiguous tools, but cannot
+    # override an explicit mutation verb in the discovered tool name.
+    if annotations is not None and getattr(annotations, "readOnlyHint", False) is True:
+        return False
 
     # 2. Check for explicit creation/modification sentences in description
     if any(phrase in desc_clean for phrase in [
@@ -119,6 +120,7 @@ class MetaMCPClient:
         server_url: str | None = None,
         access_token: str | None = None,
         allow_writes: bool | None = None,
+        enable_live: bool | None = None,
         timeout_seconds: float = 20.0,
         max_retries: int = 3,
     ) -> None:
@@ -135,6 +137,11 @@ class MetaMCPClient:
         else:
             env_writes = os.environ.get("META_MCP_ALLOW_WRITES", "false").strip().lower()
             self.allow_writes = env_writes in {"true", "1", "yes"}
+        if enable_live is not None:
+            self.enable_live = enable_live
+        else:
+            env_live = os.environ.get("META_MCP_ENABLE_LIVE", "false").strip().lower()
+            self.enable_live = env_live in {"true", "1", "yes"}
 
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(1, max_retries)
@@ -149,6 +156,12 @@ class MetaMCPClient:
             raise MetaMCPConfigurationError(
                 "META_MCP_ACCESS_TOKEN is not configured. Set META_MCP_ACCESS_TOKEN in .env with a valid Meta Business access token."
             )
+
+    def _validate_write_gate(self) -> None:
+        if not (self.enable_live and self.allow_writes):
+            raise MetaMCPWriteRefusedError("Both META_MCP_ENABLE_LIVE and META_MCP_ALLOW_WRITES must be true for Meta writes.")
+        if not os.environ.get("META_AD_ACCOUNT_ID", "").strip():
+            raise MetaMCPConfigurationError("META_AD_ACCOUNT_ID is not configured.")
 
     def _build_http_client(self, on_status: Any = None) -> httpx.AsyncClient:
         """Construct an authenticated httpx.AsyncClient with required headers and status hook."""
@@ -264,18 +277,13 @@ class MetaMCPClient:
     ) -> MetaMCPResult:
         """Call a specific tool on the Meta MCP server over JSON-RPC.
         
-        Refuses all tools classified as writes under the Launch Gate v1 policy.
+        Refuses writes unless both explicit live and write opt-ins are enabled.
         """
         rpc_id = f"meta_{uuid.uuid4().hex[:8]}"
 
-        # Launch Gate v1 has no authorization path for real platform mutations.
-        # Keep this fail-closed even if the legacy environment flag is set.
-        if (
-            is_write_tool(tool_name, tool_description, tool_annotations)
-            or is_write_tool(tool_name, tool_description)
-        ):
+        if is_write_tool(tool_name, tool_description, tool_annotations) and not (self.enable_live and self.allow_writes):
             refusal_msg = (
-                f"Write operation refused: real platform writes are disabled by Launch Gate v1 policy "
+                f"Write operation refused: both META_MCP_ENABLE_LIVE and META_MCP_ALLOW_WRITES must be true "
                 f"(tool '{tool_name}')."
             )
             logger.warning("[MCP SAFETY REFUSAL] %s", refusal_msg)
@@ -284,6 +292,29 @@ class MetaMCPClient:
                 tool_name=tool_name,
                 result={},
                 error=refusal_msg,
+                rpc_id=rpc_id,
+                is_write_refusal=True,
+            )
+
+        if is_write_tool(tool_name, tool_description, tool_annotations):
+            try:
+                self._validate_write_gate()
+            except (MetaMCPWriteRefusedError, MetaMCPConfigurationError) as gate_error:
+                return MetaMCPResult(
+                    success=False,
+                    tool_name=tool_name,
+                    result={},
+                    error=str(gate_error),
+                    rpc_id=rpc_id,
+                    is_write_refusal=isinstance(gate_error, MetaMCPWriteRefusedError),
+                )
+
+        if self.enable_live and not self.allow_writes and is_write_tool(tool_name, tool_description, tool_annotations):
+            return MetaMCPResult(
+                success=False,
+                tool_name=tool_name,
+                result={},
+                error="Write operation refused: META_MCP_ALLOW_WRITES is false.",
                 rpc_id=rpc_id,
                 is_write_refusal=True,
             )

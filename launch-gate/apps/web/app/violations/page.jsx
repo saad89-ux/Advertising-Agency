@@ -1,26 +1,28 @@
 "use client";
+import { API_BASE_URL, readError, requestErrorMessage } from "../../lib/api";
 import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-export default function ViolationsPage({ apiBaseUrl = "http://localhost:8000" }) {
+export default function ViolationsPage({ apiBaseUrl = API_BASE_URL }) {
   const router = useRouter();
   const [violations, setViolations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchViolations = async () => {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(`${apiBaseUrl}/campaign-flow/violations`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setViolations(data);
-      }
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      setViolations(data);
     } catch (err) {
       console.error(err);
+      setError(requestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -29,6 +31,9 @@ export default function ViolationsPage({ apiBaseUrl = "http://localhost:8000" })
   useEffect(() => {
     fetchViolations();
   }, [apiBaseUrl]);
+
+  if (loading) return <main role="status" style={{ padding: 40, color: "#cbd5e1" }}>Loading violations...</main>;
+  if (error) return <main role="alert" style={{ padding: 40, color: "#fecaca" }}>{error}</main>;
 
   return (
     <div style={{

@@ -74,3 +74,20 @@ def test_alert_dispatch_has_email_status_only(monkeypatch):
     send_email.assert_not_called()
     assert "sms_status" not in result
     assert result["details"]["recipient_phone"] == "+15551234567"
+
+
+def test_email_diagnostics_require_explicit_smtp_sink(monkeypatch):
+    from apps.api.diagnostics import get_ai_and_tracing_status
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "smtp-user")
+    monkeypatch.setenv("SMTP_PASSWORD", "smtp-password")
+    monkeypatch.setenv("NOTIFICATION_FROM_EMAIL", "alerts@example.com")
+    monkeypatch.setenv("NOTIFICATION_DELIVERY_SINK", "")
+    status = get_ai_and_tracing_status()["email_alerts"]
+    assert status == {"is_configured": False, "sink": "unset", "status": "sink_not_selected"}
+
+    monkeypatch.setenv("NOTIFICATION_DELIVERY_SINK", "smtp")
+    status = get_ai_and_tracing_status()["email_alerts"]
+    assert status == {"is_configured": True, "sink": "smtp", "status": "ready"}

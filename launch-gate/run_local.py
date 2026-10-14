@@ -24,15 +24,18 @@ _venv_python = (
     if sys.platform == "win32"
     else REPO_ROOT / ".venv" / "bin" / "python"
 )
-if _venv_python.exists() and Path(sys.executable).resolve() != _venv_python.resolve():
+_venv_root = REPO_ROOT / ".venv"
+if _venv_python.exists() and Path(sys.prefix).resolve() != _venv_root.resolve():
     print(f"[INFO] Auto-switching to project virtual environment: {_venv_python}")
     sys.exit(subprocess.call([str(_venv_python), str(Path(__file__).resolve())] + sys.argv[1:]))
 
 import http.server
+import json
 import socket
 import socketserver
 import threading
 import time
+from urllib.request import urlopen
 
 
 # Ensure nodejs is in PATH if installed in user local appdata
@@ -66,6 +69,9 @@ def run_storefront_server():
     storefront_dir = REPO_ROOT / "data" / "storefront_pages"
     if not storefront_dir.exists():
         return
+    if is_port_in_use(8099):
+        print("[INFO] Storefront server is already active on http://127.0.0.1:8099.")
+        return
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -83,6 +89,12 @@ def run_storefront_server():
 
 def run_stand_in_platform():
     """Run simulated ad platform on port 8100."""
+    if is_port_in_use(8100):
+        if is_expected_service(8100, "/openapi.json", "info.title", "Stand-in platform (SYNTHETIC)"):
+            print("[INFO] Stand-in platform is already active on http://127.0.0.1:8100.")
+        else:
+            print("[ERROR] Port 8100 is occupied by a service that is not the Launch Gate stand-in platform.")
+        return
     try:
         import uvicorn
 
@@ -124,6 +136,20 @@ def is_port_in_use(port: int) -> bool:
         return False
 
 
+def is_expected_service(port: int, path: str, field: str, expected: str) -> bool:
+    try:
+        with urlopen(f"http://127.0.0.1:{port}{path}", timeout=1.0) as response:
+            payload = json.load(response)
+        value: object = payload
+        for key in field.split("."):
+            if not isinstance(value, dict):
+                return False
+            value = value.get(key)
+        return value == expected
+    except Exception:
+        return False
+
+
 def run_frontend():
     """Run Next.js dev server on port 3000 if not already running."""
     if is_port_in_use(3000):
@@ -147,6 +173,12 @@ def run_frontend():
 
 def run_backend_api():
     """Run FastAPI main app on port 8000."""
+    if is_port_in_use(8000):
+        if is_expected_service(8000, "/health", "app", "Launch Gate API"):
+            print("[INFO] Launch Gate API is already active on http://127.0.0.1:8000.")
+        else:
+            print("[ERROR] Port 8000 is occupied by a service that is not the Launch Gate API.")
+        return
     try:
         import uvicorn
 
@@ -190,6 +222,15 @@ def main():
 
     if "--check" in sys.argv or "--dry-run" in sys.argv:
         print("[OK] Pre-flight check succeeded. Virtual environment and all dependencies verified.")
+        return
+
+    if (
+        is_expected_service(8000, "/health", "app", "Launch Gate API")
+        and is_expected_service(8100, "/openapi.json", "info.title", "Stand-in platform (SYNTHETIC)")
+        and is_port_in_use(3000)
+    ):
+        print("[INFO] Launch Gate API, stand-in platform, and frontend are already active; reusing them.")
+        print_banner()
         return
 
     # 1. Background Storefront server

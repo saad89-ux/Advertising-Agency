@@ -32,6 +32,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaign-flow", tags=["campaign-flow"])
 
 
+def _metric_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return _metric_number(json.loads(value))
+        except (TypeError, ValueError):
+            try:
+                return float(value)
+            except ValueError:
+                return None
+    if isinstance(value, list):
+        values = [_metric_number(item) for item in value]
+        present = [item for item in values if item is not None]
+        return sum(present) if present else None
+    if isinstance(value, dict):
+        return _metric_number(value.get("value"))
+    return None
+
+
 def endpoint_errors(func):
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -72,6 +92,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_launch_contacts_batch_email
     ON campaign_launch_contacts (batch_id, employee_email);
 ALTER TABLE ad_live_dispatches ADD COLUMN IF NOT EXISTS launch_attempt_id TEXT;
 ALTER TABLE send_alerts ADD COLUMN IF NOT EXISTS launch_attempt_id TEXT;
+ALTER TABLE ad_live_dispatches ADD COLUMN IF NOT EXISTS meta_campaign_id TEXT;
+ALTER TABLE ad_live_dispatches ADD COLUMN IF NOT EXISTS meta_ad_set_id TEXT;
+ALTER TABLE ad_live_dispatches ADD COLUMN IF NOT EXISTS meta_creative_id TEXT;
+CREATE TABLE IF NOT EXISTS meta_launch_objects (
+    ad_id TEXT NOT NULL REFERENCES ads (ad_id) ON DELETE CASCADE,
+    platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram')),
+    campaign_id TEXT,
+    ad_set_id TEXT,
+    creative_id TEXT,
+    platform_ad_id TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (ad_id, platform)
+);
 """
 
 
@@ -110,6 +143,12 @@ class LaunchBatchRequest(BaseModel):
     ad_text: str | None = None
     destination_url: str | None = None
     creative_file: str | None = None
+    creative_mime_type: str | None = None
+    meta_page_id: str | None = None
+    instagram_user_id: str | None = None
+    targeting_country: str | None = None
+    daily_budget_minor_units: int | None = Field(None, ge=1)
+    special_ad_category: str | None = None
 
 
 class HitlRemediateRequest(BaseModel):
@@ -194,6 +233,28 @@ def preflight_review(
     client_id = resolve_campaign_client(user, req.client_id, req.batch_id,
                  str(req.ad_overrides.get("destination_url") or ""), req.input_text)
 
+    overrides = req.ad_overrides or {}
+    if overrides.get("meta_launch"):
+        missing_meta = []
+        for field, label in (("meta_page_id", "Facebook Page ID"), ("targeting_country", "Targeting country"),
+                             ("daily_budget_minor_units", "Daily budget"), ("special_ad_category", "Special ad category")):
+            if not overrides.get(field):
+                missing_meta.append({"field": field, "label": label, "reason": "Required to build the Meta campaign."})
+        if not str(overrides.get("targeting_country") or "").strip().isalpha() or len(str(overrides.get("targeting_country") or "").strip()) != 2:
+            missing_meta.append({"field": "targeting_country", "label": "Targeting country", "reason": "Enter a two-letter country code."})
+        if "instagram" in (overrides.get("target_platforms") or []) and not overrides.get("instagram_user_id"):
+            missing_meta.append({"field": "instagram_user_id", "label": "Instagram account ID", "reason": "Required when Instagram is selected."})
+        if overrides.get("special_ad_category") not in {"NONE", "HOUSING", "EMPLOYMENT", "FINANCIAL_PRODUCTS_SERVICES", "ISSUES_ELECTIONS_POLITICS"}:
+            missing_meta.append({"field": "special_ad_category", "label": "Special ad category", "reason": "Choose None or the applicable Meta special ad category."})
+        creative_url = str(overrides.get("creative_file") or "")
+        if not creative_url.startswith("https://"):
+            missing_meta.append({"field": "creative_file", "label": "Public creative image URL", "reason": "Meta needs an uploaded, publicly accessible HTTPS image."})
+        if overrides.get("creative_mime_type") not in {"image/jpeg", "image/png"}:
+            missing_meta.append({"field": "creative_mime_type", "label": "Creative image format", "reason": "The current Meta create chain requires a PNG or JPEG image."})
+        if missing_meta:
+            return {"status": "missing_requirements", "client_id": client_id,
+                    "missing_items": missing_meta, "missing_count": len(missing_meta)}
+
     if background:
         from apps.api.review_jobs import submit
         fingerprint = req.model_dump()
@@ -203,7 +264,7 @@ def preflight_review(
                 fingerprint["content_versions"] = conn.execute(
                     "SELECT ad_id, row_hash FROM ads WHERE batch_id=%s AND client_id=%s ORDER BY ad_id",
                     (req.batch_id, client_id)).fetchall()
-        return submit(user.user_id, fingerprint, lambda: preflight_review(req, user=user, background=False))
+        return submit(user.user_id, fingerprint, lambda: preflight_review(req, request=request, user=user, background=False))
 
     raw_text = (req.input_text or "").strip()
     overrides = req.ad_overrides or {}
@@ -285,6 +346,27 @@ def launch_batch(
 
     if not normalized_platforms:
         raise HTTPException(status_code=400, detail="At least one valid target platform must be selected.")
+
+    from apps.worker.mcp_client import meta_live_writes_enabled
+    if meta_live_writes_enabled():
+        missing_connection = [
+            name for name in ("MCP_META_SERVER_URL", "META_MCP_ACCESS_TOKEN", "META_AD_ACCOUNT_ID")
+            if not os.environ.get(name, "").strip()
+        ]
+        if missing_connection:
+            raise HTTPException(status_code=503, detail=f"Live Meta configuration is incomplete: {', '.join(missing_connection)}.")
+        if not req.meta_page_id or not req.targeting_country or not req.daily_budget_minor_units:
+            raise HTTPException(status_code=422, detail="Page ID, targeting country, and daily budget are required for Meta launch.")
+        if not req.targeting_country.strip().isalpha() or len(req.targeting_country.strip()) != 2:
+            raise HTTPException(status_code=422, detail="Targeting country must be a two-letter country code.")
+        if "instagram" in normalized_platforms and not req.instagram_user_id:
+            raise HTTPException(status_code=422, detail="Instagram account ID is required when Instagram is selected.")
+        if not req.creative_file or not req.creative_file.startswith("https://"):
+            raise HTTPException(status_code=422, detail="Meta launch requires an uploaded creative with a public HTTPS URL.")
+        if req.creative_mime_type not in {"image/jpeg", "image/png"}:
+            raise HTTPException(status_code=422, detail="The current Meta create chain requires a PNG or JPEG image creative.")
+        if req.special_ad_category not in {"NONE", "HOUSING", "EMPLOYMENT", "FINANCIAL_PRODUCTS_SERVICES", "ISSUES_ELECTIONS_POLITICS"}:
+            raise HTTPException(status_code=422, detail="Unsupported Meta special ad category.")
 
     batch_id = req.batch_id or f"batch_{req.client_id[:3]}_{uuid.uuid4().hex[:8]}"
     launch_attempt_id = (req.launch_attempt_id or "").strip() or f"lnch_{batch_id[:12]}_{uuid.uuid4().hex[:8]}"
@@ -428,30 +510,52 @@ def launch_batch(
                         dispatch_results.append({"ad_id": ad_id, "platform": plat, "status": "sent", "error": None})
                         continue
 
-                    # Execute MCP tool call
-                    mcp_resp = mcp_dispatcher.call_tool(
+                    cur.execute(
+                        "SELECT campaign_id, ad_set_id, creative_id, platform_ad_id FROM meta_launch_objects WHERE ad_id=%s AND platform=%s",
+                        (ad_id, plat),
+                    )
+                    stored_objects = cur.fetchone()
+                    existing_ids = dict(zip(("campaign", "ad_set", "creative", "ad"), stored_objects or (None, None, None, None)))
+
+                    def persist_meta_stage(stage: str, object_id: str) -> None:
+                        columns = {"campaign": "campaign_id", "ad_set": "ad_set_id", "creative": "creative_id", "ad": "platform_ad_id"}
+                        column = columns[stage]
+                        cur.execute(
+                            f"""INSERT INTO meta_launch_objects (ad_id, platform, {column}) VALUES (%s,%s,%s)
+                                ON CONFLICT (ad_id, platform) DO UPDATE SET {column}=EXCLUDED.{column}, updated_at=NOW()""",
+                            (ad_id, plat, object_id),
+                        )
+                        conn.commit()
+
+                    mcp_resp = mcp_dispatcher.dispatch_paused_ad(
                         platform=plat,
-                        tool_name=f"{plat}_dispatch_ad",
-                        arguments={
-                            "ad_id": ad_id,
-                            "headline": headline,
-                            "ad_text": ad_row[2],
-                            "creative_file": ad_row[5],
-                            "idempotency_key": disp_id,
-                            "destination_url": destination_url,
-                            "handle": handle,
-                        },
+                        ad_id=ad_id,
+                        campaign_name=req.campaign_name,
+                        headline=headline,
+                        ad_text=ad_row[2] or "",
+                        destination_url=destination_url or "",
+                        ad_account_id=os.environ.get("META_AD_ACCOUNT_ID", "").strip().removeprefix("act_"),
+                        page_id=req.meta_page_id or "",
+                        instagram_user_id=req.instagram_user_id,
+                        targeting_country=req.targeting_country or "",
+                        daily_budget_minor_units=req.daily_budget_minor_units or 0,
+                        image_url=req.creative_file or "",
+                        special_ad_category=req.special_ad_category,
+                        existing_ids=existing_ids,
+                        persist_stage=persist_meta_stage,
                     )
 
                     # Check success on every connector call; on failure do not write fake rows
                     if not mcp_resp.success or not (mcp_resp.result or {}).get("platform_ad_id"):
                         error_msg = mcp_resp.error or "Platform did not confirm an ad ID. Delivery is unconfirmed."
-                        is_unconfigured = error_msg in {"connector_not_configured", "real_platform_calls_disabled"}
+                        is_unconfigured = error_msg in {"connector_not_configured", "real_platform_calls_disabled"} or error_msg.startswith("meta_chain_incomplete:")
                         disp_status = "blocked_connector_not_configured" if is_unconfigured else "rejected"
                         if error_msg == "real_platform_calls_disabled":
                             review_status = "Blocked: Live Writes Disabled"
                         elif error_msg == "connector_not_configured":
                             review_status = "Blocked: Connector Not Configured"
+                        elif error_msg.startswith("meta_chain_incomplete:"):
+                            review_status = "Blocked: Meta creation incomplete"
                         else:
                             review_status = "Rejected / Dispatch Failed"
                         if error_msg == "real_platform_calls_disabled":
@@ -499,17 +603,22 @@ def launch_batch(
                             """
                             INSERT INTO ad_live_dispatches (
                                 dispatch_id, ad_id, batch_id, client_id, platform, handle,
-                                status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url, launch_attempt_id
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s)
+                                status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url, launch_attempt_id,
+                                meta_campaign_id, meta_ad_set_id, meta_creative_id
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s, %s)
                             ON CONFLICT (dispatch_id) DO UPDATE SET
                                 status = EXCLUDED.status,
                                 platform_ad_id = EXCLUDED.platform_ad_id,
                                 platform_review_status = EXCLUDED.platform_review_status,
                                 platform_review_notes = EXCLUDED.platform_review_notes,
                                 launch_attempt_id = EXCLUDED.launch_attempt_id,
+                                meta_campaign_id = EXCLUDED.meta_campaign_id,
+                                meta_ad_set_id = EXCLUDED.meta_ad_set_id,
+                                meta_creative_id = EXCLUDED.meta_creative_id,
                                 last_tracked_at = NOW();
                             """,
-                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, disp_status, disp_id, review_status, review_notes, launch_attempt_id),
+                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, disp_status, "", review_status, review_notes,
+                             launch_attempt_id, existing_ids.get("campaign"), existing_ids.get("ad_set"), existing_ids.get("creative")),
                         )
 
                         if not is_unconfigured:
@@ -544,57 +653,80 @@ def launch_batch(
                         """
                         INSERT INTO ad_live_dispatches (
                             dispatch_id, ad_id, batch_id, client_id, platform, handle,
-                            status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url,
+                            meta_campaign_id, meta_ad_set_id, meta_creative_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (dispatch_id) DO UPDATE SET
                             status = EXCLUDED.status,
+                            platform_ad_id = EXCLUDED.platform_ad_id,
                             platform_review_status = EXCLUDED.platform_review_status,
                             platform_review_notes = EXCLUDED.platform_review_notes,
+                            meta_campaign_id = EXCLUDED.meta_campaign_id,
+                            meta_ad_set_id = EXCLUDED.meta_ad_set_id,
+                            meta_creative_id = EXCLUDED.meta_creative_id,
                             last_tracked_at = NOW();
                         """,
-                        (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, platform_status, plat_ad_id, platform_review, audit_notes, live_url),
+                        (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, platform_status, plat_ad_id, platform_review, audit_notes, live_url,
+                         mcp_result.get("campaign_id"), mcp_result.get("ad_set_id"), mcp_result.get("creative_id")),
                     )
 
                     cur.execute("INSERT INTO ad_sends (send_id,ad_id,client_id,batch_id,idempotency_key,content_hash,platform,status,platform_ad_id,is_dry_run) VALUES (%s,%s,%s,%s,%s,%s,%s,'sent',%s,FALSE) ON CONFLICT (send_id) DO NOTHING",
                                 (f"send_{disp_id}",ad_id,req.client_id,actual_batch_id,disp_id,ad_row[4],plat,plat_ad_id))
                     perf_resp = mcp_dispatcher.call_tool(
                         platform=plat,
-                        tool_name=f"{plat}_track_performance",
-                        arguments={"platform_ad_id": plat_ad_id},
+                        tool_name="ads_get_ad_entities",
+                        arguments={
+                            "ad_account_id": os.environ.get("META_AD_ACCOUNT_ID", "").strip().removeprefix("act_"),
+                            "level": "ad",
+                            "object_ids": [plat_ad_id],
+                            "fields": ["amount_spent", "impressions", "clicks", "ctr", "omni_purchase", "omni_purchase_values"],
+                            "client_conversation_id": mcp_result.get("client_conversation_id") or uuid.uuid4().hex[:20],
+                            "advertiser_request": "Review and update the campaign preview, then confirm launch on the selected Meta platform(s).",
+                            "advertiser_job": "create_and_launch_new_ads",
+                        },
                     )
                     if perf_resp.success:
                         perf_res = perf_resp.result
-                        cur.execute(
-                            """
-                            INSERT INTO ad_performance_tracking (
-                                ad_id, batch_id, client_id, platform, handle,
-                                inbound_sales_usd, inbound_orders, impressions, clicks, ctr_percent, roas, spend_usd,
-                                has_rule_violation, violation_details, last_event
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s)
-                            ON CONFLICT (ad_id) DO UPDATE SET
-                                platform = EXCLUDED.platform,
-                                handle = EXCLUDED.handle,
-                                inbound_sales_usd = EXCLUDED.inbound_sales_usd,
-                                inbound_orders = EXCLUDED.inbound_orders,
-                                impressions = EXCLUDED.impressions,
-                                clicks = EXCLUDED.clicks,
-                                ctr_percent = EXCLUDED.ctr_percent,
-                                roas = EXCLUDED.roas,
-                                spend_usd = EXCLUDED.spend_usd,
-                                updated_at = NOW();
-                            """,
-                            (
-                                ad_id, actual_batch_id, req.client_id, plat, handle,
-                                perf_res.get("inbound_sales_usd"),
-                                perf_res.get("inbound_orders"),
-                                perf_res.get("impressions"),
-                                perf_res.get("clicks"),
-                                perf_res.get("ctr_percent"),
-                                perf_res.get("roas"),
-                                perf_res.get("spend_usd"),
-                                f"MCP tracking active (RPC: {perf_resp.rpc_id})",
-                            ),
-                        )
+                        perf_rows = perf_res if isinstance(perf_res, list) else (perf_res.get("ad_entities") or perf_res.get("data") or [])
+                        perf_ad = next((item for item in perf_rows if isinstance(item, dict) and str(item.get("id")) == str(plat_ad_id)), None)
+                        if perf_ad:
+                            account_currency = os.environ.get("META_AD_ACCOUNT_CURRENCY", "").strip().upper()
+                            spend = _metric_number(perf_ad.get("amount_spent"))
+                            purchase_values = _metric_number(perf_ad.get("omni_purchase_values"))
+                            sales_usd = purchase_values if account_currency == "USD" else None
+                            spend_usd = spend if account_currency == "USD" else None
+                            purchases = _metric_number(perf_ad.get("omni_purchase"))
+                            cur.execute(
+                                """
+                                INSERT INTO ad_performance_tracking (
+                                    ad_id, batch_id, client_id, platform, handle,
+                                    inbound_sales_usd, inbound_orders, impressions, clicks, ctr_percent, roas, spend_usd,
+                                    has_rule_violation, violation_details, last_event
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s)
+                                ON CONFLICT (ad_id, platform) DO UPDATE SET
+                                    platform = EXCLUDED.platform,
+                                    handle = EXCLUDED.handle,
+                                    inbound_sales_usd = EXCLUDED.inbound_sales_usd,
+                                    inbound_orders = EXCLUDED.inbound_orders,
+                                    impressions = EXCLUDED.impressions,
+                                    clicks = EXCLUDED.clicks,
+                                    ctr_percent = EXCLUDED.ctr_percent,
+                                    roas = EXCLUDED.roas,
+                                    spend_usd = EXCLUDED.spend_usd,
+                                    updated_at = NOW();
+                                """,
+                                (
+                                    ad_id, actual_batch_id, req.client_id, plat, handle,
+                                    sales_usd,
+                                    int(purchases) if purchases is not None else None,
+                                    int(_metric_number(perf_ad.get("impressions"))) if _metric_number(perf_ad.get("impressions")) is not None else None,
+                                    int(_metric_number(perf_ad.get("clicks"))) if _metric_number(perf_ad.get("clicks")) is not None else None,
+                                    _metric_number(perf_ad.get("ctr")),
+                                    round(sales_usd / spend_usd, 2) if sales_usd is not None and spend_usd and spend_usd > 0 else None,
+                                    spend_usd,
+                                    f"Meta Ads insights (RPC: {perf_resp.rpc_id})",
+                                ),
+                            )
                 ad_results = [item["status"] for item in dispatch_results if item["ad_id"] == ad_id]
                 if ad_results and all(value == "blocked" for value in ad_results):
                     cur.execute("UPDATE ad_approvals SET state = 'blocked_connector_not_configured', rejection_reason = %s WHERE ad_id = %s AND state = 'approved'", ("Meta connector not configured", ad_id))
@@ -677,7 +809,7 @@ def get_mcp_traces(
     traces = [
         {
             "server": f"mcp_{r[2]}",
-            "tool": f"{r[2]}_dispatch_ad",
+            "tool": "Meta Ads create/activation chain",
             "status": r[4],
             "duration_ms": None,
             "handle": r[3],
@@ -1183,6 +1315,7 @@ def get_all_campaigns(
                 JOIN batches b ON a.batch_id = b.batch_id
                 LEFT JOIN ad_live_dispatches d ON a.ad_id = d.ad_id
                 LEFT JOIN ad_performance_tracking p ON a.ad_id = p.ad_id
+                    AND LOWER(p.platform) = LOWER(COALESCE(d.platform, a.platform))
                 {where_str}
                 ORDER BY b.created_at DESC, a.row_number ASC
                 LIMIT 100;
