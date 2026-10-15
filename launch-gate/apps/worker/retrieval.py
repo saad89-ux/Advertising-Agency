@@ -1,0 +1,301 @@
+"""Client-filtered vector retrieval for client rules and claims."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+import logging
+import math
+from typing import Any
+
+from pgvector import Vector
+from pgvector.psycopg import register_vector
+
+from apps.api.database import get_session
+from apps.worker.client_rule_loader import CREATE_CLIENT_RULES_TABLE
+
+logger = logging.getLogger(__name__)
+
+EmbedText = Callable[[str], Sequence[float]]
+
+METRIC_OPERATORS: dict[str, str] = {
+    "cosine": "<=>",
+    "l2": "<->",
+    "euclidean": "<->",
+    "inner_product": "<#>",
+    "ip": "<#>",
+}
+
+SELECT_CLIENT_RULES = """
+SELECT client_id, entry_number, source_file, content, (embedding <=> %s) AS distance
+FROM client_rules
+WHERE client_id = %s
+ORDER BY embedding <=> %s ASC
+LIMIT %s
+"""
+
+
+@dataclass(frozen=True)
+class RetrievedRule:
+    """A retrieved client rule or claim entry with vector similarity distance."""
+
+    client_id: str
+    entry_number: str
+    source_file: str
+    content: str
+    distance: float = 0.0
+
+    @property
+    def similarity(self) -> float:
+        """Cosine similarity derived from distance (1 - distance)."""
+        return 1.0 - self.distance
+
+
+def _validated_query_vector(raw_vector: Any) -> tuple[float, ...]:
+    """Validate query vector elements are finite numeric floats."""
+    if isinstance(raw_vector, (str, bytes)) or not isinstance(raw_vector, Sequence):
+        raise ValueError("query embedding must be a sequence of numbers")
+    if not raw_vector:
+        raise ValueError("query embedding cannot be empty")
+
+    vector: list[float] = []
+    for value in raw_vector:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("query embedding values must be numbers")
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError("query embedding values must be finite")
+        vector.append(numeric)
+    return tuple(vector)
+
+
+def _format_query(operator: str) -> str:
+    return f"""
+SELECT client_id, entry_number, source_file, content, (embedding {operator} %s) AS distance
+FROM client_rules
+WHERE client_id = %s
+ORDER BY embedding {operator} %s ASC
+LIMIT %s
+"""
+
+
+def retrieve_client_rules(
+    client_id: str,
+    query_embedding: Sequence[float] | None = None,
+    *,
+    query_text: str | None = None,
+    embed_text: EmbedText | None = None,
+    top_k: int = 5,
+    metric: str = "cosine",
+    connection: Any = None,
+) -> list[RetrievedRule]:
+    """Retrieve top-k rules strictly filtered to `client_id` by vector distance.
+
+    Never returns rules belonging to another client, even if another client's
+    rule has a closer or exact matching embedding.
+    """
+    if not isinstance(client_id, str) or not client_id.strip():
+        raise ValueError("client_id must be a non-empty string")
+    clean_client_id = client_id.strip()
+
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k <= 0:
+        raise ValueError("top_k must be a positive integer")
+
+    if metric not in METRIC_OPERATORS:
+        raise ValueError(
+            f"unsupported metric {metric!r}; supported: {sorted(METRIC_OPERATORS)}"
+        )
+    operator = METRIC_OPERATORS[metric]
+
+    if query_embedding is None:
+        if query_text is None:
+            raise ValueError("either query_embedding or query_text must be provided")
+        if not isinstance(query_text, str) or not query_text.strip():
+            raise ValueError("query_text cannot be empty")
+        if embed_text is None or not callable(embed_text):
+            raise ValueError("embed_text callable must be provided when query_text is given")
+        try:
+            query_embedding = embed_text(query_text)
+        except Exception as exc:
+            raise ValueError("embedding function failed for query text") from exc
+
+    vector = _validated_query_vector(query_embedding)
+
+    def _execute(conn: Any) -> list[RetrievedRule]:
+        try:
+            register_vector(conn)
+        except Exception:
+            pass
+
+        vec_param = Vector(list(vector))
+        query = _format_query(operator)
+        cursor = conn.execute(query, (vec_param, clean_client_id, vec_param, top_k))
+        rows = cursor.fetchall() if hasattr(cursor, "fetchall") else cursor
+
+        results: list[RetrievedRule] = []
+        for row in rows:
+            if isinstance(row, dict):
+                cid = row["client_id"]
+                entry_number = row["entry_number"]
+                source_file = row["source_file"]
+                content = row["content"]
+                distance = float(row["distance"])
+            else:
+                cid, entry_number, source_file, content, distance = (
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    float(row[4]),
+                )
+
+            # Defensive client isolation barrier: drop any cross-client row
+            if cid != clean_client_id:
+                logger.error(
+                    "Isolation violation prevented: retrieved rule client_id %r does not match %r",
+                    cid,
+                    clean_client_id,
+                )
+                continue
+
+            results.append(
+                RetrievedRule(
+                    client_id=cid,
+                    entry_number=entry_number,
+                    source_file=source_file,
+                    content=content,
+                    distance=distance,
+                )
+            )
+        return results
+
+    if connection is not None:
+        return _execute(connection)
+    with get_session() as session:
+        return _execute(session)
+
+
+def retrieve_rule_by_entry(
+    client_id: str,
+    entry_number: str,
+    *,
+    connection: Any = None,
+) -> RetrievedRule | None:
+    """Retrieve a single rule by client_id and exact entry_number."""
+    if not isinstance(client_id, str) or not client_id.strip():
+        raise ValueError("client_id must be a non-empty string")
+    if not isinstance(entry_number, str) or not entry_number.strip():
+        raise ValueError("entry_number must be a non-empty string")
+    clean_client_id = client_id.strip()
+    clean_entry_number = entry_number.strip()
+
+    def _execute(conn: Any) -> RetrievedRule | None:
+        cursor = conn.execute(
+            """
+            SELECT client_id, entry_number, source_file, content
+            FROM client_rules
+            WHERE client_id = %s AND entry_number = %s
+            """,
+            (clean_client_id, clean_entry_number),
+        )
+        rows = cursor.fetchall() if hasattr(cursor, "fetchall") else cursor
+        if not rows:
+            return None
+        row = rows[0]
+        if isinstance(row, dict):
+            cid = row["client_id"]
+            entry = row["entry_number"]
+            source = row["source_file"]
+            content = row["content"]
+        else:
+            cid, entry, source, content = row[0], row[1], row[2], row[3]
+
+        if cid != clean_client_id:
+            return None
+
+        return RetrievedRule(
+            client_id=cid,
+            entry_number=entry,
+            source_file=source,
+            content=content,
+            distance=0.0,
+        )
+
+    if connection is not None:
+        return _execute(connection)
+    with get_session() as session:
+        return _execute(session)
+
+
+def list_client_rules(
+    client_id: str,
+    *,
+    connection: Any = None,
+) -> list[RetrievedRule]:
+    """List all stored rules for a specific client_id."""
+    if not isinstance(client_id, str) or not client_id.strip():
+        raise ValueError("client_id must be a non-empty string")
+    clean_client_id = client_id.strip()
+
+    def _execute(conn: Any) -> list[RetrievedRule]:
+        cursor = conn.execute(
+            """
+            SELECT client_id, entry_number, source_file, content
+            FROM client_rules
+            WHERE client_id = %s
+            ORDER BY entry_number ASC
+            """,
+            (clean_client_id,),
+        )
+        rows = cursor.fetchall() if hasattr(cursor, "fetchall") else cursor
+        results: list[RetrievedRule] = []
+        for row in rows:
+            if isinstance(row, dict):
+                cid = row["client_id"]
+                entry_number = row["entry_number"]
+                source_file = row["source_file"]
+                content = row["content"]
+            else:
+                cid, entry_number, source_file, content = row[0], row[1], row[2], row[3]
+
+            if cid != clean_client_id:
+                continue
+
+            results.append(
+                RetrievedRule(
+                    client_id=cid,
+                    entry_number=entry_number,
+                    source_file=source_file,
+                    content=content,
+                    distance=0.0,
+                )
+            )
+        return results
+
+    if connection is not None:
+        return _execute(connection)
+    with get_session() as session:
+        return _execute(session)
+
+
+def verify_citation(
+    retrieved_rules: Sequence[RetrievedRule],
+    cited_entry: str,
+) -> bool:
+    """Verify whether a cited rule entry number exists in retrieved rules."""
+    if not cited_entry or not isinstance(cited_entry, str):
+        return False
+    target = cited_entry.strip()
+    return any(rule.entry_number == target for rule in retrieved_rules)
+
+
+def format_retrieved_rules_for_context(
+    retrieved_rules: Sequence[RetrievedRule],
+) -> str:
+    """Format retrieved rules into text block for LLM wording check context."""
+    if not retrieved_rules:
+        return ""
+    blocks: list[str] = []
+    for rule in retrieved_rules:
+        blocks.append(f"[{rule.entry_number}] ({rule.source_file}):\n{rule.content}")
+    return "\n\n".join(blocks)

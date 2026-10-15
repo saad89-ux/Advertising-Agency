@@ -32,3 +32,10 @@ def max_xlsx_uncompressed_bytes() -> int:
     return _positive_int(
         "MAX_XLSX_UNCOMPRESSED_BYTES", DEFAULT_MAX_XLSX_UNCOMPRESSED_BYTES
     )
+
+
+DEFAULT_MAX_EDIT_LOOPS = 5
+
+
+def max_edit_loops() -> int:
+    return _positive_int("MAX_EDIT_LOOPS", DEFAULT_MAX_EDIT_LOOPS)

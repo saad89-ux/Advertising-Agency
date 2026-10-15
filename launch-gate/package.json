@@ -1,0 +1,12 @@
+{
+  "name": "launch-gate",
+  "version": "1.0.0",
+  "description": "Pre-launch ad quality, compliance, and verification gate",
+  "private": true,
+  "scripts": {
+    "dev": "python run_local.py",
+    "start": "python run_local.py",
+    "web": "npm run dev --prefix apps/web",
+    "test": "pytest"
+  }
+}

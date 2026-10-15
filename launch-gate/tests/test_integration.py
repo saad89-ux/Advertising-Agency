@@ -78,6 +78,7 @@ def _clean_test_db(test_db_url: str) -> None:
                 DROP TABLE IF EXISTS users CASCADE;
                 DROP TABLE IF EXISTS clients CASCADE;
                 DROP TABLE IF EXISTS client_rules CASCADE;
+                DROP TABLE IF EXISTS cost_ledger CASCADE;
             """)
     except Exception as exc:
         pytest.fail(f"PostgreSQL service at TEST_DATABASE_URL is unreachable or error: {exc}")
@@ -466,3 +467,162 @@ def test_redis_down_leaves_jobs_pending_in_outbox(real_services, monkeypatch):
 
     # In Redis, queue now has the 2 jobs
     assert redis_client.llen(queue.AD_JOB_QUEUE) == 2
+
+
+def test_worker_job_runner_integration(real_services, monkeypatch):
+    """Cover worker runner against real PostgreSQL and Redis (Task W1).
+
+    Verifies:
+    1. one job -> expected findings in PostgreSQL findings table
+    2. same job twice -> no duplicates (idempotent)
+    3. clean ad -> zero findings
+    4. crash mid-job -> job still retryable in Redis
+    """
+    from apps.worker import job_runner
+    from apps.worker.job_runner import run_once
+
+    test_db_url = real_services["test_db_url"]
+    test_redis_url = real_services["test_redis_url"]
+    _seed_test_users_and_clients(test_db_url)
+
+    client = TestClient(app)
+    login_res = client.post(
+        "/auth/login",
+        json={"email": "buyer@test.test", "password": "ValidPassword123!"},
+    )
+    token = login_res.json()["access_token"]
+    auth_header = {"Authorization": f"Bearer {token}"}
+
+    # Upload two ads: row 1 has missing utm_source, row 2 is clean
+    csv_content = (
+        "Row,Platform,Headline,Ad Text,Destination URL,Creative file\n"
+        "1,Facebook,Promo 1,Text 1,https://brightleaf.example/promo?utm_medium=paid_social&utm_campaign=brand_jan,brightleaf_300x250.png\n"
+        "2,Facebook,Promo 2,Text 2,https://brightleaf.example/landing?utm_source=facebook&utm_medium=paid_social&utm_campaign=brand_jan,brightleaf_300x250.png\n"
+    ).encode("utf-8")
+
+    upload_res = client.post(
+        "/uploads",
+        files={"file": ("worker_test.csv", csv_content, "text/csv")},
+        headers=auth_header,
+    )
+    assert upload_res.status_code == 201
+    batch_id = upload_res.json()["batch_id"]
+
+    redis_client = Redis.from_url(test_redis_url, decode_responses=True)
+    assert redis_client.llen(queue.AD_JOB_QUEUE) == 2
+
+    # Get ad IDs from test DB
+    with psycopg.connect(test_db_url) as conn:
+        ad_rows = conn.execute(
+            """SELECT ad_id, row_number FROM ads WHERE batch_id = %s ORDER BY row_number""",
+            (batch_id,),
+        ).fetchall()
+    assert len(ad_rows) == 2
+    ad_id_1, ad_id_2 = ad_rows[0][0], ad_rows[1][0]
+
+    # 1. Process job 1: one job -> expected findings
+    processed_job_1 = run_once(redis_client=redis_client, run_page_checks=False)
+    assert processed_job_1 is not None
+    assert processed_job_1.ad_id == ad_id_1
+
+    with psycopg.connect(test_db_url) as conn:
+        findings_1 = conn.execute(
+            """SELECT finding_id, field, proposed_fix, check_type
+               FROM findings WHERE ad_id = %s""",
+            (ad_id_1,),
+        ).fetchall()
+
+    assert len(findings_1) > 0
+    fields_1 = {row[1] for row in findings_1}
+    assert "utm_source" in fields_1
+    assert all(row[3] == "mechanical" for row in findings_1)
+
+    # 2. Same job twice -> no duplicates (idempotency)
+    # Re-push job 1 to Redis
+    queue.enqueue_ad_jobs([processed_job_1], redis_client=redis_client)
+    repeat_job_1 = run_once(redis_client=redis_client, run_page_checks=False)
+    assert repeat_job_1 == processed_job_1
+
+    with psycopg.connect(test_db_url) as conn:
+        findings_1_repeat = conn.execute(
+            """SELECT finding_id FROM findings WHERE ad_id = %s""",
+            (ad_id_1,),
+        ).fetchall()
+    assert len(findings_1_repeat) == len(findings_1)
+
+    # 3. Clean ad -> zero findings
+    processed_job_2 = run_once(redis_client=redis_client, run_page_checks=False)
+    assert processed_job_2 is not None
+    assert processed_job_2.ad_id == ad_id_2
+
+    with psycopg.connect(test_db_url) as conn:
+        findings_2 = conn.execute(
+            """SELECT finding_id FROM findings WHERE ad_id = %s""",
+            (ad_id_2,),
+        ).fetchall()
+    assert len(findings_2) == 0
+
+    # 4. Crash mid-job -> job still retryable
+    # Enqueue a test job
+    crash_job = queue.AdJob(batch_id=batch_id, ad_id=ad_id_1)
+    queue.enqueue_ad_jobs([crash_job], redis_client=redis_client)
+    assert redis_client.llen(queue.AD_JOB_QUEUE) == 1
+
+    def crashing_process(job, **kwargs):
+        raise RuntimeError("Injected worker crash")
+
+    monkeypatch.setattr(job_runner, "process_job", crashing_process)
+    crash_res = run_once(redis_client=redis_client)
+    assert crash_res is None
+    # Job was preserved in Redis queue for retry
+    assert redis_client.llen(queue.AD_JOB_QUEUE) == 1
+    retry_popped = queue.dequeue_ad_job(redis_client=redis_client)
+    assert retry_popped == crash_job
+
+
+def test_retrieval_client_isolation_integration(real_services, monkeypatch):
+    """Real PostgreSQL + pgvector test: verify client-filtered retrieval and cross-client isolation."""
+    from apps.worker.client_rule_loader import load_client_rules
+    from apps.worker.retrieval import (
+        list_client_rules,
+        retrieve_client_rules,
+        retrieve_rule_by_entry,
+    )
+
+    test_db_url = real_services["test_db_url"]
+    _seed_test_users_and_clients(test_db_url)
+
+    # Simple deterministic 4-dim embedding
+    def embed_func(text: str) -> list[float]:
+        v = [0.0, 0.0, 0.0, 0.0]
+        for idx, ch in enumerate(text):
+            v[idx % 4] += ord(ch)
+        norm = (sum(x * x for x in v) ** 0.5) or 1.0
+        return [x / norm for x in v]
+
+    # Load rules for brightleaf and oakandhome
+    bl_count = load_client_rules(embed_func, client_id="brightleaf")
+    oh_count = load_client_rules(embed_func, client_id="oakandhome")
+    assert bl_count > 0
+    assert oh_count > 0
+
+    # Retrieve an oakandhome rule directly to get its exact vector
+    oh_rules = list_client_rules("oakandhome")
+    assert len(oh_rules) > 0
+    target_oh_rule = oh_rules[0]
+    oh_vector = embed_func(target_oh_rule.content)
+
+    # Query for brightleaf using oakandhome's exact embedding vector
+    results = retrieve_client_rules("brightleaf", oh_vector, top_k=5)
+
+    # Multi-tenant isolation: every single returned rule MUST belong to brightleaf
+    assert len(results) > 0
+    assert all(r.client_id == "brightleaf" for r in results)
+    assert not any(r.client_id == "oakandhome" for r in results)
+    assert not any(r.entry_number.startswith("OH-") for r in results)
+
+    # Exact rule lookup cross-client isolation
+    assert retrieve_rule_by_entry("brightleaf", target_oh_rule.entry_number) is None
+    assert retrieve_rule_by_entry("oakandhome", target_oh_rule.entry_number) is not None
+
+

@@ -6,3 +6,5 @@ __pycache__/
 .pytest_cache/
 .venv/
 .pytest_temp/
+
+node_modules

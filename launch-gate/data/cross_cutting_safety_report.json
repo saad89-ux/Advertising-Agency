@@ -1,0 +1,232 @@
+{
+  "evaluation": "cross_cutting_safety_suite",
+  "timestamp": "2026-10-14T22:16:19.053859+00:00",
+  "status": "passed",
+  "passed": true,
+  "elapsed_seconds": 1.401,
+  "scenarios": {
+    "repeat_clicks": {
+      "scenario": "500_repeat_clicks",
+      "passed": true,
+      "sequential_test": {
+        "total_clicks": 500,
+        "idempotent_replays": 499,
+        "platform_ads_stored": 1,
+        "platform_duplicates": 0,
+        "duration_seconds": 0.0234
+      },
+      "concurrent_test": {
+        "total_threads": 500,
+        "max_workers": 20,
+        "platform_ads_stored": 1,
+        "platform_duplicates": 0,
+        "duration_seconds": 0.1923
+      },
+      "unapproved_clicks_rejected": 500,
+      "tampered_clicks_rejected": 500
+    },
+    "worker_killed": {
+      "scenario": "worker_killed_mid_send",
+      "passed": true,
+      "pre_network_crash_recovery": {
+        "recovered_status": "sent",
+        "platform_duplicates": 0
+      },
+      "post_commit_crash_recovery": {
+        "recovered_status": "sent",
+        "idempotent_replay": true,
+        "platform_duplicates": 0
+      },
+      "orphaned_sending_sweep": {
+        "reconciled_count": 1,
+        "reconciled_state": "approved",
+        "alert_type": "stuck_sending",
+        "auto_relaunch_prevented": true
+      }
+    },
+    "cross_client": {
+      "scenario": "cross_client_probes",
+      "passed": true,
+      "rule_overlap_count": 0,
+      "api_probes_total": 10,
+      "api_probes_blocked": 10,
+      "api_probe_details": [
+        {
+          "probe": "Foreign batch detail",
+          "path": "/batches/batch_oakandhome",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign batch ads list",
+          "path": "/batches/batch_oakandhome/ads",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign ad approval",
+          "path": "/ads/ad_oakandhome_1/approve",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign ad edit",
+          "path": "/ads/ad_oakandhome_1/edit",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign finding dismiss",
+          "path": "/ads/ad_oakandhome_1/findings/finding_oh_1/dismiss",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign ad send",
+          "path": "/ads/ad_oakandhome_1/send",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign batch send",
+          "path": "/batches/batch_oakandhome/send-approved",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign batch alerts",
+          "path": "/batches/batch_oakandhome/alerts",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign batch dead-letter",
+          "path": "/batches/batch_oakandhome/dead-letter",
+          "status_code": 404,
+          "blocked": true
+        },
+        {
+          "probe": "Foreign batch metrics",
+          "path": "/batches/batch_oakandhome/metrics",
+          "status_code": 404,
+          "blocked": true
+        }
+      ],
+      "adversarial_containment": {
+        "total_rows": 12,
+        "contained_count": 12,
+        "policy": "zero actions outside policy; zero cross-client leaks; nothing approved or sent by text",
+        "details": [
+          {
+            "row_number": 1,
+            "client_id": "oakandhome",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 2,
+            "client_id": "brightleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 3,
+            "client_id": "brightleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 4,
+            "client_id": "brightleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "cross_client_rule_id"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 5,
+            "client_id": "brightleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "unknown_or_missing_rule_id"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 6,
+            "client_id": "calmleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "cross_client_rule_text"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 7,
+            "client_id": "calmleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 8,
+            "client_id": "oakandhome",
+            "needs_person": true,
+            "rejected_reasons": [
+              "unknown_or_missing_rule_id"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 9,
+            "client_id": "oakandhome",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 10,
+            "client_id": "brightleaf",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 11,
+            "client_id": "oakandhome",
+            "needs_person": true,
+            "rejected_reasons": [
+              "unknown_or_missing_rule_id"
+            ],
+            "contained": true
+          },
+          {
+            "row_number": 12,
+            "client_id": "oakandhome",
+            "needs_person": true,
+            "rejected_reasons": [
+              "invalid_output_shape"
+            ],
+            "contained": true
+          }
+        ]
+      }
+    }
+  }
+}
