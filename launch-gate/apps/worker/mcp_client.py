@@ -114,12 +114,54 @@ class MCPPlatformDispatcher:
 
         logger.info("[MCP EXECUTE] Platform: %s | Tool: %s | RPC ID: %s", platform, tool_name, rpc_id)
 
-        # Check for remote external MCP server endpoint
+        # 1. Real TikTok for Business MCP execution via official SDK
+        if platform == "tiktok":
+            tt_token = os.environ.get("TIKTOK_MCP_ACCESS_TOKEN", "").strip()
+            if self.tiktok_mcp_url and tt_token:
+                try:
+                    from apps.worker.tiktok_mcp_client import (
+                        TikTokMCPClient,
+                        ACTION_TIKTOK_READ_PERFORMANCE,
+                        ACTION_TIKTOK_READ_AD_REVIEW_STATUS,
+                        ACTION_TIKTOK_CREATE_PAUSED_AD,
+                    )
+                    tt_client = TikTokMCPClient(server_url=self.tiktok_mcp_url, access_token=tt_token)
+                    action = None
+                    if "performance" in tool_name:
+                        action = ACTION_TIKTOK_READ_PERFORMANCE
+                    elif any(k in tool_name for k in ("policy", "audit", "review")):
+                        action = ACTION_TIKTOK_READ_AD_REVIEW_STATUS
+                    elif any(k in tool_name for k in ("dispatch", "create")):
+                        action = ACTION_TIKTOK_CREATE_PAUSED_AD
+
+                    if action:
+                        res = tt_client.execute_action_sync(action, arguments)
+                    else:
+                        res = tt_client.call_tool_sync(tool_name, arguments)
+
+                    return MCPResponse(
+                        success=res.success,
+                        platform="tiktok",
+                        tool_name=res.tool_name,
+                        result=res.result,
+                        error=res.error,
+                        rpc_id=res.rpc_id,
+                    )
+                except Exception as tt_err:
+                    logger.warning("TikTok MCP execution failed: %s", tt_err)
+                    return MCPResponse(
+                        success=False,
+                        platform="tiktok",
+                        tool_name=tool_name,
+                        result={},
+                        error=str(tt_err),
+                        rpc_id=rpc_id,
+                    )
+
+        # 2. Check for other remote external MCP endpoints
         endpoint = None
         if platform in {"instagram", "facebook"} and self.meta_mcp_url:
             endpoint = self.meta_mcp_url
-        elif platform == "tiktok" and self.tiktok_mcp_url:
-            endpoint = self.tiktok_mcp_url
         elif platform == "x" and self.x_mcp_url:
             endpoint = self.x_mcp_url
 
