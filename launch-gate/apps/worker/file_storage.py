@@ -76,3 +76,51 @@ class LocalFileStore:
         except ValueError:
             raise ValueError("storage file reference escapes the storage directory") from None
         return target
+
+
+class UnifiedFileStore:
+    """Unified file store prioritizing Cloudinary for persistent CDN storage with local disk fallback."""
+
+    def __init__(self, root: str | Path | None = None) -> None:
+        self.local = LocalFileStore(root=root)
+        self.cloud = None
+        try:
+            from apps.worker.cloud_storage import CloudinaryFileStore, is_cloudinary_configured
+            if is_cloudinary_configured():
+                self.cloud = CloudinaryFileStore()
+        except Exception:
+            self.cloud = None
+
+    def put(self, content: bytes, resource_type: str = "auto") -> str:
+        """Persist content to Cloudinary if configured; otherwise use LocalFileStore."""
+        if self.cloud is not None:
+            try:
+                return self.cloud.put(content, resource_type=resource_type)
+            except Exception:
+                pass
+        return self.local.put(content)
+
+    def get(self, file_ref: str) -> bytes:
+        """Retrieve content from Cloudinary CDN URL or local storage."""
+        if file_ref.startswith("http://") or file_ref.startswith("https://"):
+            if self.cloud is not None:
+                return self.cloud.get(file_ref)
+            import urllib.request
+            req = urllib.request.Request(file_ref, headers={"User-Agent": "LaunchGate/1.0"})
+            with urllib.request.urlopen(req) as resp:
+                return resp.read()
+        return self.local.get(file_ref)
+
+    def delete(self, file_ref: str) -> None:
+        """Delete from Cloudinary if URL; otherwise from local storage."""
+        if file_ref.startswith("http://") or file_ref.startswith("https://"):
+            if self.cloud is not None:
+                self.cloud.delete(file_ref)
+        else:
+            self.local.delete(file_ref)
+
+
+def get_file_store(root: str | Path | None = None) -> UnifiedFileStore:
+    """Return a unified file store instance configured for the environment."""
+    return UnifiedFileStore(root=root)
+

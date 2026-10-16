@@ -19,9 +19,14 @@ SPEND_CAP_PER_ROW_DEFAULT = 0.01   # $0.01 hard cap per ad row
 SPEND_CAP_TOTAL_DEFAULT = 15.00    # $15.00 total assessment spend cap
 
 # Pricing per million tokens (USD)
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MODEL_PRICING: dict[str, dict[str, float]] = {
+    "gemini-3.5-flash-lite": {"input": 0.075 / 1_000_000, "output": 0.30 / 1_000_000},
+    "gemini-3.8-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-3.5-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-flash-latest": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-2.5-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
     "gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
     "gemini-1.5-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
     "gemini-1.5-pro": {"input": 1.25 / 1_000_000, "output": 5.00 / 1_000_000},

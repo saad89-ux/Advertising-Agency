@@ -327,16 +327,62 @@ def process_job(
                 sheet_hash=row[10],
             )
 
+        # 0. Initialize Tracing (Postgres + Langfuse if configured)
+        from apps.worker.tracing import get_default_tracer
+        tracer = get_default_tracer(conn)
+        trace_id = f"{ad_contract.batch_id}:{ad_contract.ad_id}"
+        try:
+            tracer.start_trace(
+                trace_id=trace_id,
+                batch_id=ad_contract.batch_id,
+                ad_id=ad_contract.ad_id,
+                client_id=ad_contract.client_id,
+                metadata={"platform": ad_contract.platform, "headline": ad_contract.headline},
+            )
+        except Exception as exc:
+            logger.debug("Failed start_trace for %s: %s", trace_id, exc)
+
         # 1. Run mechanical checks
         findings: list[FindingContract] = []
+        span_mech = None
+        try:
+            span_mech = tracer.start_span(
+                trace_id,
+                "mechanical_checks",
+                input_data={"platform": ad_contract.platform, "destination_url": ad_contract.destination_url},
+            )
+        except Exception:
+            pass
+
         findings.extend(check_utm_presence(ad_contract))
         findings.extend(check_utm_naming(ad_contract))
         findings.extend(check_platform_text_limits(ad_contract, platforms_map))
         findings.extend(check_stale_platform_limits(ad_contract, limits_config))
         findings.extend(check_creative_size_ratio(ad_contract, manifest_map, platforms_map))
 
+        if span_mech:
+            try:
+                tracer.end_span(
+                    span_mech,
+                    trace_id,
+                    output_data={"findings_count": len(findings)},
+                    status="completed",
+                )
+            except Exception:
+                pass
+
         # 2. Run page checks
         if run_page_checks:
+            span_page = None
+            try:
+                span_page = tracer.start_span(
+                    trace_id,
+                    "page_offer_checks",
+                    input_data={"destination_url": ad_contract.destination_url},
+                )
+            except Exception:
+                pass
+
             page_findings, shared_state = asyncio.run(
                 _execute_page_checks(
                     ad_contract,
@@ -354,8 +400,29 @@ def process_job(
                 except Exception:
                     pass
 
+            if span_page:
+                try:
+                    tracer.end_span(
+                        span_page,
+                        trace_id,
+                        output_data={"findings_count": len(page_findings)},
+                        status="completed",
+                    )
+                except Exception:
+                    pass
+
         # 3. Run wording checks
         if run_wording_checks:
+            span_wording = None
+            try:
+                span_wording = tracer.start_span(
+                    trace_id,
+                    "wording_checks",
+                    input_data={"headline": ad_contract.headline, "ad_text": ad_contract.ad_text},
+                )
+            except Exception:
+                pass
+
             from apps.worker.wording_check import check_wording
             existing_shared_state = LATEST_SHARED_STATE.get(ad_contract.ad_id)
             wording_result = check_wording(
@@ -366,12 +433,25 @@ def process_job(
                 file_store=file_store,
                 shared_state=existing_shared_state,
                 connection=conn,
+                tracer=tracer,
+                trace_id=trace_id,
             )
             findings.extend(wording_result.findings)
             LATEST_SHARED_STATE[ad_contract.ad_id] = wording_result.shared_state
             if hasattr(job, "__dict__"):
                 try:
                     setattr(job, "shared_state", wording_result.shared_state)
+                except Exception:
+                    pass
+
+            if span_wording:
+                try:
+                    tracer.end_span(
+                        span_wording,
+                        trace_id,
+                        output_data={"findings_count": len(wording_result.findings)},
+                        status="completed",
+                    )
                 except Exception:
                     pass
 
@@ -386,11 +466,22 @@ def process_job(
         # 4. Persist findings idempotently
         persist_findings_on_connection(conn, findings)
 
-        # 5. Broadcast SSE live update
+        # 5. Broadcast SSE live update & Finalize Trace
+        from apps.worker.verdict import aggregate_ad_verdict
+        v_res = aggregate_ad_verdict(ad_contract, findings)
+
+        try:
+            tracer.end_trace(
+                trace_id=trace_id,
+                verdict=v_res.status.value,
+                step_count=3 if run_wording_checks else 2,
+            )
+            tracer.flush()
+        except Exception as exc:
+            logger.debug("Failed finalizing trace %s: %s", trace_id, exc)
+
         try:
             from apps.api.sse import notify_ad_update
-            from apps.worker.verdict import aggregate_ad_verdict
-            v_res = aggregate_ad_verdict(ad_contract, findings)
             notify_ad_update(
                 ad_contract.batch_id,
                 ad_contract.ad_id,
@@ -422,7 +513,7 @@ def run_once(
     page_timeout_ms: int = 5000,
     file_store: LocalFileStore | None = None,
     as_of: date | None = None,
-    run_wording_checks: bool = False,
+    run_wording_checks: bool = True,
     model_client: Any = None,
     embed_fn: Any = None,
     retrieved_rules: Sequence[Any] | None = None,

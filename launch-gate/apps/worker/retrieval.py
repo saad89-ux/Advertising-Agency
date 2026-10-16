@@ -237,40 +237,64 @@ def list_client_rules(
         raise ValueError("client_id must be a non-empty string")
     clean_client_id = client_id.strip()
 
-    def _execute(conn: Any) -> list[RetrievedRule]:
-        cursor = conn.execute(
-            """
-            SELECT client_id, entry_number, source_file, content
-            FROM client_rules
-            WHERE client_id = %s
-            ORDER BY entry_number ASC
-            """,
-            (clean_client_id,),
-        )
-        rows = cursor.fetchall() if hasattr(cursor, "fetchall") else cursor
-        results: list[RetrievedRule] = []
-        for row in rows:
-            if isinstance(row, dict):
-                cid = row["client_id"]
-                entry_number = row["entry_number"]
-                source_file = row["source_file"]
-                content = row["content"]
-            else:
-                cid, entry_number, source_file, content = row[0], row[1], row[2], row[3]
-
-            if cid != clean_client_id:
-                continue
-
-            results.append(
+    def _from_files() -> list[RetrievedRule]:
+        from apps.worker.client_rule_loader import load_rule_entries
+        try:
+            entries = load_rule_entries(client_id=clean_client_id)
+            return [
                 RetrievedRule(
-                    client_id=cid,
-                    entry_number=entry_number,
-                    source_file=source_file,
-                    content=content,
+                    client_id=e.client_id,
+                    entry_number=e.entry_number,
+                    source_file=e.source_file,
+                    content=e.content,
                     distance=0.0,
                 )
+                for e in entries
+                if e.client_id == clean_client_id
+            ]
+        except Exception:
+            return []
+
+    def _execute(conn: Any) -> list[RetrievedRule]:
+        try:
+            cursor = conn.execute(
+                """
+                SELECT client_id, entry_number, source_file, content
+                FROM client_rules
+                WHERE client_id = %s
+                ORDER BY entry_number ASC
+                """,
+                (clean_client_id,),
             )
-        return results
+            rows = cursor.fetchall() if hasattr(cursor, "fetchall") else cursor
+            if not rows:
+                return _from_files()
+
+            results: list[RetrievedRule] = []
+            for row in rows:
+                if isinstance(row, dict):
+                    cid = row["client_id"]
+                    entry_number = row["entry_number"]
+                    source_file = row["source_file"]
+                    content = row["content"]
+                else:
+                    cid, entry_number, source_file, content = row[0], row[1], row[2], row[3]
+
+                if cid != clean_client_id:
+                    continue
+
+                results.append(
+                    RetrievedRule(
+                        client_id=cid,
+                        entry_number=entry_number,
+                        source_file=source_file,
+                        content=content,
+                        distance=0.0,
+                    )
+                )
+            return results or _from_files()
+        except Exception:
+            return _from_files()
 
     if connection is not None:
         return _execute(connection)

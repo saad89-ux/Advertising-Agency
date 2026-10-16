@@ -103,6 +103,12 @@ def sanitize_text(text: str, source: str) -> SanitizedText:
             continue
         kept.append(character)
     clean = "".join(kept)
+
+    # Apply PII detection and redaction
+    from packages.guards.pii_guard import scrub_pii
+    pii_result = scrub_pii(clean)
+    clean = pii_result.cleaned_text
+
     truncated = len(clean) > limit
     return SanitizedText(clean[:limit], text, removed, truncated)
 

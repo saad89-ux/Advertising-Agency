@@ -64,15 +64,30 @@ def infer_client_id(
         for mapped_host in normalized_map
         if normalized_host == mapped_host or normalized_host.endswith("." + mapped_host)
     ]
-    if not matches:
-        return None
-    return normalized_map[max(matches, key=len)]
+    if matches:
+        return normalized_map[max(matches, key=len)]
+
+    # Dynamic real-world client inference fallback
+    import os
+    import re
+    from dotenv import load_dotenv
+    load_dotenv()
+    if os.environ.get("ALLOW_DYNAMIC_CLIENTS", "true").strip().lower() in {"true", "1", "yes"}:
+        parts = normalized_host.split(".")
+        if len(parts) >= 2:
+            base = parts[-2]
+            if base in {"co", "com", "org", "net", "gov", "edu"} and len(parts) >= 3:
+                base = parts[-3]
+            clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", base).casefold()
+            if len(clean_id) >= 2:
+                return clean_id
+    return None
 
 
 def allowed_origins_for_client(
     client_id: str, domain_map: Mapping[str, str | None]
 ) -> frozenset[str]:
-    """Return exact HTTP(S) origins mapped to one client, plus local dev origin."""
+    """Return exact HTTP(S) origins mapped to one client, plus local dev origin and dynamic domains."""
     origins: set[str] = set()
     for host, mapped_client in domain_map.items():
         if mapped_client != client_id or host == "local_storefront_base":
@@ -80,6 +95,15 @@ def allowed_origins_for_client(
         normalized_host = str(host).casefold().strip().rstrip(".")
         if normalized_host:
             origins.update({f"http://{normalized_host}", f"https://{normalized_host}"})
+
+    # If client is dynamic and not in domain_map, allow its primary domains
+    if not origins and client_id:
+        origins.update({
+            f"http://{client_id}.com",
+            f"https://{client_id}.com",
+            f"http://www.{client_id}.com",
+            f"https://www.{client_id}.com",
+        })
 
     local_base = domain_map.get("local_storefront_base")
     if isinstance(local_base, str):
@@ -92,3 +116,4 @@ def allowed_origins_for_client(
         except ValueError:
             pass
     return frozenset(origins)
+

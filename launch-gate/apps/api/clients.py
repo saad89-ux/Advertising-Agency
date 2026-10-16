@@ -43,3 +43,13 @@ def create_client_tables() -> None:
         connection.execute(CREATE_USERS_TABLE)
         connection.execute(CREATE_USER_CLIENT_ASSIGNMENTS_TABLE)
         connection.execute(ENSURE_ASSIGNMENT_USER_FOREIGN_KEY)
+
+
+def list_clients() -> list[dict[str, str]]:
+    """Return all clients registered in the clients table."""
+    with get_session() as connection:
+        rows = connection.execute(
+            "SELECT client_id, name FROM clients ORDER BY name ASC;"
+        ).fetchall()
+    return [{"client_id": str(r[0]), "name": str(r[1])} for r in rows]
+

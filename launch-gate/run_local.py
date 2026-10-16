@@ -64,7 +64,11 @@ def init_environment():
         for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
             assign_user_to_client(user_id="demo_manager", client_id=client_id)
 
-        print("[OK] Database schema initialized and demo users seeded.")
+        from apps.api.mock_data import seed_demo_data
+
+        seed_demo_data(force=False)
+
+        print("[OK] Database schema initialized and demo users/batches seeded.")
     except Exception as exc:
         print(f"[WARN] Database initialization warning (may already be initialized): {exc}")
 
@@ -114,7 +118,7 @@ def run_worker_loop():
 
     while True:
         try:
-            run_once()
+            run_once(run_wording_checks=True)
         except Exception:
             pass
         time.sleep(1.0)

@@ -1,43 +1,52 @@
-/* Launch Gate Review Screen Styles */
+/* Launch Gate — Futuristic Glass Droom Theme */
 
 :root {
-  --bg-color: #f8fafc;
-  --surface-color: #ffffff;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
-  --primary-color: #2563eb;
-  --primary-hover: #1d4ed8;
+  --bg-color: #080c14;
+  --surface-color: rgba(15, 23, 42, 0.68);
+  --surface-card: rgba(15, 23, 42, 0.62);
+  --surface-secondary: rgba(30, 41, 59, 0.45);
+  --surface-hover: rgba(51, 65, 85, 0.4);
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-glow: rgba(99, 102, 241, 0.35);
+  --primary-color: #3b82f6;
+  --primary-hover: #60a5fa;
 
-  /* Verdict Colors */
-  --verdict-ready-bg: #ecfdf5;
-  --verdict-ready-text: #065f46;
-  --verdict-ready-border: #10b981;
+  /* Verdict Colors with Luminous Accents */
+  --verdict-ready-bg: rgba(16, 185, 129, 0.12);
+  --verdict-ready-text: #34d399;
+  --verdict-ready-border: rgba(16, 185, 129, 0.3);
 
-  --verdict-fix-bg: #fffbeb;
-  --verdict-fix-text: #92400e;
-  --verdict-fix-border: #f59e0b;
+  --verdict-fix-bg: rgba(245, 158, 11, 0.12);
+  --verdict-fix-text: #fbbf24;
+  --verdict-fix-border: rgba(245, 158, 11, 0.3);
 
-  --verdict-blocked-bg: #fef2f2;
-  --verdict-blocked-text: #991b1b;
-  --verdict-blocked-border: #ef4444;
+  --verdict-blocked-bg: rgba(239, 68, 68, 0.12);
+  --verdict-blocked-text: #f87171;
+  --verdict-blocked-border: rgba(239, 68, 68, 0.3);
 
-  --verdict-needs-person-bg: #f5f3ff;
-  --verdict-needs-person-text: #5b21b6;
-  --verdict-needs-person-border: #8b5cf6;
+  --verdict-needs-person-bg: rgba(168, 85, 247, 0.12);
+  --verdict-needs-person-text: #c084fc;
+  --verdict-needs-person-border: rgba(168, 85, 247, 0.3);
 
-  --verdict-pending-bg: #f1f5f9;
-  --verdict-pending-text: #475569;
-  --verdict-pending-border: #94a3b8;
+  --verdict-pending-bg: rgba(148, 163, 184, 0.1);
+  --verdict-pending-text: #94a3b8;
+  --verdict-pending-border: rgba(148, 163, 184, 0.2);
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   background-color: var(--bg-color);
   color: var(--text-primary);
   margin: 0;
   padding: 0;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .review-screen-container {
@@ -46,14 +55,16 @@ body {
   padding: 24px 20px;
 }
 
-/* Batch Summary Header */
+/* Batch Summary Header — Frosted Glass Panel */
 .batch-summary-card {
   background: var(--surface-color);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 24px;
   margin-bottom: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .batch-header-top {
@@ -862,15 +873,128 @@ body {
   border: none;
 }
 
-.btn-action.btn-send:hover {
-  background: #059669;
+/* ==========================================================================
+   GLASS DROOM FUTURISTIC THEME OVERRIDES
+   ========================================================================== */
+
+.review-screen-container,
+.review-index-container,
+.metrics-container,
+.batch-summary-card,
+.ad-table-card,
+.drawer-container,
+.review-drawer,
+.findings-list-card,
+.batch-card,
+.review-index-card {
+  background: rgba(15, 23, 42, 0.68) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  color: #f8fafc !important;
 }
 
-.btn-action.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  pointer-events: none;
+.table-container table {
+  width: 100%;
+  border-collapse: collapse;
 }
+
+.table-container th {
+  background: rgba(15, 23, 42, 0.8) !important;
+  color: #94a3b8 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  padding: 12px 14px;
+}
+
+.table-container td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: #cbd5e1 !important;
+  padding: 12px 14px;
+}
+
+.table-container tr:hover td {
+  background: rgba(51, 65, 85, 0.3) !important;
+}
+
+/* Glass Inputs & Selects */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+select,
+textarea {
+  background: rgba(15, 23, 42, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #f8fafc !important;
+  border-radius: 8px !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(99, 102, 241, 0.6) !important;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.3) !important;
+  outline: none !important;
+}
+
+/* Glass Buttons */
+.btn-primary,
+button.btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 16px rgba(37, 99, 235, 0.4) !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-primary:hover,
+button.btn-primary:hover {
+  box-shadow: 0 0 24px rgba(37, 99, 235, 0.6) !important;
+  transform: translateY(-1px);
+}
+
+.btn-secondary,
+button.btn-secondary {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #cbd5e1 !important;
+}
+
+.btn-secondary:hover,
+button.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+/* Code & monospace blocks */
+code, pre {
+  background: rgba(0, 0, 0, 0.4) !important;
+  color: #38bdf8 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(8, 12, 20, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 
 .btn-send-batch {
   background: #059669;

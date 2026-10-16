@@ -8,5 +8,8 @@
     "start": "python run_local.py",
     "web": "npm run dev --prefix apps/web",
     "test": "pytest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1"
   }
 }

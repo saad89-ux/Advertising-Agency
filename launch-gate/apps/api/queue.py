@@ -7,6 +7,7 @@ import json
 import os
 from typing import Sequence
 
+from dotenv import load_dotenv
 from redis import Redis
 
 
@@ -22,6 +23,7 @@ class AdJob:
 
 
 def _redis_client() -> Redis:
+    load_dotenv()
     redis_url = os.environ.get("REDIS_URL", "").strip()
     if not redis_url:
         raise RuntimeError("REDIS_URL must be set in the environment or .env file")

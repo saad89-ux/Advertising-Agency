@@ -33,12 +33,20 @@ class ModelResponse:
     cost_entry: CostLedgerEntry
 
 
+def is_gemini_configured() -> bool:
+    """Check if a valid Gemini API key is configured in the environment."""
+    load_dotenv()
+    key = os.environ.get("MODEL_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+    key = key.strip()
+    return bool(key and "replace" not in key.lower() and "placeholder" not in key.lower())
+
+
 def get_model_api_key() -> str:
     """Load model API key from environment (MODEL_API_KEY or GEMINI_API_KEY)."""
     load_dotenv()
     key = os.environ.get("MODEL_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
     key = key.strip()
-    if not key or "replace" in key.lower() or "placeholder" in key.lower():
+    if not is_gemini_configured():
         raise RuntimeError(
             "MODEL_API_KEY must be set in the environment or .env file with a valid API key"
         )

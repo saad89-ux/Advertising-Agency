@@ -32,6 +32,7 @@ from apps.worker.verdict import (
     aggregate_ad_verdict,
 )
 from apps.worker.wording_check import check_wording
+from apps.worker.judge_eval import evaluate_with_llm_judge
 from packages.contracts import (
     AdContract,
     FindingContract,
@@ -275,6 +276,8 @@ def wording_check_node(state: WorkerGraphState) -> dict[str, Any]:
         file_store=state.get("file_store"),
         shared_state=shared_state,
         connection=state.get("connection"),
+        tracer=tracer,
+        trace_id=trace_id,
     )
 
     existing_findings = list(state.get("findings", []))
@@ -325,9 +328,24 @@ def verdict_node(state: WorkerGraphState) -> dict[str, Any]:
             },
         )
 
-    verdict = aggregate_ad_verdict(
+    # Execute runtime LLM-as-a-Judge compliance audit
+    judge_result = evaluate_with_llm_judge(
         ad,
         findings,
+        retrieved_rules=state.get("retrieved_rules"),
+    )
+    if judge_result.needs_person:
+        needs_person = True
+
+    # Filter out any findings that the judge explicitly identified as false alarms
+    active_findings = [
+        f for f in findings
+        if f.finding_id not in judge_result.false_alarms_dismissed
+    ]
+
+    verdict = aggregate_ad_verdict(
+        ad,
+        active_findings,
         verdict_floor=verdict_floor,
         needs_person=needs_person,
         step_count=step_count,

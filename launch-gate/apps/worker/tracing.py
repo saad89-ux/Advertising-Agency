@@ -427,6 +427,15 @@ class PostgresTracer:
 
 # --- Langfuse Tracer ---
 
+def _to_valid_trace_id(raw_id: str) -> str:
+    """Ensure trace ID is a valid 32-character hexadecimal string accepted by Langfuse."""
+    import hashlib
+    clean = (raw_id or "").strip()
+    if len(clean) == 32 and all(c in "0123456789abcdefABCDEF" for c in clean):
+        return clean.lower()
+    return hashlib.md5(clean.encode("utf-8")).hexdigest()
+
+
 class LangfuseTracer:
     """Langfuse tracer emitting spans and traces to the hosted or self-hosted Langfuse server."""
 
@@ -499,9 +508,11 @@ class LangfuseTracer:
                 "client_id": ctx.get("client_id"),
                 **(metadata or {}),
             }
+            lf_trace_id = _to_valid_trace_id(trace_id)
             span = self._client.start_observation(
                 name=step_name,
                 as_type="span",
+                trace_context={"trace_id": lf_trace_id},
                 input=input_data,
                 metadata=meta,
             )
@@ -536,6 +547,55 @@ class LangfuseTracer:
         except Exception as exc:
             logger.warning("Langfuse end_span failed for %s: %s", span_id, exc)
 
+    def record_generation(
+        self,
+        trace_id: str,
+        name: str,
+        model: str,
+        prompt: str,
+        completion: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost_usd: float = 0.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Record an explicit LLM generation observation in Langfuse."""
+        if not self.is_enabled or not self._client:
+            return
+        try:
+            lf_trace_id = _to_valid_trace_id(trace_id)
+            ctx = self._trace_contexts.get(trace_id, {})
+            meta = {
+                "trace_id": trace_id,
+                "batch_id": ctx.get("batch_id"),
+                "ad_id": ctx.get("ad_id"),
+                "client_id": ctx.get("client_id"),
+                **(metadata or {}),
+            }
+            gen = self._client.start_observation(
+                name=name,
+                as_type="generation",
+                trace_context={"trace_id": lf_trace_id},
+                model=model,
+                input=[{"role": "user", "content": prompt}],
+                metadata=meta,
+            )
+            total_tokens = prompt_tokens + completion_tokens
+            cost_details = {"total": cost_usd} if cost_usd > 0 else None
+            gen.update(
+                output=completion,
+                usage_details={
+                    "input": prompt_tokens,
+                    "output": completion_tokens,
+                    "total": total_tokens,
+                },
+                cost_details=cost_details,
+            )
+            gen.end()
+            self._client.flush()
+        except Exception as exc:
+            logger.warning("Langfuse record_generation failed: %s", exc)
+
     def end_trace(
         self,
         trace_id: str,
@@ -552,6 +612,13 @@ class LangfuseTracer:
             self._client.flush()
         except Exception as exc:
             logger.warning("Langfuse end_trace/flush failed: %s", exc)
+
+    def flush(self) -> None:
+        if self.is_enabled and self._client:
+            try:
+                self._client.flush()
+            except Exception as exc:
+                logger.warning("Langfuse flush failed: %s", exc)
 
 
 # --- Composite Ad Workflow Tracer ---
@@ -696,6 +763,35 @@ class AdWorkflowTracer:
             except Exception as exc:
                 logger.warning("Langfuse end_span failed: %s", exc)
 
+    def record_generation(
+        self,
+        trace_id: str,
+        name: str,
+        model: str,
+        prompt: str,
+        completion: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost_usd: float = 0.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Record an explicit LLM generation observation in Langfuse."""
+        if self.langfuse_tracer:
+            try:
+                self.langfuse_tracer.record_generation(
+                    trace_id=trace_id,
+                    name=name,
+                    model=model,
+                    prompt=prompt,
+                    completion=completion,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    cost_usd=cost_usd,
+                    metadata=metadata,
+                )
+            except Exception as exc:
+                logger.warning("AdWorkflowTracer record_generation failed: %s", exc)
+
     def end_trace(
         self,
         trace_id: str,
@@ -733,6 +829,14 @@ class AdWorkflowTracer:
                 self.langfuse_tracer.end_trace(trace_id, verdict, status, total_cost_usd, step_count, metadata)
             except Exception as exc:
                 logger.warning("Langfuse end_trace failed: %s", exc)
+
+    def flush(self) -> None:
+        """Explicitly flush all pending telemetry batches to Langfuse."""
+        if self.langfuse_tracer:
+            try:
+                self.langfuse_tracer.flush()
+            except Exception as exc:
+                logger.warning("AdWorkflowTracer flush failed: %s", exc)
 
     def get_trace(self, trace_id: str) -> dict[str, Any] | None:
         """Get full trace record. Prefers PostgreSQL record if available, else in-memory."""
@@ -791,9 +895,9 @@ def get_default_tracer(
     load_dotenv()
 
     # 1. Langfuse Tracer
-    pub_key = os.environ.get("LANGFUSE_PUBLIC_KEY", "").strip() or None
-    sec_key = os.environ.get("LANGFUSE_SECRET_KEY", "").strip() or None
-    host = os.environ.get("LANGFUSE_HOST", "").strip() or "https://cloud.langfuse.com"
+    pub_key = (os.environ.get("LANGFUSE_PUBLIC_KEY") or "").strip(" \t\r\n\"'") or None
+    sec_key = (os.environ.get("LANGFUSE_SECRET_KEY") or "").strip(" \t\r\n\"'") or None
+    host = (os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com").strip(" \t\r\n\"'")
     lf_tracer = LangfuseTracer(public_key=pub_key, secret_key=sec_key, host=host)
 
     # 2. Postgres Tracer
@@ -802,5 +906,11 @@ def get_default_tracer(
         pg_tracer = PostgresTracer(connection=connection, connection_factory=connection_factory)
     elif os.environ.get("DATABASE_URL", "").strip():
         pg_tracer = PostgresTracer()
+
+    if pg_tracer is not None:
+        try:
+            pg_tracer.setup()
+        except Exception:
+            pass
 
     return AdWorkflowTracer(postgres_tracer=pg_tracer, langfuse_tracer=lf_tracer)

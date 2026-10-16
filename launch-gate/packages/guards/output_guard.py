@@ -12,7 +12,7 @@ from packages.contracts import AdContract, CheckType, FindingContract
 from packages.guards.input_guard import safe_export_cell
 
 
-_ALLOWED_TOP_LEVEL = {"findings"}
+_ALLOWED_TOP_LEVEL = {"findings", "summary", "unknown", "needs_person"}
 _ALLOWED_FINDING_KEYS = {"message", "field", "proposed_fix", "rule_id", "check_type"}
 _GENERIC_MESSAGE = "Model output was rejected by the safety guard."
 
@@ -95,8 +95,16 @@ def validate_model_output(
 ) -> OutputGuardResult:
     """Accept only strict finding objects and citations/content from this ad's client."""
     if isinstance(raw, str):
+        clean_raw = raw.strip()
+        if clean_raw.startswith("```"):
+            lines = clean_raw.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            clean_raw = "\n".join(lines).strip()
         try:
-            value = json.loads(raw)
+            value = json.loads(clean_raw)
         except (json.JSONDecodeError, TypeError):
             return _reject(ad, "invalid_json")
     elif isinstance(raw, dict):
@@ -104,7 +112,7 @@ def validate_model_output(
     else:
         return _reject(ad, "invalid_output_type")
 
-    if type(value) is not dict or set(value) != _ALLOWED_TOP_LEVEL:
+    if type(value) is not dict or not set(value).issubset(_ALLOWED_TOP_LEVEL) or "findings" not in value:
         return _reject(ad, "invalid_output_shape")
     raw_findings = value["findings"]
     if type(raw_findings) is not list:

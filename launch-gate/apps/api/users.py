@@ -97,3 +97,19 @@ def assign_user_to_client(user_id: str, client_id: str) -> None:
                VALUES (%s, %s) ON CONFLICT (user_id, client_id) DO NOTHING""",
             (user_id, client_id),
         )
+
+
+def list_all_users() -> list[dict[str, object]]:
+    """List all registered users with their assigned clients."""
+    with get_session() as connection:
+        rows = connection.execute(
+            """SELECT user_id, email, display_name, role, is_active
+               FROM users ORDER BY role ASC, display_name ASC"""
+        ).fetchall()
+    result = []
+    for r in rows:
+        u_dict = dict(zip(("user_id", "email", "display_name", "role", "is_active"), r))
+        u_dict["assigned_client_ids"] = get_user_client_ids(str(u_dict["user_id"]))
+        result.append(u_dict)
+    return result
+

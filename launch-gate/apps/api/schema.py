@@ -13,6 +13,7 @@ from apps.api import (
     rejected_rows,
 )
 from apps.worker import sender
+from apps.worker.tracing import create_trace_tables
 
 
 def init_schema() -> None:
@@ -30,3 +31,5 @@ def init_schema() -> None:
     evidence.create_approval_evidence_table()
     edits.create_ad_edits_table()
     sender.create_send_tables()
+    create_trace_tables()
+
