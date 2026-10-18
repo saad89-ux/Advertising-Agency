@@ -259,4 +259,12 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
 - **Accounting & Tracing**: Model calls are routed via `apps/worker/model_client.py:call_gemini_model` with `client_id`, `ad_id`, `batch_id`, enforcing client spend caps and recording every token and cost in PostgreSQL `cost_ledger`. Langfuse spans recorded when tracer is active.
 - **Clean Ad Short-Circuit**: Ads with zero initial findings skip the judge step cleanly with `verdict="SKIPPED"`, 0 cost, and `needs_person=False`.
 
+## D56 — Judge Pricing Verification, Test Isolation & Meta MCP Scope Probe (Task 1 Follow-up)
+
+- **Gemini 3.x Conservative Pricing**: Published table rows for `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.8-flash`, `gemini-3.5-flash`, and `gemini-3.1-pro-preview` are not yet listed in the official `https://ai.google.dev/pricing` static tier table. Marked as `UNVERIFIED` in `apps/worker/cost_ledger.py` and set to conservative upper-bound rates ($0.25/$1.50 for flash-lite, $0.75/$3.75 for 3.8 flash, $1.50/$9.00 for 3.5 flash, $2.00/$12.00 for 3.1 pro) to prevent ledger undercounting until official numbers are verified. Gemini 2.5 / 1.5 models remain strictly bound to verified official rates.
+- **Test Isolation Hardening**: Removed inline runtime `load_dotenv()` calls inside function bodies (`apps/worker/tracing.py:get_default_tracer()`, `apps/worker/cost_ledger.py:get_spend_cap_*()`, `apps/worker/mcp_client.py:MCPPlatformDispatcher.__init__()`). These calls were resurrecting local `.env` values and defeating `pytest` `monkeypatch.delenv()`. Environment loading is strictly scoped to top-level module initialization.
+- **Upload Dataset Restoration**: Restored `data/labeled_sheets/sheet_01.csv` to remove trailing commas introduced in commit `c93fd91`, restoring 100% pass rates across `test_batch2_upload_contract.py` and `test_task53_replay_30_sheets.py`.
+- **Meta MCP Live Probe Analysis**: Live requests to official Meta Ads MCP (`https://mcp.facebook.com/ads`) with standard Graph API access token return HTTP 401 with `detail: "Failed to authenticate MCP request"` and `scope` demanding `ads_mcp_management`. Until an enterprise token with the `ads_mcp_management` scope is configured, availability of direct policy rejection text on the MCP endpoint is classified as **unknown**.
+
+
 

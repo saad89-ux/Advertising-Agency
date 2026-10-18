@@ -23,6 +23,8 @@ import uuid
 import requests
 from dotenv import load_dotenv
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,7 +49,6 @@ class MCPPlatformDispatcher:
     """Manages Model Context Protocol (MCP) tool execution for multi-platform ad lifecycles."""
 
     def __init__(self) -> None:
-        load_dotenv()
         self.meta_mcp_url = os.environ.get("MCP_META_SERVER_URL", "").strip()
         self.tiktok_mcp_url = os.environ.get("MCP_TIKTOK_SERVER_URL", "").strip()
         self.x_mcp_url = os.environ.get("MCP_X_SERVER_URL", "").strip()

@@ -11,6 +11,9 @@ from typing import Any
 import uuid
 
 from apps.api.database import get_session
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +25,22 @@ SPEND_CAP_TOTAL_DEFAULT = 15.00    # $15.00 total assessment spend cap
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemini-3.5-flash-lite": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-2.5-flash-lite": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-3.8-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
-    "gemini-3.5-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
-    "gemini-2.5-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
-    "gemini-flash-latest": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
-    "gemini-2.5-pro": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
-    "gemini-3.1-pro-preview": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
-    "gemini-pro-latest": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
-    "gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-1.5-flash": {"input": 0.075 / 1_000_000, "output": 0.30 / 1_000_000},
-    "gemini-1.5-pro": {"input": 1.25 / 1_000_000, "output": 5.00 / 1_000_000},
+    # Gemini 3.x models: published table rows not yet in static ai.google.dev/pricing table.
+    # UNVERIFIED: using conservative upper-bound rates until official rows are published.
+    "gemini-3.5-flash-lite": {"input": 0.25 / 1_000_000, "output": 1.50 / 1_000_000},  # UNVERIFIED: conservative
+    "gemini-3.1-flash-lite": {"input": 0.25 / 1_000_000, "output": 1.50 / 1_000_000},  # UNVERIFIED: conservative
+    "gemini-3.8-flash": {"input": 0.75 / 1_000_000, "output": 3.75 / 1_000_000},       # UNVERIFIED: conservative
+    "gemini-3.5-flash": {"input": 1.50 / 1_000_000, "output": 9.00 / 1_000_000},       # UNVERIFIED: conservative
+    "gemini-3.1-pro-preview": {"input": 2.00 / 1_000_000, "output": 12.00 / 1_000_000}, # UNVERIFIED: conservative
+    # Gemini 2.5 / 1.5 models: VERIFIED against official ai.google.dev/pricing
+    "gemini-2.5-flash-lite": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},  # VERIFIED
+    "gemini-2.5-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},       # VERIFIED
+    "gemini-flash-latest": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},    # VERIFIED
+    "gemini-2.5-pro": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},       # VERIFIED (<=200k tokens)
+    "gemini-pro-latest": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},     # VERIFIED
+    "gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},       # VERIFIED
+    "gemini-1.5-flash": {"input": 0.075 / 1_000_000, "output": 0.30 / 1_000_000},      # VERIFIED
+    "gemini-1.5-pro": {"input": 1.25 / 1_000_000, "output": 5.00 / 1_000_000},         # VERIFIED
 }
 
 CREATE_COST_LEDGER_TABLE = """
@@ -86,11 +93,6 @@ class CostLedgerEntry:
 
 def get_spend_cap_per_row() -> float:
     """Return configured per-row spend cap from environment or default ($0.01)."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except Exception:
-        pass
     raw = os.environ.get("SPEND_CAP_PER_ROW")
     if raw:
         try:
@@ -102,11 +104,6 @@ def get_spend_cap_per_row() -> float:
 
 def get_spend_cap_total() -> float:
     """Return configured total assessment spend cap from environment or default ($15.00)."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except Exception:
-        pass
     raw = os.environ.get("SPEND_CAP_TOTAL")
     if raw:
         try:

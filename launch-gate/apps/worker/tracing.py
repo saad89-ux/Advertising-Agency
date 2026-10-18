@@ -24,6 +24,8 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 # --- DDL Statements ---
@@ -892,8 +894,6 @@ def get_default_tracer(
     connection_factory: Callable[[], Any] | None = None,
 ) -> AdWorkflowTracer:
     """Construct default workflow tracer inspecting environment variables and database config."""
-    load_dotenv()
-
     # 1. Langfuse Tracer
     pub_key = (os.environ.get("LANGFUSE_PUBLIC_KEY") or "").strip(" \t\r\n\"'") or None
     sec_key = (os.environ.get("LANGFUSE_SECRET_KEY") or "").strip(" \t\r\n\"'") or None

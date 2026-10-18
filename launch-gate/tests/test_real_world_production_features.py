@@ -82,7 +82,10 @@ def test_runtime_llm_judge_with_findings():
     assert judge_res.confidence_score > 0.8
 
 
-def test_mcp_platform_dispatcher():
+def test_mcp_platform_dispatcher(monkeypatch):
+    monkeypatch.delenv("MCP_META_SERVER_URL", raising=False)
+    monkeypatch.delenv("MCP_TIKTOK_SERVER_URL", raising=False)
+    monkeypatch.delenv("MCP_X_SERVER_URL", raising=False)
     dispatcher = MCPPlatformDispatcher()
     tools = dispatcher.list_tools("instagram")
     assert len(tools) == 3

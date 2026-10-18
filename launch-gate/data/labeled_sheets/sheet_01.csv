@@ -1,43 +1,43 @@
-Row,Platform,Ad text and headline as typed,Link as typed,Creative file,,
-2,FaceBook,Wool Rugs: 20% OFF this month. / Home Refresh Sale,oakandhome.example/rugs?utm_source=facebook&utm_medium=paid_social&utm_campaign=rugs_q4 ,rugs_v3_1080x1920.png,,
-3,FaceBook,"Handmade oak pieces, free delivery over $75. / Shop Oak Furniture", oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1920.png,,
-4,Google Ads,"Handmade oak pieces, free delivery over $75. / Shop Oak Furniture",oakandhome.example/shelves?utm_source=google&utm_medium=cpc&utm_campaign=shelves_q4,,,
-5,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4 ,shelves_v1_1080x1080.mp4,,
-6,google ads,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Home Refresh Sale,https://oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4,,,
-7,FB,New colours are here. See the range. / See the Range,oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1920.mp4,,
-8,google ads,Sustainably sourced wool rugs. 20% OFF this month. *FSC certified timber. / Shop the Sale,oakandhome.example/rugs?utm_source=google&utm_medium=cpc&utm_campaign=rugs_q4,n/a,,
-9,Meta,Eco-friendly oak shelves for every home. / Shop Oak Furniture, https://oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4 ,newcolours_v1_1080x1080.png,,
-10,IG,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Shop the Sale, https://oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v2_1080x1920.mp4,,
-11,Meta,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v2_1080x1920.png,,
-12,Google Ads,Award-winning design in every room. / Shop Now, oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4,,,
-13,FaceBook,Eco-friendly oak shelves for every home. / Shop Oak Furniture,oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v3_1080x1920.png,,
-14,FB,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Shop the Sale,https://oakandhome.example/sofas?utm_source=FB&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v2_1080x1350.png,,
-15,FaceBook,"Handmade oak pieces, free delivery over $75. 🌿 / Free Delivery Offer", oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=Shelves Q4,shelves_v2_1080x1920.png,,
-16,google ads,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Shop the Sale,oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4,,,
-43,,,,,,
-17,FB,"Handmade oak pieces, free delivery over $75. Limited time only, shop now while this great offer lasts for everyone today. Limited time only, shop now while this great offer lasts for everyone today. / Shop Oak Furniture",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1350.png,,
-18,Facebook Ads,New colours are here. See the range. / See the Range, oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1920.mp4,,
-19,Instagram,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v2_1080x1080.mp4,,
-20,adwords,"Handmade oak pieces, free delivery over $75. / Shop Oak Furniture",https://oakandhome.example/shelves?utm_source=google&utm_medium=cpc&utm_campaign=shelves_q4 ,n/a,,
-21,Instagram Ads,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v1_1080x1920.png,,
+Row,Platform,Ad text and headline as typed,Link as typed,Creative file
+2,FaceBook,Wool Rugs: 20% OFF this month. / Home Refresh Sale,oakandhome.example/rugs?utm_source=facebook&utm_medium=paid_social&utm_campaign=rugs_q4 ,rugs_v3_1080x1920.png
+3,FaceBook,"Handmade oak pieces, free delivery over $75. / Shop Oak Furniture", oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1920.png
+4,Google Ads,"Handmade oak pieces, free delivery over $75. / Shop Oak Furniture",oakandhome.example/shelves?utm_source=google&utm_medium=cpc&utm_campaign=shelves_q4,
+5,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4 ,shelves_v1_1080x1080.mp4
+6,google ads,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Home Refresh Sale,https://oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4,
+7,FB,New colours are here. See the range. / See the Range,oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1920.mp4
+8,google ads,Sustainably sourced wool rugs. 20% OFF this month. *FSC certified timber. / Shop the Sale,oakandhome.example/rugs?utm_source=google&utm_medium=cpc&utm_campaign=rugs_q4,n/a
+9,Meta,Eco-friendly oak shelves for every home. / Shop Oak Furniture, https://oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4 ,newcolours_v1_1080x1080.png
+10,IG,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Shop the Sale, https://oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v2_1080x1920.mp4
+11,Meta,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v2_1080x1920.png
+12,Google Ads,Award-winning design in every room. / Shop Now, oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4,
+13,FaceBook,Eco-friendly oak shelves for every home. / Shop Oak Furniture,oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v3_1080x1920.png
+14,FB,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Shop the Sale,https://oakandhome.example/sofas?utm_source=FB&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v2_1080x1350.png
+15,FaceBook,"Handmade oak pieces, free delivery over $75. 🌿 / Free Delivery Offer", oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=Shelves Q4,shelves_v2_1080x1920.png
+16,google ads,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Shop the Sale,oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4,
+43,,,,
+17,FB,"Handmade oak pieces, free delivery over $75. Limited time only, shop now while this great offer lasts for everyone today. Limited time only, shop now while this great offer lasts for everyone today. / Shop Oak Furniture",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1350.png
+18,Facebook Ads,New colours are here. See the range. / See the Range, oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1920.mp4
+19,Instagram,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v2_1080x1080.mp4
+20,adwords,"Handmade oak pieces, free delivery over $75. / Shop Oak Furniture",https://oakandhome.example/shelves?utm_source=google&utm_medium=cpc&utm_campaign=shelves_q4 ,n/a
+21,Instagram Ads,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=instagram&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v1_1080x1920.png
 42,Facebook,broken row,x,y,z,extra
-22,Facebook,New colours are here. See the range. / See the Range, https://oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1350.mp4,,
-23,Instagram Ads,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Home Refresh Sale,oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v1_1080x1350.mp4,,
-24,Facebook,Linen Sofas: 20% OFF this month. / Home Refresh Sale,https://oakandhome.example/sofas?utm_source=facebook&utm_medium=paid_social&utm_campaign=sofas_q4 ,sofas_v1_1080x1920.png,,
-25,Google Ads,Linen Sofas: 20% OFF this month. / Home Refresh Sale,oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4,n/a,,
-26,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",https://oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v1_1080x1080.mp4,,
-27,Google Ads,New colours are here. See the range. / See the Range,oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4,n/a,,
-28,google ads,Table Lamps: 15% OFF this month. / Shop the Sale,https://oakandhome.example/lamps-sale?utm_source=google&utm_medium=cpc&utm_campaign=lamps_q4,,,
-29,Google Ads,New colours are here. See the range. / See the Range,https://oakandhome.example/new,,,
-30,LinkedIn,Cut reporting time in half / Book a demo, tallyhq.example/demo?utm_source=linkedin&utm_medium=paid_social&utm_campaign=demo_q4,demo_1200x627.png,,
-31,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1350.mp4,,
-32,linkedin,Cut reporting time in half / Book a demo,tallyhq.example/demo?utm_source=linkedin&utm_medium=paid_social&utm_campaign=demo_q4 ,demo_1200x627.png,,
-33,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer", https://oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1350.png,,
-34,Facebook Ads,Eco-friendly oak shelves for every home. / Shop Oak Furniture,https://oakandhome.example/new?utm_source=fb&utm_medium=paid_social&utm_campaign=newcolours_q4 ,newcolours_v2_1080x1920.mp4,,
-35,IG,New colours are here. See the range. / See the Range, https://oakandhome.example/new?utm_source=instagram&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1080.mp4,,
-36,fb,Sustainably sourced table lamps. 15% OFF this month. *FSC certified timber. / Shop the Sale,https://oakandhome.example/lamps-sale?utm_source=facebook&utm_medium=paid_social&utm_campaign=lamps_q4,lamps_v2_1080x1350.png,,
-37,IG,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/tables?utm_source=instagram&utm_medium=paid_social&utm_campaign=tables_q4,tables_v2_1080x1920.png,,
-38,FaceBook,Linen Sofas: 20% OFF this month. / Shop the Sale,oakandhome.example/sofas?utm_source=facebook&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v3_1080x1080.png,,
-39,Google Ads,New colours are here. See the range. / See the Range,oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4,n/a,,
-40,Google,"Handmade oak pieces, free delivery over $75. 🌿 Limited time only, shop now while this great offer lasts for everyone today. / Free Delivery Offer",oakandhome.example/shelves?utm_source=google&utm_medium=cpc&utm_campaign=shelves_q4,n/a,,
-41,IG,Lowest price guaranteed on oak furniture. / Shop Oak Furniture,oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v3_1080x1080.mp4,,
+22,Facebook,New colours are here. See the range. / See the Range, https://oakandhome.example/new?utm_source=facebook&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1350.mp4
+23,Instagram Ads,Sustainably sourced linen sofas. 20% OFF this month. *FSC certified timber. / Home Refresh Sale,oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v1_1080x1350.mp4
+24,Facebook,Linen Sofas: 20% OFF this month. / Home Refresh Sale,https://oakandhome.example/sofas?utm_source=facebook&utm_medium=paid_social&utm_campaign=sofas_q4 ,sofas_v1_1080x1920.png
+25,Google Ads,Linen Sofas: 20% OFF this month. / Home Refresh Sale,oakandhome.example/sofas?utm_source=google&utm_medium=cpc&utm_campaign=sofas_q4,n/a
+26,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",https://oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v1_1080x1080.mp4
+27,Google Ads,New colours are here. See the range. / See the Range,oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4,n/a
+28,google ads,Table Lamps: 15% OFF this month. / Shop the Sale,https://oakandhome.example/lamps-sale?utm_source=google&utm_medium=cpc&utm_campaign=lamps_q4,
+29,Google Ads,New colours are here. See the range. / See the Range,https://oakandhome.example/new,
+30,LinkedIn,Cut reporting time in half / Book a demo, tallyhq.example/demo?utm_source=linkedin&utm_medium=paid_social&utm_campaign=demo_q4,demo_1200x627.png
+31,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1350.mp4
+32,linkedin,Cut reporting time in half / Book a demo,tallyhq.example/demo?utm_source=linkedin&utm_medium=paid_social&utm_campaign=demo_q4 ,demo_1200x627.png
+33,FaceBook,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer", https://oakandhome.example/shelves?utm_source=facebook&utm_medium=paid_social&utm_campaign=shelves_q4,shelves_v3_1080x1350.png
+34,Facebook Ads,Eco-friendly oak shelves for every home. / Shop Oak Furniture,https://oakandhome.example/new?utm_source=fb&utm_medium=paid_social&utm_campaign=newcolours_q4 ,newcolours_v2_1080x1920.mp4
+35,IG,New colours are here. See the range. / See the Range, https://oakandhome.example/new?utm_source=instagram&utm_medium=paid_social&utm_campaign=newcolours_q4,newcolours_v1_1080x1080.mp4
+36,fb,Sustainably sourced table lamps. 15% OFF this month. *FSC certified timber. / Shop the Sale,https://oakandhome.example/lamps-sale?utm_source=facebook&utm_medium=paid_social&utm_campaign=lamps_q4,lamps_v2_1080x1350.png
+37,IG,"Handmade oak pieces, free delivery over $75. / Free Delivery Offer",oakandhome.example/tables?utm_source=instagram&utm_medium=paid_social&utm_campaign=tables_q4,tables_v2_1080x1920.png
+38,FaceBook,Linen Sofas: 20% OFF this month. / Shop the Sale,oakandhome.example/sofas?utm_source=facebook&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v3_1080x1080.png
+39,Google Ads,New colours are here. See the range. / See the Range,oakandhome.example/new?utm_source=google&utm_medium=cpc&utm_campaign=newcolours_q4,n/a
+40,Google,"Handmade oak pieces, free delivery over $75. 🌿 Limited time only, shop now while this great offer lasts for everyone today. / Free Delivery Offer",oakandhome.example/shelves?utm_source=google&utm_medium=cpc&utm_campaign=shelves_q4,n/a
+41,IG,Lowest price guaranteed on oak furniture. / Shop Oak Furniture,oakandhome.example/sofas?utm_source=instagram&utm_medium=paid_social&utm_campaign=sofas_q4,sofas_v3_1080x1080.mp4
