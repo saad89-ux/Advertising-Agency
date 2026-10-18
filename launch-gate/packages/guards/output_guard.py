@@ -13,7 +13,7 @@ from packages.guards.input_guard import safe_export_cell
 
 
 _ALLOWED_TOP_LEVEL = {"findings", "summary", "unknown", "needs_person"}
-_ALLOWED_FINDING_KEYS = {"message", "field", "proposed_fix", "rule_id", "check_type"}
+_ALLOWED_FINDING_KEYS = {"message", "field", "proposed_fix", "rule_id", "check_type", "quote"}
 _GENERIC_MESSAGE = "Model output was rejected by the safety guard."
 
 
@@ -146,7 +146,7 @@ def validate_model_output(
             or raw_finding.get("check_type") not in {"wording", "page"}
         ):
             return _reject(ad, "invalid_finding_shape")
-        for optional in ("field", "proposed_fix", "rule_id"):
+        for optional in ("field", "proposed_fix", "rule_id", "quote"):
             if optional in raw_finding and raw_finding[optional] is not None and not isinstance(raw_finding[optional], str):
                 return _reject(ad, "invalid_finding_type")
 
@@ -161,11 +161,19 @@ def validate_model_output(
         proposed_fix = raw_finding.get("proposed_fix")
         rule_id = raw_finding.get("rule_id")
         check_type = raw_finding["check_type"]
+        quote = raw_finding.get("quote")
         texts = [message]
         if field is not None:
             texts.append(field)
         if proposed_fix is not None:
             texts.append(proposed_fix)
+        if quote is not None:
+            texts.append(quote)
+            # Verbatim substring verification for explicit quote
+            ad_content = f"{ad.headline or ''} {ad.ad_text or ''}"
+            if quote.strip() and quote not in ad_content:
+                rejected.append(f"unverified_quote:{quote}")
+                continue
         combined_text = "\n".join(texts)
         if rule_id in other_ids or any(_contains_rule_id(combined_text, other_id) for other_id in other_ids):
             rejected.append("cross_client_rule_id")

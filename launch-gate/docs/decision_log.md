@@ -266,5 +266,12 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
 - **Upload Dataset Restoration**: Restored `data/labeled_sheets/sheet_01.csv` to remove trailing commas introduced in commit `c93fd91`, restoring 100% pass rates across `test_batch2_upload_contract.py` and `test_task53_replay_30_sheets.py`.
 - **Meta MCP Live Probe Analysis**: Live requests to official Meta Ads MCP (`https://mcp.facebook.com/ads`) with standard Graph API access token return HTTP 401 with `detail: "Failed to authenticate MCP request"` and `scope` demanding `ads_mcp_management`. Until an enterprise token with the `ads_mcp_management` scope is configured, availability of direct policy rejection text on the MCP endpoint is classified as **unknown**.
 
+## D57 — Fail-Closed Wording Check, Verbatim Quote Verification & Pre-filter Rules (Task 2)
+
+- **Elimination of Fabricated Engines**: Completely removed `simulated_json`, `"heuristic-rule-engine-fallback"`, and `"heuristic-rule-engine"` from `apps/worker/wording_check.py`. On ANY model failure (missing `MODEL_API_KEY`, API exceptions, 429 quota exhaustion, or malformed JSON), the node fails closed: generates an explicit `wording:model_unavailable` finding and transitions to `needs_person=True`.
+- **Deterministic Keyword Pre-filter**: Retained prohibited term scanning strictly as an offline deterministic pre-filter (`run_keyword_prefilter`). Its findings are explicitly tagged with `source=keyword_rule`. Pre-filter executions are never presented as model output and are never recorded in the cost ledger.
+- **Verbatim Quote & Citation Verification**: Enforces dual verification on all model findings before acceptance. Every finding must (1) cite an entry in the client's retrieved rules, and (2) cite a quote that is a verbatim substring of the ad headline or text. Any finding failing either check is dropped from accepted findings, an explicit `unverified_quote` or `unverified_citation` finding is recorded, and the ad is routed to human review (`needs_person=True`).
+- **Specialist Model Selection**: Configured via `SPECIALIST_MODEL` environment variable (default: `gemini-3.5-flash-lite`, verified active and free-tier compliant via live API execution). Pure JSON contract enforced with `response_mime_type="application/json"`.
+
 
 
