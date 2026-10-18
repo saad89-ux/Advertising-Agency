@@ -14,7 +14,9 @@ def test_api_exposes_health_route():
     )
 
     assert route.methods == {"GET"}
-    assert route.endpoint() == {"status": "ok"}
+    payload = route.endpoint()
+    assert payload["status"] == "ok"
+    assert payload["app"] == "Launch Gate API"
 
 
 def test_worker_stub_does_not_process_jobs(capsys):

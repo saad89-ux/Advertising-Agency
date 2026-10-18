@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
+import random
+import re
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -19,6 +22,35 @@ from apps.worker.cost_ledger import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def is_retryable_error(exc: Exception) -> bool:
+    """Check if an exception is a 429 RateLimit/Quota, 503 Unavailable, or network/timeout error."""
+    msg = str(exc).lower()
+    status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    if status_code in {429, 503}:
+        return True
+    if any(code in msg for code in ["429", "503", "resource_exhausted", "resourceexhausted", "unavailable", "timeout", "timed out", "connection error"]):
+        return True
+    return isinstance(exc, (TimeoutError, ConnectionError))
+
+
+def get_retry_delay(exc: Exception, attempt: int, base_delay: float = 0.5) -> float:
+    """Extract Retry-After header or calculate exponential backoff with jitter."""
+    headers = getattr(exc, "headers", {}) or {}
+    retry_after = None
+    if isinstance(headers, dict):
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            val = float(retry_after)
+            if val > 0:
+                return min(val, 10.0)
+        except ValueError:
+            pass
+
+    delay = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.05, 0.25)
+    return min(delay, 5.0)
 
 
 @dataclass(frozen=True)
@@ -71,7 +103,7 @@ def call_gemini_model(
     temperature: float | None = None,
     response_mime_type: str | None = None,
 ) -> ModelResponse:
-    """Invoke Google Gemini, enforce spend caps, and record cost in PostgreSQL ledger.
+    """Invoke Google Gemini with bounded retry, enforce spend caps, and record cost in PostgreSQL ledger.
 
     Raises SpendCapExceededError if spend caps are breached.
     """
@@ -83,7 +115,7 @@ def call_gemini_model(
     # 1. Pre-flight check: ensure current spend hasn't already reached cap
     check_spend_caps(ad_id=ad_id, additional_cost=0.0, connection=connection)
 
-    # 2. Invoke model
+    # 2. Invoke model with bounded retry (max 3 attempts for 429/503/network)
     genai_client = client or create_gemini_client()
     config_kwargs: dict[str, Any] = {}
     if system_instruction:
@@ -95,11 +127,35 @@ def call_gemini_model(
 
     config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
-    response = genai_client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config=config,
-    )
+    max_attempts = 3
+    response = None
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = genai_client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config,
+            )
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_attempts and is_retryable_error(exc):
+                delay = get_retry_delay(exc, attempt)
+                logger.warning(
+                    "Model invocation attempt %d/%d failed with retryable error (%s). Retrying in %.2fs...",
+                    attempt,
+                    max_attempts,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+            else:
+                raise last_exc
+
+    if response is None and last_exc is not None:
+        raise last_exc
 
     # 3. Extract text and usage tokens (including thinking/reasoning tokens as output tokens)
     text = response.text or ""

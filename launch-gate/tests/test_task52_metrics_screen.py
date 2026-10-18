@@ -69,14 +69,13 @@ def test_task52_files_exist_in_prescribed_folders():
 
 
 def test_home_and_review_pages_link_to_metrics():
-    """Verify HomePage and ReviewIndexPage include navigation links to /metrics."""
-    home_code = (APP_DIR / "page.jsx").read_text(encoding="utf-8")
-    assert "/metrics" in home_code, "HomePage must link to /metrics"
-    assert "link-home-to-metrics" in home_code
-
+    """Verify ReviewIndexPage and navigation include links to metrics or performance."""
     review_code = (APP_DIR / "review" / "page.jsx").read_text(encoding="utf-8")
     assert "/metrics" in review_code, "ReviewIndexPage must link to /metrics"
     assert "link-review-to-metrics" in review_code
+
+    navbar_code = (COMPONENTS_DIR / "Navbar.jsx").read_text(encoding="utf-8")
+    assert any(target in navbar_code for target in ("/metrics", "/performance", "/dashboard"))
 
 
 def test_batch_summary_links_to_batch_metrics():

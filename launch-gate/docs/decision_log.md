@@ -273,5 +273,22 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
 - **Verbatim Quote & Citation Verification**: Enforces dual verification on all model findings before acceptance. Every finding must (1) cite an entry in the client's retrieved rules, and (2) cite a quote that is a verbatim substring of the ad headline or text. Any finding failing either check is dropped from accepted findings, an explicit `unverified_quote` or `unverified_citation` finding is recorded, and the ad is routed to human review (`needs_person=True`).
 - **Specialist Model Selection**: Configured via `SPECIALIST_MODEL` environment variable (default: `gemini-3.5-flash-lite`, verified active and free-tier compliant via live API execution). Pure JSON contract enforced with `response_mime_type="application/json"`.
 
+## D58 — Wording Prompt Tightening, Bounded Retries & Client Inference Security Analysis (Task 2 Follow-up)
+
+- **Prompt & Schema Tightening (Quality Check with Live Model)**:
+  - Tightened `build_wording_prompt` instructions in `apps/worker/wording_check.py` to require findings to quote the **shortest verbatim span** (1–5 words) that contradicts a retrieved rule, and to state explicitly which part of the rule text is violated.
+  - Strictly banned speculative and hedged language ("could be interpreted as", "might imply", "possibly suggests"). Normal descriptive skincare language (e.g. "daily hydration", "soothing aloe") does not violate rules unless explicitly prohibited.
+  - Enforced that disclaimers and negations ("does not cure anything") are not treated as violations.
+  - Decoupled `unknown=True` from forcing human review on clean ads where no rule is relevant, preserving clean pass-through (`status="ready"`, `needs_person=False`).
+- **Bounded Retry in `apps/worker/model_client.py`**:
+  - Implemented bounded retry with max 3 attempts for transient errors (HTTP 429 quota/rate limits, 503 unavailable, timeouts, and network connection errors).
+  - Implemented exponential backoff with randomized jitter ($0.5 \times 2^{\text{attempt}-1} + \text{jitter}$), while respecting HTTP `Retry-After` headers if provided by upstream APIs.
+  - Guaranteed cost ledger integrity: failed attempts are never double-counted. Cost entries are recorded in the PostgreSQL ledger only upon successful completion. Exhaustion of retries fails closed and re-raises the error.
+- **Security Analysis: Lookalike Domain Phishing Bypass in `client_inference.py` (Deferred for Task 7)**:
+  - *Vulnerability Mechanism*: In `apps/api/client_inference.py`, `infer_client_from_host()` line 75 enables `ALLOW_DYNAMIC_CLIENTS=true` by default. When an unmapped, malicious domain (e.g., `brightleaf-scam.com` or `apple-phishing.org`) is evaluated, lines 76–83 split the host and dynamically synthesize a new client ID out of thin air (`clean_id = "brightleaf-scam"`).
+  - *Self-Fulfilling Origin Whitelisting*: Subsequently, `allowed_origins_for_client("brightleaf-scam", domain_map)` checks line 100: `if not origins and client_id:`. Because no static domain map exists for the synthesized ID, lines 101–106 automatically inject `https://{client_id}.com` and `http://{client_id}.com` (e.g. `https://brightleaf-scam.com`) into `origins`.
+  - *Impact*: The URL redirect verification compares the redirect destination against `origins`. Since `origins` was dynamically populated with the attacker's own domain, the check passes unconditionally. Any attacker can bypass open-redirect validation by registering any unmapped domain.
+  - *Remediation Plan (Task 7)*: Deprecate `ALLOW_DYNAMIC_CLIENTS` in production, enforce strict fail-closed rejection for unmapped domains, and require explicit client origin registration in `domain_map.json`. The 3 redirect tests in `test_task24_utm_redirect.py` remain failing until Task 7 is executed.
+
 
 
