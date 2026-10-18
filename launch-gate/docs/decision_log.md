@@ -242,3 +242,21 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
   - End-to-End User Journey: Guided steps from uploading a launch sheet, monitoring real-time SSE progress pills, reviewing verdicts in the Reviewer Cockpit, attaching approval evidence, performing bounded copy edits, dismissing false alarms, sending approved ads, managing dead-letter alerts, to viewing the metrics dashboard.
   - Reproducible Evaluation Runbooks: Exact CLI commands and expected benchmark results for 30-sheet replay (`evals/replay_30_sheets.py`), cross-cutting safety evaluation (`evals/cross_cutting_safety_eval.py`), adversarial guard replay (`evals/task20_adversarial_guard_eval.py`), and full test suite execution (`python -m pytest`).
   - PRD §11 Alignment Truth Table: Explicit classification of What is Real (ingest, rules, page check, wording check, verdict engine, reviewer cockpit, idempotent sender, SSE live status, metrics), What is Faked (SYNTHETIC datasets, stand-in platform), and What is Missing (live external platform APIs switched off by design).
+
+## D54 — Real Architecture, Storage, and Platform Connector Decisions
+
+- **D1 (CLAUDE.md Scope Update)**: Cloudinary storage approved for persistent private evidence and creative storage (`STORAGE_BACKEND=cloudinary|local`). Read-only platform status (approval state, performance metrics) approved with mutation/write actions locked. Deployment and CI/CD pipelines remain deferred.
+- **D2 (External Libraries)**: Approved `cloudinary` (MIT, free tier: 25 credits/mo) for persistent cloud file storage. `httpx` is used for all external platform HTTP communication.
+- **D3 (Single Bounded LangGraph Flow)**: Option A approved. Delete dead file `apps/worker/supervisor_agent.py`. The system operates strictly as a single, bounded LangGraph flow in `apps/worker/graph.py` with zero extra supervisor LLM cost or latency.
+- **D4 (Platform Connection Architecture)**: Option A approved. Plain tool functions calling each platform's official REST API directly with `httpx` (no MCP). Meta Graph/Marketing API and TikTok Ads API will be invoked directly via typed, bounded `httpx` tool functions in `apps/worker/connectors/`. All fabricated/mock fallback engines deleted; unconfigured platforms return `not_configured` or `error`.
+- **D5 (Safety Guardrails)**: Option A approved. Wire and harden existing custom guards (`packages/guards/input_guard.py`, `output_guard.py`, `pii_guard.py`). PII scrubbing will be enforced across prompts, logs, and telemetry without heavy NeMo runtime dependencies.
+
+## D55 — Real & Fail-Closed LLM Judge Node (Task 1)
+
+- **Hard Mechanical Invariant**: Hard mechanical checks (`CheckType.MECHANICAL` — UTM parameters, platform character limits, creative ratios) can never be dismissed or overruled by an LLM judge. Any attempt to dismiss a mechanical finding is rejected and marked `needs_person=True`.
+- **Fail-Closed on All Errors**: On ANY failure (missing `MODEL_API_KEY`, Gemini API exception, HTTP timeout, malformed JSON, spend cap exceeded, hallucination detected, unknown finding ID citation, or empty judge reasoning), the judge fails closed: returns `verdict="REQUIRES_HUMAN"`, `needs_person=True`, and an honest reason.
+- **Pydantic Structured Validation**: Uses `JudgeEvaluationSchema` enforcing strict JSON contract (`judge_verdict`, `confidence_score`, `faithfulness_score`, `hallucinations_detected`, `false_alarms_dismissed`, `remediation_approved`, `judge_reasoning`).
+- **Accounting & Tracing**: Model calls are routed via `apps/worker/model_client.py:call_gemini_model` with `client_id`, `ad_id`, `batch_id`, enforcing client spend caps and recording every token and cost in PostgreSQL `cost_ledger`. Langfuse spans recorded when tracer is active.
+- **Clean Ad Short-Circuit**: Ads with zero initial findings skip the judge step cleanly with `verdict="SKIPPED"`, 0 cost, and `needs_person=False`.
+
+

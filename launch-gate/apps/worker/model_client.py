@@ -35,7 +35,6 @@ class ModelResponse:
 
 def is_gemini_configured() -> bool:
     """Check if a valid Gemini API key is configured in the environment."""
-    load_dotenv()
     key = os.environ.get("MODEL_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
     key = key.strip()
     return bool(key and "replace" not in key.lower() and "placeholder" not in key.lower())
@@ -43,7 +42,6 @@ def is_gemini_configured() -> bool:
 
 def get_model_api_key() -> str:
     """Load model API key from environment (MODEL_API_KEY or GEMINI_API_KEY)."""
-    load_dotenv()
     key = os.environ.get("MODEL_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
     key = key.strip()
     if not is_gemini_configured():
@@ -70,6 +68,8 @@ def call_gemini_model(
     client: Any = None,
     connection: Any = None,
     system_instruction: str | None = None,
+    temperature: float | None = None,
+    response_mime_type: str | None = None,
 ) -> ModelResponse:
     """Invoke Google Gemini, enforce spend caps, and record cost in PostgreSQL ledger.
 
@@ -85,9 +85,15 @@ def call_gemini_model(
 
     # 2. Invoke model
     genai_client = client or create_gemini_client()
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-    ) if system_instruction else None
+    config_kwargs: dict[str, Any] = {}
+    if system_instruction:
+        config_kwargs["system_instruction"] = system_instruction
+    if temperature is not None:
+        config_kwargs["temperature"] = temperature
+    if response_mime_type:
+        config_kwargs["response_mime_type"] = response_mime_type
+
+    config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
     response = genai_client.models.generate_content(
         model=model_name,
@@ -95,11 +101,24 @@ def call_gemini_model(
         config=config,
     )
 
-    # 3. Extract text and usage tokens
+    # 3. Extract text and usage tokens (including thinking/reasoning tokens as output tokens)
     text = response.text or ""
     usage = getattr(response, "usage_metadata", None)
-    prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
-    completion_tokens = getattr(usage, "candidates_token_count", 0) or 0
+    raw_prompt_tokens = getattr(usage, "prompt_token_count", 0)
+    prompt_tokens = raw_prompt_tokens if isinstance(raw_prompt_tokens, int) else 0
+    raw_candidates_tokens = getattr(usage, "candidates_token_count", 0)
+    candidates_tokens = raw_candidates_tokens if isinstance(raw_candidates_tokens, int) else 0
+    raw_thoughts_tokens = getattr(usage, "thoughts_token_count", 0)
+    thoughts_tokens = raw_thoughts_tokens if isinstance(raw_thoughts_tokens, int) else 0
+    raw_total_tokens = getattr(usage, "total_token_count", None)
+    total_tokens_reported = raw_total_tokens if isinstance(raw_total_tokens, int) else (prompt_tokens + candidates_tokens + thoughts_tokens)
+
+    # Thinking/reasoning tokens are billed as output tokens
+    completion_tokens = max(
+        candidates_tokens,
+        total_tokens_reported - prompt_tokens,
+        candidates_tokens + thoughts_tokens,
+    )
 
     # 4. Record to cost ledger (enforces spend cap during persistence)
     cost_entry = record_cost_entry(

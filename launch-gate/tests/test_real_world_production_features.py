@@ -50,7 +50,7 @@ def test_runtime_llm_judge_clean_pass():
         sheet_hash="sheethash",
     )
     judge_res = evaluate_with_llm_judge(ad, findings=[])
-    assert judge_res.verdict == "CONFIRMED"
+    assert judge_res.verdict == "SKIPPED"
     assert judge_res.confidence_score == 1.0
     assert judge_res.needs_person is False
 

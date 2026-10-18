@@ -333,6 +333,10 @@ def verdict_node(state: WorkerGraphState) -> dict[str, Any]:
         ad,
         findings,
         retrieved_rules=state.get("retrieved_rules"),
+        connection=state.get("connection"),
+        model_client=state.get("model_client"),
+        tracer=tracer,
+        trace_id=trace_id,
     )
     if judge_result.needs_person:
         needs_person = True
@@ -370,13 +374,14 @@ def verdict_node(state: WorkerGraphState) -> dict[str, Any]:
                 "finding_ids": verdict.finding_ids,
             },
             status="completed",
-            cost_usd=0.0,
+            cost_usd=judge_result.cost_usd,
         )
 
     return {
         "step_count": step_count,
         "verdict": verdict,
         "shared_state": shared_state,
+        "needs_person": needs_person,
     }
 
 
@@ -536,13 +541,15 @@ def run_ad_worker_flow(
             step_count=final_state.get("step_count", 0),
         )
 
+    effective_needs_person = final_state.get("needs_person", False) or (verdict.status == VerdictStatus.NEEDS_PERSON)
+
     return WorkerGraphResult(
         ad=ad_out,
         verdict=verdict,
         findings=final_state.get("findings", []),
         shared_state=final_state.get("shared_state", current_state),
         step_count=final_state.get("step_count", 0),
-        needs_person=final_state.get("needs_person", False),
+        needs_person=effective_needs_person,
         final_state=final_state,
         trace_id=effective_trace_id if tracer else None,
     )

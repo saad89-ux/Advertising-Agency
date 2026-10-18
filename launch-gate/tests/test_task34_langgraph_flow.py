@@ -81,15 +81,37 @@ def sample_retrieved_rules() -> list[RetrievedRule]:
     ]
 
 
-def make_mock_model_client(response_dict: dict) -> MagicMock:
+def make_mock_model_client(
+    response_dict: dict,
+    judge_response: dict | None = None,
+) -> MagicMock:
+    default_judge = {
+        "judge_verdict": "CONFIRMED",
+        "confidence_score": 0.95,
+        "faithfulness_score": 0.95,
+        "hallucinations_detected": False,
+        "false_alarms_dismissed": [],
+        "remediation_approved": True,
+        "judge_reasoning": "Findings verified by judge.",
+    }
+    effective_judge = judge_response or default_judge
+
     client = MagicMock()
-    mock_resp = MagicMock()
-    mock_resp.text = json.dumps(response_dict)
-    mock_usage = MagicMock()
-    mock_usage.prompt_token_count = 100
-    mock_usage.candidates_token_count = 50
-    mock_resp.usage_metadata = mock_usage
-    client.models.generate_content.return_value = mock_resp
+
+    def generate_content_side_effect(*args, **kwargs):
+        mock_resp = MagicMock()
+        contents_str = str(kwargs.get("contents") or (args[1] if len(args) > 1 else "")).lower()
+        if "judge" in contents_str:
+            mock_resp.text = json.dumps(effective_judge)
+        else:
+            mock_resp.text = json.dumps(response_dict)
+        mock_usage = MagicMock()
+        mock_usage.prompt_token_count = 100
+        mock_usage.candidates_token_count = 50
+        mock_resp.usage_metadata = mock_usage
+        return mock_resp
+
+    client.models.generate_content.side_effect = generate_content_side_effect
     return client
 
 

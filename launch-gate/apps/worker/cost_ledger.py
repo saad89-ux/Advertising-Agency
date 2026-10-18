@@ -22,13 +22,17 @@ SPEND_CAP_TOTAL_DEFAULT = 15.00    # $15.00 total assessment spend cap
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemini-3.5-flash-lite": {"input": 0.075 / 1_000_000, "output": 0.30 / 1_000_000},
-    "gemini-3.8-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-3.5-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-flash-latest": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-2.5-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-3.5-flash-lite": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-2.5-flash-lite": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-3.8-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
+    "gemini-3.5-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
+    "gemini-2.5-flash": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
+    "gemini-flash-latest": {"input": 0.30 / 1_000_000, "output": 2.50 / 1_000_000},
+    "gemini-2.5-pro": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
+    "gemini-3.1-pro-preview": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
+    "gemini-pro-latest": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
     "gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gemini-1.5-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-1.5-flash": {"input": 0.075 / 1_000_000, "output": 0.30 / 1_000_000},
     "gemini-1.5-pro": {"input": 1.25 / 1_000_000, "output": 5.00 / 1_000_000},
 }
 
@@ -156,7 +160,8 @@ def check_spend_caps(
         # 1. Total spend cap check
         cursor_total = conn.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM cost_ledger")
         row_tot = cursor_total.fetchone()
-        current_total = float(row_tot[0] if isinstance(row_tot, (tuple, list)) else (row_tot.get("sum", 0) if isinstance(row_tot, dict) else row_tot))
+        val_tot = (row_tot[0] if isinstance(row_tot, (tuple, list)) else (row_tot.get("sum", 0) if isinstance(row_tot, dict) else row_tot)) if row_tot is not None else 0.0
+        current_total = float(val_tot or 0.0)
         if current_total + additional_cost > total_cap:
             raise SpendCapExceededError(
                 f"Total spend cap of ${total_cap:.2f} exceeded: current spend is "
@@ -171,7 +176,8 @@ def check_spend_caps(
                 (ad_id,),
             )
             row_ad = cursor_ad.fetchone()
-            current_ad = float(row_ad[0] if isinstance(row_ad, (tuple, list)) else (row_ad.get("sum", 0) if isinstance(row_ad, dict) else row_ad))
+            val_ad = (row_ad[0] if isinstance(row_ad, (tuple, list)) else (row_ad.get("sum", 0) if isinstance(row_ad, dict) else row_ad)) if row_ad is not None else 0.0
+            current_ad = float(val_ad or 0.0)
             if current_ad + additional_cost > row_cap:
                 raise SpendCapExceededError(
                     f"Spend cap per row of ${row_cap:.4f} exceeded for ad {ad_id!r}: "
