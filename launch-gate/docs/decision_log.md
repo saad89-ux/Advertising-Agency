@@ -288,7 +288,20 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
   - *Vulnerability Mechanism*: In `apps/api/client_inference.py`, `infer_client_from_host()` line 75 enables `ALLOW_DYNAMIC_CLIENTS=true` by default. When an unmapped, malicious domain (e.g., `brightleaf-scam.com` or `apple-phishing.org`) is evaluated, lines 76–83 split the host and dynamically synthesize a new client ID out of thin air (`clean_id = "brightleaf-scam"`).
   - *Self-Fulfilling Origin Whitelisting*: Subsequently, `allowed_origins_for_client("brightleaf-scam", domain_map)` checks line 100: `if not origins and client_id:`. Because no static domain map exists for the synthesized ID, lines 101–106 automatically inject `https://{client_id}.com` and `http://{client_id}.com` (e.g. `https://brightleaf-scam.com`) into `origins`.
   - *Impact*: The URL redirect verification compares the redirect destination against `origins`. Since `origins` was dynamically populated with the attacker's own domain, the check passes unconditionally. Any attacker can bypass open-redirect validation by registering any unmapped domain.
-  - *Remediation Plan (Task 7)*: Deprecate `ALLOW_DYNAMIC_CLIENTS` in production, enforce strict fail-closed rejection for unmapped domains, and require explicit client origin registration in `domain_map.json`. The 3 redirect tests in `test_task24_utm_redirect.py` remain failing until Task 7 is executed.
+
+## D59 — Deterministic Citation Grounding, UI Test Hardening & Meta Graph v26.0 (Pre-Task 3 Alignment)
+
+- **Deterministic Citation Grounding (Zero LLM Overhead)**:
+  - Added strict grounding checks in `apps/worker/citation_verification.py`. When a finding cites a rule tagged with `[FORBIDDEN]` phrases, its quote must match one of the listed forbidden phrases (case-insensitive substring or single-character typo distance $\le 1$ for tokens $\ge 5$ characters).
+  - Explicitly rejects contradictory findings whose explanation states that a claim is "not covered in the rules" while citing a rule.
+  - Unsatisfied findings are dropped from accepted findings and downgraded to `citation_not_supported` with `needs_person=True`.
+- **UI Route Test Hardening**:
+  - `tests/test_task38_batch_review_screen.py`: Reinforced `test_home_page_navigates_to_review_screen` to assert the concrete batch review route pattern `\`/batches/${item.batch_id}\`` and `data-testid="link-batch-review"` rendered directly on the home page sidebar, rather than relying on loose substring matching.
+  - `tests/test_task52_metrics_screen.py`: Reinforced `test_home_and_review_pages_link_to_metrics` to assert exact concrete navigation links (`href="/metrics"` on review screen and `href: "/performance"` & `href: "/dashboard"` on Navbar) with zero `any()` loose assertions.
+- **Meta Graph API Version & Support Status**:
+  - Current active version: **v26.0** (released July 29, 2026).
+  - Version **v21.0** (released October 2, 2024) remains **fully supported** by Meta through **January 21, 2027** under Meta's 2-year lifecycle policy.
+  - Live diagnostics (`scripts/meta_token_diagnostics.py`) upgraded to `v26.0`. Current token session expired on Saturday, 17-Oct-26 13:00:00 PDT with 0 remaining lifetime until token rotation.
 
 
 

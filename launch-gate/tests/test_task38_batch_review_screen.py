@@ -42,10 +42,11 @@ def test_root_layout_imports_review_styles():
 
 
 def test_home_page_navigates_to_review_screen():
-    """Verify HomePage retains Launch Gate title and review interface capability."""
+    """Verify HomePage retains Launch Gate title and links to batch review."""
     home_code = (APP_DIR / "page.jsx").read_text(encoding="utf-8")
     assert "Launch Gate" in home_code
-    assert "review" in home_code.lower()
+    assert "`/batches/${item.batch_id}`" in home_code
+    assert 'data-testid="link-batch-review"' in home_code
 
 
 # --- 2. Side-by-Side Layout ("Ads Beside Findings") Tests ---

@@ -306,16 +306,21 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       <span style={{ fontSize: "13px", fontWeight: "600", color: isActive ? "#ffffff" : "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.title}
                       </span>
-                      <span style={{
-                        fontSize: "10px",
-                        padding: "1px 6px",
-                        borderRadius: "4px",
-                        background: item.status === "active_serving" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                        color: item.status === "active_serving" ? "#34d399" : "#fbbf24",
-                        fontWeight: "600",
-                      }}>
+                      <Link
+                        href={`/batches/${item.batch_id}`}
+                        data-testid="link-batch-review"
+                        style={{
+                          fontSize: "10px",
+                          padding: "1px 6px",
+                          borderRadius: "4px",
+                          background: item.status === "active_serving" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
+                          color: item.status === "active_serving" ? "#34d399" : "#fbbf24",
+                          fontWeight: "600",
+                          textDecoration: "none",
+                        }}
+                      >
                         {item.status === "active_serving" ? "Live" : "Review"}
-                      </span>
+                      </Link>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
                       <span>{item.client_name || item.client_id}</span>

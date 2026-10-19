@@ -585,22 +585,30 @@ def check_wording(
         active_retrieved_rules,
         client_id=ad.client_id,
         connection=connection,
+        quotes_by_index=raw_quote_by_index,
     )
 
     if citation_report.needs_person or not citation_report.is_valid:
         needs_person = True
-        for rej in citation_report.rejected_findings:
-            cite_finding = FindingContract(
-                finding_id=f"{ad.ad_id}:wording:unverified_citation:{rej.rule_id or 'none'}",
-                ad_id=ad.ad_id,
-                row_number=ad.row_number,
-                check_type=CheckType.WORDING,
-                message=f"Wording finding cited unverified/invented rule {rej.rule_id!r}; flagged for human review.",
-                field=rej.field,
-                proposed_fix="Cite an existing entry from retrieved client rules.",
-                rule_id=None,
-            )
-            all_findings.append(cite_finding)
+        for res in citation_report.results:
+            if not res.is_valid:
+                rej = res.finding
+                finding_suffix = (
+                    "citation_not_supported"
+                    if res.status == CitationStatus.CITATION_NOT_SUPPORTED
+                    else "unverified_citation"
+                )
+                cite_finding = FindingContract(
+                    finding_id=f"{ad.ad_id}:wording:{finding_suffix}:{rej.rule_id or 'none'}",
+                    ad_id=ad.ad_id,
+                    row_number=ad.row_number,
+                    check_type=CheckType.WORDING,
+                    message=f"Wording finding rejected ({res.reason}); flagged for human review.",
+                    field=rej.field,
+                    proposed_fix="Cite an existing entry from retrieved client rules matching the explicit claim.",
+                    rule_id=None,
+                )
+                all_findings.append(cite_finding)
 
     # Verify quotes on accepted citation findings: must have a quote that is a verbatim substring of ad text
     allowed_ids_set = {
