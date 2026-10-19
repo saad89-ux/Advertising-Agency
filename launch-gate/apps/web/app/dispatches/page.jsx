@@ -259,9 +259,9 @@ export default function DispatchesPage({ apiBaseUrl = "http://localhost:8000" })
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: "12px" }}>
                           <div style={{ fontSize: "12px" }}>
                             <span style={{ color: "#64748b" }}>Spend: </span>
-                            <span style={{ color: "#f8fafc", fontWeight: "600" }}>${Number(camp.spend || 0).toFixed(2)}</span>
+                            <span style={{ color: "#f8fafc", fontWeight: "600" }}>{camp.tracked && camp.spend != null ? `$${Number(camp.spend).toFixed(2)}` : "Not tracked"}</span>
                             <span style={{ color: "#64748b", marginLeft: "8px" }}>Orders: </span>
-                            <span style={{ color: "#10b981", fontWeight: "600" }}>{camp.orders || 0}</span>
+                            <span style={{ color: "#10b981", fontWeight: "600" }}>{camp.tracked && camp.orders != null ? camp.orders : "Not tracked"}</span>
                           </div>
                         </div>
                       </div>

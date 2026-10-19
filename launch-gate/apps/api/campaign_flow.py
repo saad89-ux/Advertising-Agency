@@ -273,44 +273,67 @@ def launch_batch(
                         },
                     )
 
-                    # Check success on every connector call; on failure do not write fake rows (route to dead letter/retry)
+                    # Check success on every connector call; on failure do not write fake rows
                     if not mcp_resp.success:
                         error_msg = mcp_resp.error or "connector_not_configured"
+                        is_unconfigured = error_msg == "connector_not_configured"
+                        disp_status = "blocked_connector_not_configured" if is_unconfigured else "rejected"
+                        review_status = "Blocked: Connector Not Configured" if is_unconfigured else "Rejected / Dispatch Failed"
+                        review_notes = (
+                            f"Platform connector '{plat}' is not configured. Set MCP_{plat.upper()}_SERVER_URL to enable live dispatch."
+                            if is_unconfigured else error_msg
+                        )
+
                         cur.execute(
                             """
                             INSERT INTO ad_live_dispatches (
                                 dispatch_id, ad_id, batch_id, client_id, platform, handle,
                                 status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url
-                            ) VALUES (%s, %s, %s, %s, %s, %s, 'failed_dispatch', NULL, 'Rejected / Not Configured', %s, NULL)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
                             ON CONFLICT (dispatch_id) DO UPDATE SET
-                                status = 'failed_dispatch',
-                                platform_review_status = 'Rejected / Not Configured',
+                                status = EXCLUDED.status,
+                                platform_ad_id = EXCLUDED.platform_ad_id,
+                                platform_review_status = EXCLUDED.platform_review_status,
                                 platform_review_notes = EXCLUDED.platform_review_notes,
                                 last_tracked_at = NOW();
                             """,
-                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, error_msg),
+                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, disp_status, f"blocked_{disp_id}", review_status, review_notes),
                         )
-                        # Route ad to dead_letter state in ad_approvals
-                        cur.execute(
-                            """
-                            UPDATE ad_approvals
-                            SET state = 'dead_letter',
-                                dead_letter_reason = %s,
-                                updated_at = NOW()
-                            WHERE ad_id = %s;
-                            """,
-                            (f"MCP dispatch failed for {plat}: {error_msg}", ad_id),
-                        )
-                        # Record attempt in ad_sends as dead_letter for bounded retry tracking
-                        cur.execute(
-                            """
-                            INSERT INTO ad_sends (
-                                send_id, ad_id, platform, attempt_number, status, error_message, created_at
-                            ) VALUES (%s, %s, %s, 1, 'dead_letter', %s, NOW())
-                            ON CONFLICT (send_id) DO NOTHING;
-                            """,
-                            (f"send_{disp_id}", ad_id, plat, error_msg),
-                        )
+
+                        if is_unconfigured:
+                            # A launch blocked because the connector is not configured must NOT go to dead_letter.
+                            # Set distinct status and keep out of dead letter queue
+                            cur.execute(
+                                """
+                                UPDATE ad_approvals
+                                SET state = 'blocked_connector_not_configured',
+                                    rejection_reason = %s,
+                                    updated_at = NOW()
+                                WHERE ad_id = %s;
+                                """,
+                                (review_notes, ad_id),
+                            )
+                        else:
+                            # Real failed attempts route to dead_letter
+                            cur.execute(
+                                """
+                                UPDATE ad_approvals
+                                SET state = 'dead_letter',
+                                    dead_letter_reason = %s,
+                                    updated_at = NOW()
+                                WHERE ad_id = %s;
+                                """,
+                                (f"MCP dispatch failed for {plat}: {error_msg}", ad_id),
+                            )
+                            cur.execute(
+                                """
+                                INSERT INTO ad_sends (
+                                    send_id, ad_id, platform, attempt_number, status, error_message, created_at
+                                ) VALUES (%s, %s, %s, 1, 'dead_letter', %s, NOW())
+                                ON CONFLICT (send_id) DO NOTHING;
+                                """,
+                                (f"send_{disp_id}", ad_id, plat, error_msg),
+                            )
                         continue
 
                     # If connector call succeeded:
@@ -464,27 +487,30 @@ def get_platform_performance(
     found_map = {r[0]: r for r in rows}
 
     for plat in default_platforms:
-        if plat in found_map:
+        if plat in found_map and found_map[plat][1] is not None:
             r = found_map[plat]
             sales = float(r[1])
             spend = float(r[2])
             orders = int(r[3])
             imp = int(r[4])
             clicks = int(r[5])
+            roas = round(sales / spend, 2) if spend > 0 else (0.0 if sales == 0.0 else None)
+            ctr = round((clicks / imp * 100), 2) if imp > 0 else 0.0
+            tracked = True
+
+            total_sales += sales
+            total_spend += spend
+            total_orders += orders
+            total_imp += imp
         else:
-            sales = 0.0
-            spend = 0.0
-            orders = 0
-            imp = 0
-            clicks = 0
-
-        roas = round(sales / spend, 2) if spend > 0 else 0.0
-        ctr = round((clicks / imp * 100), 2) if imp > 0 else 0.0
-
-        total_sales += sales
-        total_spend += spend
-        total_orders += orders
-        total_imp += imp
+            sales = None
+            spend = None
+            orders = None
+            imp = None
+            clicks = None
+            roas = None
+            ctr = None
+            tracked = False
 
         platform_stats.append({
             "platform": plat,
@@ -496,9 +522,11 @@ def get_platform_performance(
             "clicks": clicks,
             "roas": roas,
             "ctr_percent": ctr,
+            "tracked": tracked,
         })
 
-    blended_roas = round(total_sales / total_spend, 2) if total_spend > 0 else 0.0
+    any_tracked = any(p["tracked"] for p in platform_stats)
+    blended_roas = round(total_sales / total_spend, 2) if (any_tracked and total_spend > 0) else None
 
     # Donut chart data computed from real recorded dispatches
     with get_session() as conn:
@@ -518,21 +546,24 @@ def get_platform_performance(
     donut_data = []
     if status_counts.get("active_live", 0) > 0:
         donut_data.append({"label": "Active & Serving", "value": status_counts["active_live"], "color": "#10b981"})
-    if status_counts.get("under_review", 0) > 0:
-        donut_data.append({"label": "Under Platform Review", "value": status_counts["under_review"], "color": "#f59e0b"})
+    if status_counts.get("pending_review", 0) > 0:
+        donut_data.append({"label": "Under Platform Review", "value": status_counts["pending_review"], "color": "#f59e0b"})
     if status_counts.get("failed_dispatch", 0) > 0:
         donut_data.append({"label": "Failed / Dead Letter", "value": status_counts["failed_dispatch"], "color": "#f43f5e"})
-    if status_counts.get("staged", 0) > 0:
-        donut_data.append({"label": "Scheduled / Staged", "value": status_counts["staged"], "color": "#8b5cf6"})
+    if status_counts.get("blocked_connector_not_configured", 0) > 0:
+        donut_data.append({"label": "Blocked (Unconfigured)", "value": status_counts["blocked_connector_not_configured"], "color": "#94a3b8"})
+    if status_counts.get("scheduled", 0) > 0:
+        donut_data.append({"label": "Scheduled / Staged", "value": status_counts["scheduled"], "color": "#8b5cf6"})
 
     return {
         "summary": {
-            "total_sales_usd": total_sales,
-            "total_spend_usd": total_spend,
+            "total_sales_usd": total_sales if any_tracked else None,
+            "total_spend_usd": total_spend if any_tracked else None,
             "blended_roas": blended_roas,
-            "total_orders": total_orders,
-            "total_impressions": total_imp,
-            "active_campaigns": len([p for p in platform_stats if p["impressions"] > 0]),
+            "total_orders": total_orders if any_tracked else None,
+            "total_impressions": total_imp if any_tracked else None,
+            "active_campaigns": len([p for p in platform_stats if p["tracked"] and (p["impressions"] or 0) > 0]),
+            "tracked": any_tracked,
         },
         "platform_breakdown": platform_stats,
         "donut_data": donut_data,
@@ -686,27 +717,35 @@ def get_all_campaigns(
                 """
                 SELECT
                     a.ad_id, a.client_id, a.platform, a.headline, a.destination_url,
-                    COALESCE(d.handle, '@' || a.client_id || '_official') as handle,
+                    COALESCE(d.handle, 'Not configured') as handle,
                     COALESCE(d.status, 'not_dispatched') as delivery_status,
-                    COALESCE(d.platform_review_status, 'unconfigured') as review_status,
-                    COALESCE(p.inbound_sales_usd, 0.0) as sales,
-                    COALESCE(p.spend_usd, 0.0) as spend,
-                    COALESCE(p.roas, 0.0) as roas,
-                    COALESCE(p.impressions, 0) as impressions,
-                    COALESCE(p.has_rule_violation, FALSE) as has_violation
+                    COALESCE(d.platform_review_status, 'Unconfigured') as review_status,
+                    p.inbound_sales_usd as sales,
+                    p.spend_usd as spend,
+                    p.roas as roas,
+                    p.impressions as impressions,
+                    p.has_rule_violation as has_violation,
+                    (p.ad_id IS NOT NULL) as tracked
                 FROM ads a
+                JOIN batches b ON a.batch_id = b.batch_id
                 LEFT JOIN ad_live_dispatches d ON a.ad_id = d.ad_id
                 LEFT JOIN ad_performance_tracking p ON a.ad_id = p.ad_id
                 WHERE a.client_id = ANY(%s)
-                ORDER BY a.created_at DESC
+                ORDER BY b.created_at DESC, a.row_number ASC
                 LIMIT 50;
                 """,
                 (allowed,),
             )
             rows = cur.fetchall()
 
-    return [
-        {
+    campaigns = []
+    for r in rows:
+        is_tracked = bool(r[13])
+        sales = float(r[8]) if (is_tracked and r[8] is not None) else None
+        spend = float(r[9]) if (is_tracked and r[9] is not None) else None
+        roas = float(r[10]) if (is_tracked and r[10] is not None) else None
+        impressions = int(r[11]) if (is_tracked and r[11] is not None) else None
+        campaigns.append({
             "ad_id": r[0],
             "client_id": r[1],
             "client_name": r[1].replace("_", " ").title(),
@@ -716,14 +755,14 @@ def get_all_campaigns(
             "handle": r[5],
             "delivery_status": r[6],
             "review_status": r[7],
-            "inbound_sales_usd": float(r[8]),
-            "spend_usd": float(r[9]),
-            "roas": float(r[10]),
-            "impressions": int(r[11]),
-            "has_rule_violation": bool(r[12]),
-        }
-        for r in rows
-    ]
+            "inbound_sales_usd": sales,
+            "spend_usd": spend,
+            "roas": roas,
+            "impressions": impressions,
+            "has_rule_violation": bool(r[12]) if is_tracked else False,
+            "tracked": is_tracked,
+        })
+    return campaigns
 
 
 @router.get("/revenue-analytics")
@@ -744,13 +783,15 @@ def get_revenue_analytics(
             cur.execute(
                 """
                 SELECT
-                    client_id,
-                    COALESCE(SUM(inbound_sales_usd), 0.0),
-                    COALESCE(SUM(spend_usd), 0.0),
-                    COALESCE(SUM(inbound_orders), 0)
-                FROM ad_performance_tracking
-                WHERE client_id = ANY(%s)
-                GROUP BY client_id;
+                    c.client_id,
+                    SUM(p.inbound_sales_usd) as total_sales,
+                    SUM(p.spend_usd) as total_spend,
+                    SUM(p.inbound_orders) as total_orders,
+                    COUNT(p.ad_id) as tracking_count
+                FROM clients c
+                LEFT JOIN ad_performance_tracking p ON c.client_id = p.client_id
+                WHERE c.client_id = ANY(%s)
+                GROUP BY c.client_id;
                 """,
                 (query_clients,),
             )
@@ -759,17 +800,22 @@ def get_revenue_analytics(
     clients_data = []
     for r in client_rows:
         cid = r[0]
-        sales = float(r[1])
-        spend = float(r[2])
-        roas = round(sales / spend, 2) if spend > 0 else 0.0
+        has_perf = (r[4] or 0) > 0 and r[1] is not None
+        sales = float(r[1]) if has_perf else None
+        spend = float(r[2]) if has_perf else None
+        orders = int(r[3]) if has_perf else None
+        roas = round(sales / spend, 2) if (has_perf and spend and spend > 0) else (0.0 if (has_perf and sales == 0.0) else None)
         clients_data.append({
             "client_id": cid,
             "client_name": cid.replace("_", " ").title(),
-            "daily_sales": round(sales / 30, 2),
-            "weekly_sales": round(sales / 4, 2),
+            "daily_sales": round(sales / 30, 2) if has_perf else None,
+            "weekly_sales": round(sales / 4, 2) if has_perf else None,
             "monthly_sales": sales,
-            "top_platform": "Unconfigured",
+            "spend_usd": spend,
+            "orders": orders,
+            "top_platform": "Not tracked" if not has_perf else "Meta",
             "blended_roas": roas,
+            "tracked": has_perf,
         })
 
     return {

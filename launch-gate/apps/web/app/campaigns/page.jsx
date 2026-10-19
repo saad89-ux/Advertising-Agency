@@ -80,7 +80,9 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
               fontSize: "12px",
             }}>
               <span style={{ color: "#94a3b8" }}>Total Attributed Revenue: </span>
-              <strong style={{ color: "#10b981", fontSize: "14px" }}>${totalRevenue.toLocaleString()}</strong>
+              <strong style={{ color: campaigns.some(c => c.tracked && c.inbound_sales_usd != null) ? "#10b981" : "#94a3b8", fontSize: "14px" }}>
+                {campaigns.some(c => c.tracked && c.inbound_sales_usd != null) ? `$${totalRevenue.toLocaleString()}` : "Not tracked"}
+              </strong>
             </div>
           </div>
         </div>
@@ -158,31 +160,39 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
                   </td>
 
                   <td style={{ padding: "14px 18px" }}>
-                    {c.has_rule_violation ? (
+                    {c.delivery_status === "blocked_connector_not_configured" ? (
+                      <span style={{ padding: "3px 8px", background: "rgba(148, 163, 184, 0.15)", color: "#94a3b8", borderRadius: "6px", fontSize: "11px", fontWeight: "700" }}>
+                        🔒 Blocked (Connector Unconfigured)
+                      </span>
+                    ) : c.has_rule_violation ? (
                       <span style={{ padding: "3px 8px", background: "rgba(239, 68, 68, 0.15)", color: "#f87171", borderRadius: "6px", fontSize: "11px", fontWeight: "700" }}>
                         ⚠️ Policy Flagged
                       </span>
-                    ) : (
+                    ) : c.delivery_status === "active_live" ? (
                       <span style={{ padding: "3px 8px", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", borderRadius: "6px", fontSize: "11px", fontWeight: "700" }}>
                         ● Serving Live
+                      </span>
+                    ) : (
+                      <span style={{ padding: "3px 8px", background: "rgba(100, 116, 139, 0.15)", color: "#64748b", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
+                        {c.delivery_status}
                       </span>
                     )}
                   </td>
 
-                  <td style={{ padding: "14px 18px", fontWeight: "700", color: "#10b981", fontSize: "14px" }}>
-                    ${c.inbound_sales_usd.toLocaleString()}
+                  <td style={{ padding: "14px 18px", fontWeight: "700", color: c.tracked && c.inbound_sales_usd != null ? "#10b981" : "#64748b", fontSize: "14px" }}>
+                    {c.tracked && c.inbound_sales_usd != null ? `$${c.inbound_sales_usd.toLocaleString()}` : "Not tracked"}
                   </td>
 
-                  <td style={{ padding: "14px 18px", color: "#f8fafc" }}>
-                    ${c.spend_usd}
+                  <td style={{ padding: "14px 18px", color: c.tracked && c.spend_usd != null ? "#f8fafc" : "#64748b" }}>
+                    {c.tracked && c.spend_usd != null ? `$${c.spend_usd}` : "Not tracked"}
                   </td>
 
-                  <td style={{ padding: "14px 18px", fontWeight: "600", color: "#818cf8" }}>
-                    {c.roas}x
+                  <td style={{ padding: "14px 18px", fontWeight: "600", color: c.tracked && c.roas != null ? "#818cf8" : "#64748b" }}>
+                    {c.tracked && c.roas != null ? `${c.roas}x` : "Not tracked"}
                   </td>
 
-                  <td style={{ padding: "14px 18px", color: "#94a3b8" }}>
-                    {c.impressions.toLocaleString()}
+                  <td style={{ padding: "14px 18px", color: c.tracked && c.impressions != null ? "#94a3b8" : "#64748b" }}>
+                    {c.tracked && c.impressions != null ? c.impressions.toLocaleString() : "Not tracked"}
                   </td>
 
                   <td style={{ padding: "14px 18px", textAlign: "right" }}>

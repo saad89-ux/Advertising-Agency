@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS ad_live_dispatches (
     account_id TEXT REFERENCES platform_accounts (account_id) ON DELETE SET NULL,
     platform TEXT NOT NULL,
     handle TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active_live' CHECK (status IN ('scheduled', 'authenticating', 'dispatching', 'pending_review', 'active_live', 'rejected', 'paused')),
+    status TEXT NOT NULL DEFAULT 'active_live' CHECK (status IN ('scheduled', 'authenticating', 'dispatching', 'pending_review', 'active_live', 'rejected', 'paused', 'blocked_connector_not_configured')),
     platform_ad_id TEXT NOT NULL,
     platform_review_status TEXT NOT NULL DEFAULT 'Approved by Platform Review',
     platform_review_notes TEXT,

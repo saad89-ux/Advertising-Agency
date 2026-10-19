@@ -320,5 +320,18 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
   - Probed `models/gemini-embedding-001` and `gemini-embedding-2`: returned 3072-dimensional vector (`res.embeddings[0].values`).
   - Probed `text-embedding-004`: returned `404 NOT_FOUND` (`models/text-embedding-004 is not found for API version v1beta, or is not supported for embedContent`).
 
+## D61 — Task 7 Retrieval Architecture & Vector Indexing Specifications
 
-
+- **Rule Gating Threshold**:
+  - Keep policy established in D60: send all client rules when client rule count $\le 40$ rules directly to the LLM prompt. Semantic vector retrieval is strictly triggered only when rule count exceeds 40 rules.
+- **Gemini Embedding Output Dimensionality**:
+  - Live available models on active key: `models/gemini-embedding-001` and `models/gemini-embedding-2` (default 3,072 dimensions).
+  - Official documentation reference: `https://ai.google.dev/gemini-api/docs/embeddings`
+  - Output dimensionality specification: The Google GenAI SDK supports reducing vector size via `types.EmbedContentConfig(output_dimensionality=D)`. Verified with live API calls that both `gemini-embedding-001` and `gemini-embedding-2` successfully return 768, 1536, and 3072 dimensions natively without accuracy loss from client-side slicing.
+- **pgvector Indexing Limits & Dimensions**:
+  - Official documentation reference: `https://github.com/pgvector/pgvector`
+  - Standard `vector` type: Maximum index limit for HNSW and IVFFlat is **2,000 dimensions**. A 3,072-dimensional vector cannot be indexed with standard `vector` HNSW/IVFFlat without dimension truncation (e.g. `output_dimensionality=768` or `1536`).
+  - `halfvec` type (16-bit half-precision float, introduced in pgvector 0.7.0): Supports HNSW and IVFFlat indexing up to **4,000 dimensions**. A 3,072-dimensional vector can be indexed natively using `halfvec(3072)`.
+  - **No ANN Index Needed for Tens of Rules**: For typical agency clients having $\le 40$ rules (and even up to a few thousand rules), approximate nearest neighbor (ANN) indexes like HNSW or IVFFlat are completely unnecessary and introduce index maintenance overhead. Exact $k$-NN search (`SELECT ... ORDER BY embedding <=> query_vector LIMIT k`) executes in $< 1\text{ms}$ on PostgreSQL and has zero dimension restrictions.
+- **Hosting Decision**:
+  - pgvector hosting decision (local Docker container, native Windows Postgres, or hosted Neon/Supabase) is explicitly **deferred** to Task 7. No vector retrieval or embeddings implementation is to be introduced before Task 7.

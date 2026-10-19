@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("sales"); // 'sales' | 'spend' | 'roas'
+  const [activeTab, setActiveTab] = useState("sales");
 
   const fetchPerformance = async () => {
     try {
@@ -13,8 +13,8 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(`${apiBaseUrl}/campaign-flow/platform-performance`, { headers });
       if (res.ok) {
-        const json = await res.json();
-        setData(json);
+        const perf = await res.json();
+        setData(perf);
       }
     } catch (err) {
       console.error(err);
@@ -28,9 +28,12 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
   }, [apiBaseUrl]);
 
   const liveOrders = [];
-
   const platforms = data?.platform_breakdown || [];
-  const maxSales = Math.max(...platforms.map((p) => p.inbound_sales_usd || 0), 1000);
+  const trackedPlatforms = platforms.filter((p) => p.tracked);
+  const anyTracked = data?.summary?.tracked || trackedPlatforms.length > 0;
+  const maxSales = Math.max(...trackedPlatforms.map((p) => p.inbound_sales_usd || 0), 1000);
+
+  const donutTotal = (data?.donut_data || []).reduce((acc, curr) => acc + (curr.value || 0), 0);
 
   return (
     <div style={{
@@ -88,11 +91,36 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
           marginBottom: "28px",
         }}>
           {[
-            { label: "Total Inbound Sales", value: `$${(data?.summary?.total_sales_usd ?? 0).toLocaleString()}`, color: "#10b981", change: (data?.summary?.total_sales_usd || 0) > 0 ? "Tracking live" : "No sales recorded" },
-            { label: "Blended ROAS", value: `${data?.summary?.blended_roas ?? 0}x`, color: "#818cf8", change: (data?.summary?.blended_roas || 0) > 0 ? "Target active" : "Unconfigured" },
-            { label: "Total Ad Spend", value: `$${(data?.summary?.total_spend_usd ?? 0).toLocaleString()}`, color: "#f59e0b", change: "Spend tracking active" },
-            { label: "Attributed Orders", value: `${data?.summary?.total_orders ?? 0}`, color: "#38bdf8", change: "Verified via UTMs" },
-            { label: "Total Impressions", value: `${(data?.summary?.total_impressions ?? 0).toLocaleString()}`, color: "#ec4899", change: "Live across networks" },
+            {
+              label: "Total Inbound Sales",
+              value: data?.summary?.total_sales_usd != null ? `$${data.summary.total_sales_usd.toLocaleString()}` : "Not tracked",
+              color: "#10b981",
+              change: data?.summary?.tracked ? "Tracking active" : "Not tracked",
+            },
+            {
+              label: "Blended ROAS",
+              value: data?.summary?.blended_roas != null ? `${data.summary.blended_roas}x` : "Not tracked",
+              color: "#818cf8",
+              change: data?.summary?.tracked ? "Efficiency verified" : "Not tracked",
+            },
+            {
+              label: "Total Ad Spend",
+              value: data?.summary?.total_spend_usd != null ? `$${data.summary.total_spend_usd.toLocaleString()}` : "Not tracked",
+              color: "#f59e0b",
+              change: data?.summary?.tracked ? "Spend recorded" : "Not tracked",
+            },
+            {
+              label: "Attributed Orders",
+              value: data?.summary?.total_orders != null ? `${data.summary.total_orders}` : "Not tracked",
+              color: "#38bdf8",
+              change: data?.summary?.tracked ? "Verified via UTMs" : "Not tracked",
+            },
+            {
+              label: "Total Impressions",
+              value: data?.summary?.total_impressions != null ? `${data.summary.total_impressions.toLocaleString()}` : "Not tracked",
+              color: "#ec4899",
+              change: data?.summary?.tracked ? "Live impressions" : "Not tracked",
+            },
           ].map((kpi, idx) => (
             <div
               key={idx}
@@ -100,11 +128,12 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
                 background: "rgba(15, 23, 42, 0.75)",
                 backdropFilter: "blur(20px)",
                 border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: "14px",
-                padding: "20px",
+                borderRadius: "16px",
+                padding: "20px 24px",
+                boxShadow: "0 10px 30px rgba(0, 0, 0, 0.2)",
               }}
             >
-              <div style={{ fontSize: "12px", color: "#94a3b8", fontWeight: "600", marginBottom: "8px" }}>
+              <div style={{ fontSize: "12px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
                 {kpi.label}
               </div>
               <div style={{ fontSize: "28px", fontWeight: "800", color: kpi.color, marginBottom: "4px" }}>
@@ -160,43 +189,62 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
             </div>
 
             {/* SVG Custom Horizontal Bar Graph */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {platforms.map((p, idx) => {
-                const val = activeTab === "sales" ? p.inbound_sales_usd : (activeTab === "spend" ? p.spend_usd : p.roas * 1000);
-                const percent = Math.min(100, Math.max(10, (val / maxSales) * 100));
-                const colors = ["#6366f1", "#ec4899", "#10b981", "#38bdf8", "#f59e0b"];
+            {!anyTracked ? (
+              <div style={{ padding: "48px 16px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+                <div style={{ fontSize: "32px", marginBottom: "8px" }}>📊</div>
+                No platform telemetry recorded. Connect real social platform APIs to stream live revenue data.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {platforms.map((p, idx) => {
+                  const colors = ["#6366f1", "#ec4899", "#10b981", "#38bdf8", "#f59e0b"];
+                  if (!p.tracked) {
+                    return (
+                      <div key={idx}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", marginBottom: "6px" }}>
+                          <span style={{ fontWeight: "600", color: "#94a3b8" }}>{p.display_name}</span>
+                          <span style={{ fontSize: "12px", color: "#64748b" }}>Not tracked</span>
+                        </div>
+                        <div style={{ width: "100%", height: "8px", background: "rgba(255, 255, 255, 0.05)", borderRadius: "999px" }} />
+                      </div>
+                    );
+                  }
 
-                return (
-                  <div key={idx}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", marginBottom: "6px" }}>
-                      <span style={{ fontWeight: "600", color: "#e2e8f0" }}>{p.display_name}</span>
-                      <span style={{ fontWeight: "700", color: colors[idx % colors.length] }}>
-                        {activeTab === "roas" ? `${p.roas}x ROAS` : `$${val.toLocaleString()}`}
-                      </span>
-                    </div>
+                  const val = activeTab === "sales" ? p.inbound_sales_usd : (activeTab === "spend" ? p.spend_usd : (p.roas || 0) * 1000);
+                  const percent = Math.min(100, Math.max(5, (val / maxSales) * 100));
 
-                    <div style={{ width: "100%", height: "12px", background: "rgba(255, 255, 255, 0.05)", borderRadius: "999px", overflow: "hidden" }}>
-                      <div style={{
-                        width: `${percent}%`,
-                        height: "100%",
-                        background: colors[idx % colors.length],
-                        borderRadius: "999px",
-                        transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
-                      }} />
-                    </div>
+                  return (
+                    <div key={idx}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", marginBottom: "6px" }}>
+                        <span style={{ fontWeight: "600", color: "#e2e8f0" }}>{p.display_name}</span>
+                        <span style={{ fontWeight: "700", color: colors[idx % colors.length] }}>
+                          {activeTab === "roas" ? (p.roas != null ? `${p.roas}x ROAS` : "Not tracked") : `$${(val || 0).toLocaleString()}`}
+                        </span>
+                      </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
-                      <span>Spend: ${p.spend_usd}</span>
-                      <span>Orders: {p.orders}</span>
-                      <span>CTR: {p.ctr_percent}%</span>
+                      <div style={{ width: "100%", height: "12px", background: "rgba(255, 255, 255, 0.05)", borderRadius: "999px", overflow: "hidden" }}>
+                        <div style={{
+                          width: `${percent}%`,
+                          height: "100%",
+                          background: colors[idx % colors.length],
+                          borderRadius: "999px",
+                          transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
+                        }} />
+                      </div>
+
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                        <span>Spend: {p.spend_usd != null ? `$${p.spend_usd}` : "Not tracked"}</span>
+                        <span>Orders: {p.orders != null ? p.orders : "Not tracked"}</span>
+                        <span>CTR: {p.ctr_percent != null ? `${p.ctr_percent}%` : "Not tracked"}</span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Donut Chart: Campaign Delivery Share */}
+          {/* Donut Chart: Delivery Status Breakdown */}
           <div style={{
             background: "rgba(15, 23, 42, 0.75)",
             backdropFilter: "blur(20px)",
@@ -210,36 +258,21 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
               Live Delivery & Review Share
             </h3>
 
-            {/* SVG Donut */}
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "180px" }}>
-              <svg width="160" height="160" viewBox="0 0 160 160">
-                <circle cx="80" cy="80" r="60" fill="none" stroke="#1e293b" strokeWidth="16" />
-                {/* Active 74% */}
-                <circle cx="80" cy="80" r="60" fill="none" stroke="#10b981" strokeWidth="16"
-                  strokeDasharray={`${(74 / 100) * 377} 377`}
-                  strokeDashoffset="0"
-                  transform="rotate(-90 80 80)"
-                />
-                {/* Review 14% */}
-                <circle cx="80" cy="80" r="60" fill="none" stroke="#f59e0b" strokeWidth="16"
-                  strokeDasharray={`${(14 / 100) * 377} 377`}
-                  strokeDashoffset={`-${(74 / 100) * 377}`}
-                  transform="rotate(-90 80 80)"
-                />
-                {/* Flagged 8% */}
-                <circle cx="80" cy="80" r="60" fill="none" stroke="#f43f5e" strokeWidth="16"
-                  strokeDasharray={`${(8 / 100) * 377} 377`}
-                  strokeDashoffset={`-${((74 + 14) / 100) * 377}`}
-                  transform="rotate(-90 80 80)"
-                />
-                <text x="80" y="76" textAnchor="middle" fill="#ffffff" fontSize="20" fontWeight="800">
-                  74%
-                </text>
-                <text x="80" y="94" textAnchor="middle" fill="#94a3b8" fontSize="11" fontWeight="600">
-                  Serving Live
-                </text>
-              </svg>
-            </div>
+            {/* Donut Content */}
+            {donutTotal === 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", height: "180px", color: "#64748b" }}>
+                <div style={{ fontSize: "32px", marginBottom: "8px" }}>⭕</div>
+                <div style={{ fontSize: "13px", fontWeight: "600" }}>No Dispatches Tracked</div>
+                <div style={{ fontSize: "11px", color: "#475569" }}>Dispatches will graph here when executed</div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "180px" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "28px", fontWeight: "800", color: "#ffffff" }}>{donutTotal}</div>
+                  <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>Total Dispatches</div>
+                </div>
+              </div>
+            )}
 
             {/* Legend */}
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
@@ -279,45 +312,16 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
             </span>
           </div>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.08)", color: "#64748b", textAlign: "left" }}>
-                  <th style={{ padding: "10px 14px" }}>Order ID</th>
-                  <th style={{ padding: "10px 14px" }}>Revenue</th>
-                  <th style={{ padding: "10px 14px" }}>Client</th>
-                  <th style={{ padding: "10px 14px" }}>Platform Source</th>
-                  <th style={{ padding: "10px 14px" }}>Attributed Ad</th>
-                  <th style={{ padding: "10px 14px" }}>Location</th>
-                  <th style={{ padding: "10px 14px" }}>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveOrders.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "32px 14px", textAlign: "center", color: "#64748b" }}>
-                      No live inbound conversions recorded yet. Attributed sales will appear here when campaigns are active.
-                    </td>
-                  </tr>
-                ) : (
-                  liveOrders.map((ord, idx) => (
-                    <tr key={idx} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.04)" }}>
-                      <td style={{ padding: "12px 14px", fontWeight: "600", color: "#e2e8f0" }}>{ord.orderId}</td>
-                      <td style={{ padding: "12px 14px", fontWeight: "700", color: "#10b981" }}>{ord.amount}</td>
-                      <td style={{ padding: "12px 14px", color: "#cbd5e1" }}>{ord.client}</td>
-                      <td style={{ padding: "12px 14px" }}>
-                        <span style={{ padding: "2px 8px", background: "rgba(99, 102, 241, 0.15)", color: "#818cf8", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
-                          {ord.platform}
-                        </span>
-                      </td>
-                      <td style={{ padding: "12px 14px", color: "#94a3b8" }}>{ord.adId}</td>
-                      <td style={{ padding: "12px 14px", color: "#cbd5e1" }}>{ord.city}</td>
-                      <td style={{ padding: "12px 14px", color: "#64748b" }}>{ord.time}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          <div style={{
+            background: "rgba(8, 12, 20, 0.6)",
+            border: "1px dashed rgba(255, 255, 255, 0.12)",
+            borderRadius: "12px",
+            padding: "36px 20px",
+            textAlign: "center",
+            color: "#64748b",
+            fontSize: "13px"
+          }}>
+            No inbound orders detected. Once campaigns launch on verified platform ad networks with UTM links, live conversions appear here in real time.
           </div>
         </div>
       </div>

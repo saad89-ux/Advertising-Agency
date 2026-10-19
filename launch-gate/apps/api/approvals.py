@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS ad_approvals (
     ad_id TEXT PRIMARY KEY REFERENCES ads (ad_id) ON DELETE CASCADE,
     client_id TEXT NOT NULL REFERENCES clients (client_id),
     state TEXT NOT NULL DEFAULT 'pending_review' CHECK (
-        state IN ('pending_review', 'approved', 'rejected', 'sending', 'sent', 'dead_letter')
+        state IN ('pending_review', 'approved', 'rejected', 'sending', 'sent', 'dead_letter', 'blocked_connector_not_configured')
     ),
     content_hash TEXT,
     content_snapshot TEXT,
