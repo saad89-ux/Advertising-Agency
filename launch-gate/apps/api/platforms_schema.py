@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
     status TEXT NOT NULL DEFAULT 'connected' CHECK (status IN ('connected', 'active', 'rate_limited', 'disconnected')),
     last_sync_at TIMESTAMPTZ DEFAULT NOW(),
     metadata JSONB DEFAULT '{}'::jsonb,
+    is_sample BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_platform_accounts_client ON platform_accounts (client_id);
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS ad_live_dispatches (
     platform_review_status TEXT NOT NULL DEFAULT 'Approved by Platform Review',
     platform_review_notes TEXT,
     live_preview_url TEXT,
+    is_sample BOOLEAN NOT NULL DEFAULT FALSE,
     dispatched_at TIMESTAMPTZ DEFAULT NOW(),
     last_tracked_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -114,8 +116,8 @@ def seed_platform_demo_data(connection: Any = None) -> None:
                     """
                     INSERT INTO platform_accounts (
                         account_id, client_id, platform, handle, account_name,
-                        auth_type, credentials_preview, encrypted_credentials, status
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        auth_type, credentials_preview, encrypted_credentials, status, is_sample
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
                     ON CONFLICT (account_id) DO NOTHING;
                     """,
                     acc,
@@ -154,7 +156,7 @@ def seed_platform_demo_data(connection: Any = None) -> None:
                     handle = f"@{client_id}_snap"
                 else:
                     plat = "instagram"
-                    handle = f"@{client_id}_wellness" if client_id == "brightleaf" else f"@{client_id}_official"
+                    handle = f"@{client_id}_official"
 
                 rev_status = "Policy Warning Flagged" if m["violation"] else "Approved & Serving Live"
                 rev_notes = m["note"]
@@ -163,8 +165,8 @@ def seed_platform_demo_data(connection: Any = None) -> None:
                     """
                     INSERT INTO ad_live_dispatches (
                         dispatch_id, ad_id, batch_id, client_id, platform, handle,
-                        status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url, is_sample
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
                     ON CONFLICT (dispatch_id) DO NOTHING;
                     """,
                     (

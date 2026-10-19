@@ -184,10 +184,10 @@ export default function DispatchesPage({ apiBaseUrl = "http://localhost:8000" })
             }}>
               <div style={{ fontSize: "32px", marginBottom: "12px" }}>📦</div>
               <div style={{ fontSize: "15px", fontWeight: "600", color: "#e2e8f0", marginBottom: "6px" }}>
-                No Active Live Deployments
+                No dispatches pending
               </div>
               <div style={{ fontSize: "13px", color: "#64748b", maxWidth: "480px", margin: "0 auto" }}>
-                Approved campaigns will appear here once dispatched via verified MCP platform connectors.
+                Approve validated ad batches in Remediation or Home to dispatch ads to live platforms.
               </div>
             </div>
           ) : (

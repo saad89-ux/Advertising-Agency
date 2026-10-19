@@ -114,9 +114,9 @@ def create_team_user(
 
     # Assign clients
     assigned = req.assigned_client_ids or []
-    # If no clients specified and role is buyer, default to all primary clients
+    # If no clients specified and role is buyer, default to all registered clients from DB
     if not assigned and req.role == "buyer":
-        assigned = ["brightleaf", "calmleaf", "oakandhome"]
+        assigned = [c["client_id"] for c in list_clients()]
 
     for cid in assigned:
         assign_user_to_client(user_id=user_id, client_id=cid)

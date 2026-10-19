@@ -23,9 +23,11 @@ CREATE TABLE IF NOT EXISTS batches (
     uploaded_by TEXT NOT NULL REFERENCES users (user_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     filename TEXT NOT NULL CHECK (length(filename) <= 255),
-    sheet_hash TEXT NOT NULL CHECK (length(trim(sheet_hash)) > 0)
+    sheet_hash TEXT NOT NULL CHECK (length(trim(sheet_hash)) > 0),
+    is_sample BOOLEAN NOT NULL DEFAULT FALSE
 )
 """
+ENSURE_BATCHES_IS_SAMPLE_COLUMN = "ALTER TABLE batches ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT FALSE;"
 
 
 def create_batches_table() -> None:

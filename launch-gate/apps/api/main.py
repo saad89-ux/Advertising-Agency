@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,11 +31,13 @@ from apps.api.uploads import UploadBodyLimitMiddleware, router as upload_router
 async def lifespan(_app: FastAPI):
     get_jwt_secret()
     init_schema()
-    try:
-        seed_demo_data(force=False)
-        seed_platform_demo_data()
-    except Exception as exc:
-        print(f"[WARN] Failed to auto-seed demo data in lifespan: {exc}")
+    seed_opt_in = os.getenv("SEED_DEMO_DATA", "false").lower() in ("true", "1", "yes")
+    if seed_opt_in:
+        try:
+            seed_demo_data(force=False)
+            seed_platform_demo_data()
+        except Exception as exc:
+            print(f"[WARN] Failed to auto-seed demo data in lifespan: {exc}")
     yield
 
 
@@ -46,7 +49,7 @@ app = FastAPI(
 All operational endpoints (except `/health` and `/auth/login`) require a Bearer token.
 
 ### Quick Start Demo Credentials:
-- **Buyer (BrightLeaf, CalmLeaf, Oak & Home):** `buyer@launchgate.com` / `password123`
+- **Media Buyer:** `buyer@launchgate.com` / `password123`
 - **Account Manager:** `manager@launchgate.com` / `password123`
 
 To test authenticated endpoints in this Swagger interface:

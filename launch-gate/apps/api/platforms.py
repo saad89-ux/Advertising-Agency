@@ -20,9 +20,9 @@ router = APIRouter(prefix="/platforms", tags=["platforms"])
 
 
 class ConnectAccountRequest(BaseModel):
-    client_id: str = Field(..., description="Client ID e.g. brightleaf, calmleaf, oakandhome")
+    client_id: str = Field(..., description="Registered client ID")
     platform: str = Field(..., description="Platform: instagram, facebook, tiktok, snapchat, x")
-    handle: str = Field(..., description="Account handle e.g. @brightleaf_wellness")
+    handle: str = Field(..., description="Account handle e.g. @brand_official")
     account_name: str = Field(..., description="Display name for account")
     auth_type: str = Field(default="api_token", description="api_token, oauth, or user_pass")
     credentials: str = Field(..., description="Secret access token, password, or OAuth payload")

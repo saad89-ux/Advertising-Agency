@@ -78,6 +78,25 @@ export default function AdCard({
               <span className="row-number-badge" title="Row index in source sheet">
                 Row #{ad.row_number ?? "?"}
               </span>
+              {(ad.is_sample || ad.ad_id?.startsWith("demo-")) && (
+                <span
+                  className="sample-badge"
+                  data-testid={`sample-badge-${ad.ad_id}`}
+                  style={{
+                    background: "rgba(234, 179, 8, 0.2)",
+                    color: "#facc15",
+                    border: "1px solid rgba(234, 179, 8, 0.4)",
+                    borderRadius: "4px",
+                    padding: "2px 6px",
+                    fontSize: "11px",
+                    fontWeight: "bold",
+                    letterSpacing: "0.05em",
+                  }}
+                  title="Sample / Demo Ad"
+                >
+                  [SAMPLE]
+                </span>
+              )}
               <span className="platform-badge" title={`Platform: ${ad.platform_raw || ad.platform}`}>
                 {ad.platform}
               </span>

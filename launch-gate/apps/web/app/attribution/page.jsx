@@ -342,9 +342,11 @@ export default function AttributionPage() {
                 }}
               >
                 <option value="">All Clients</option>
-                <option value="brightleaf">BrightLeaf</option>
-                <option value="calmleaf">CalmLeaf</option>
-                <option value="oakandhome">Oak & Home</option>
+                {Array.from(new Set(ads.map((a) => a.client_id).filter(Boolean))).map((cid) => (
+                  <option key={cid} value={cid}>
+                    {cid.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

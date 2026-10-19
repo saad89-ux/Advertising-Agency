@@ -313,11 +313,12 @@ def seed_demo_data(force: bool = False) -> dict[str, Any]:
         for b in DEMO_BATCHES:
             # Insert Batch
             conn.execute(
-                """INSERT INTO batches (batch_id, uploaded_by, created_at, filename, sheet_hash)
-                   VALUES (%s, %s, %s, %s, %s)
+                """INSERT INTO batches (batch_id, uploaded_by, created_at, filename, sheet_hash, is_sample)
+                   VALUES (%s, %s, %s, %s, %s, TRUE)
                    ON CONFLICT (batch_id) DO UPDATE SET
                      filename = EXCLUDED.filename,
-                     created_at = EXCLUDED.created_at""",
+                     created_at = EXCLUDED.created_at,
+                     is_sample = TRUE""",
                 (b["batch_id"], b["uploaded_by"], b["created_at"], b["filename"], b["sheet_hash"]),
             )
             total_batches += 1
@@ -331,13 +332,14 @@ def seed_demo_data(force: bool = False) -> dict[str, Any]:
                 conn.execute(
                     """INSERT INTO ads (
                          ad_id, batch_id, client_id, row_number, platform, platform_raw,
-                         ad_text, headline, destination_url, creative_file, row_hash, sheet_hash
-                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ad_text, headline, destination_url, creative_file, row_hash, sheet_hash, is_sample
+                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
                        ON CONFLICT (ad_id) DO UPDATE SET
                          headline = EXCLUDED.headline,
                          ad_text = EXCLUDED.ad_text,
                          platform = EXCLUDED.platform,
-                         destination_url = EXCLUDED.destination_url""",
+                         destination_url = EXCLUDED.destination_url,
+                         is_sample = TRUE""",
                     (
                         ad["ad_id"],
                         b["batch_id"],

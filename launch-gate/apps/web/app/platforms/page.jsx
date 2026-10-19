@@ -13,9 +13,11 @@ export default function PlatformsPage() {
   const [previewAd, setPreviewAd] = useState(null);
   const [toast, setToast] = useState(null);
 
+  const [clients, setClients] = useState([]);
+
   // New account form
   const [formData, setFormData] = useState({
-    client_id: "brightleaf",
+    client_id: "",
     platform: "instagram",
     handle: "",
     account_name: "",
@@ -32,6 +34,24 @@ export default function PlatformsPage() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
 
   const apiBaseUrl = "http://localhost:8000";
+
+  const fetchClients = async () => {
+    try {
+      const token = localStorage.getItem("launch_gate_token");
+      const res = await fetch(`${apiBaseUrl}/campaign-flow/clients`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setClients(data);
+        if (data.length > 0) {
+          setFormData((prev) => ({ ...prev, client_id: prev.client_id || data[0].client_id }));
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load clients:", err);
+    }
+  };
 
   const fetchAccounts = async () => {
     try {
@@ -52,6 +72,7 @@ export default function PlatformsPage() {
 
   useEffect(() => {
     fetchAccounts();
+    fetchClients();
   }, []);
 
   const handleTestAuth = async (accountId) => {
@@ -97,7 +118,7 @@ export default function PlatformsPage() {
       if (res.ok) {
         setShowAddModal(false);
         setFormData({
-          client_id: "brightleaf",
+          client_id: clients[0]?.client_id || "",
           platform: "instagram",
           handle: "",
           account_name: "",
@@ -344,6 +365,22 @@ export default function PlatformsPage() {
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <strong style={{ fontSize: "15px", color: "#f8fafc" }}>{acc.handle}</strong>
                             <span style={{ color: "#38bdf8", fontSize: "12px" }}>✓</span>
+                            {(acc.is_sample || acc.account_id?.startsWith("acc_")) && (
+                              <span
+                                style={{
+                                  background: "rgba(234, 179, 8, 0.2)",
+                                  color: "#facc15",
+                                  border: "1px solid rgba(234, 179, 8, 0.4)",
+                                  borderRadius: "4px",
+                                  padding: "1px 5px",
+                                  fontSize: "10px",
+                                  fontWeight: "bold",
+                                  letterSpacing: "0.05em",
+                                }}
+                              >
+                                [SAMPLE]
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: "11px", color: "#94a3b8" }}>
                             {acc.account_name}
@@ -643,9 +680,15 @@ export default function PlatformsPage() {
                       fontSize: "13px",
                     }}
                   >
-                    <option value="brightleaf">BrightLeaf Wellness</option>
-                    <option value="calmleaf">CalmLeaf Organic</option>
-                    <option value="oakandhome">Oak & Home Living</option>
+                    {clients.length > 0 ? (
+                      clients.map((c) => (
+                        <option key={c.client_id} value={c.client_id}>
+                          {c.name || c.client_id}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No clients registered</option>
+                    )}
                   </select>
                 </div>
 
@@ -682,7 +725,7 @@ export default function PlatformsPage() {
                     type="text"
                     value={formData.handle}
                     onChange={(e) => setFormData({ ...formData, handle: e.target.value })}
-                    placeholder="@brightleaf_wellness"
+                    placeholder="@brand_official"
                     style={{
                       width: "100%",
                       boxSizing: "border-box",
@@ -704,7 +747,7 @@ export default function PlatformsPage() {
                     type="text"
                     value={formData.account_name}
                     onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
-                    placeholder="BrightLeaf US Direct Ads"
+                    placeholder="Brand Ad Account Name"
                     style={{
                       width: "100%",
                       boxSizing: "border-box",

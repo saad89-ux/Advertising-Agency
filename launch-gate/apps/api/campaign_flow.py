@@ -49,7 +49,7 @@ def init_flow_tables():
 # --- Pydantic Request Models ---
 
 class PreflightReviewRequest(BaseModel):
-    client_id: str = "brightleaf"
+    client_id: str = ""
     input_text: str = ""
     file_name: str | None = None
     file_type: str | None = None
@@ -59,7 +59,7 @@ class PreflightReviewRequest(BaseModel):
 
 
 class LaunchBatchRequest(BaseModel):
-    client_id: str = "brightleaf"
+    client_id: str = ""
     batch_id: str | None = None
     campaign_name: str = "Multi-Platform Growth Burst"
     employee_email: str
@@ -102,29 +102,29 @@ def preflight_review(
 
     # 1. Headline validation
     headline = overrides.get("headline") or (
-        raw_text.splitlines()[0] if raw_text else ("Organic Radiance Restored" if client_id == "brightleaf" else "Natural Calm Focus")
+        raw_text.splitlines()[0].strip() if raw_text and raw_text.strip() else ""
     )
     if not headline or len(headline.strip()) < 3:
+        client_label = client_id.title() if client_id else "Campaign"
         missing_items.append({
             "client_id": client_id,
             "field": "headline",
-            "label": f"Headline for {client_id.title()}",
+            "label": f"Headline for {client_label}",
             "type": "text",
-            "placeholder": "e.g. Glowing Skin in 7 Days",
+            "placeholder": "e.g. Compliant Brand Offer Headline",
             "reason": "Campaign copy requires a compelling, compliant headline under 100 characters.",
         })
 
     # 2. Destination URL validation
-    dest_url = overrides.get("destination_url") or (
-        f"https://www.{client_id}.com/shop?utm_source=social&utm_medium=cpc"
-    )
+    dest_url = overrides.get("destination_url") or ""
     if not dest_url or not dest_url.startswith("http"):
+        client_label = client_id.title() if client_id else "Campaign"
         missing_items.append({
             "client_id": client_id,
             "field": "destination_url",
-            "label": f"Landing Page Destination URL for {client_id.title()}",
+            "label": f"Landing Page Destination URL for {client_label}",
             "type": "url",
-            "placeholder": f"https://www.{client_id}.com/landing-page",
+            "placeholder": f"https://www.{client_id if client_id else 'example'}.com/landing-page",
             "reason": "Ad platform tracking rules require a valid landing page URL with HTTPS.",
         })
 
@@ -233,21 +233,11 @@ def launch_batch(
                 (contact_id, actual_batch_id, req.client_id, req.employee_email, req.employee_phone),
             )
 
-            # Ensure demo ads exist for this batch
-            cur.execute("SELECT ad_id, headline, ad_text FROM ads WHERE client_id = %s LIMIT 3;", (req.client_id,))
+            # Query real ads for this batch or client
+            cur.execute("SELECT ad_id, headline, ad_text FROM ads WHERE batch_id = %s;", (actual_batch_id,))
             ads_list = cur.fetchall()
-            if not ads_list:
-                cur.execute(
-                    """
-                    INSERT INTO ads (
-                        ad_id, batch_id, client_id, row_number, platform, headline, ad_text, destination_url, creative_file, row_hash, sheet_hash
-                    ) VALUES
-                    (%s, %s, %s, 1, 'instagram', 'Organic Glow Serum', 'Hydrate deeply with cold-pressed rosehip seed oil.', 'https://www.brightleaf.com/glow', 'glow_1080.jpg', 'h1', 'sh1'),
-                    (%s, %s, %s, 2, 'tiktok', 'Clean Skincare Morning Ritual', 'Experience natural skin radiance in three simple steps.', 'https://www.brightleaf.com/ritual', 'ritual_reel.mp4', 'h2', 'sh1')
-                    RETURNING ad_id, headline, ad_text;
-                    """,
-                    (f"ad_{uuid.uuid4().hex[:6]}", actual_batch_id, req.client_id, f"ad_{uuid.uuid4().hex[:6]}", actual_batch_id, req.client_id),
-                )
+            if not ads_list and req.client_id:
+                cur.execute("SELECT ad_id, headline, ad_text FROM ads WHERE client_id = %s LIMIT 10;", (req.client_id,))
                 ads_list = cur.fetchall()
 
             # Initialize MCP platform tool dispatcher
@@ -646,8 +636,8 @@ def hitl_remediate(
                 (revised_headline, revised_text, req.ad_id),
             )
             row = cur.fetchone()
-            client_id = row[0] if row else "brightleaf"
-            platform = row[1] if row else "facebook"
+            client_id = row[0] if row else ""
+            platform = row[1] if row else "unknown"
 
             # 2. Update dispatches to active_live
             cur.execute(
@@ -725,7 +715,8 @@ def get_all_campaigns(
                     p.roas as roas,
                     p.impressions as impressions,
                     p.has_rule_violation as has_violation,
-                    (p.ad_id IS NOT NULL) as tracked
+                    (p.ad_id IS NOT NULL) as tracked,
+                    a.is_sample
                 FROM ads a
                 JOIN batches b ON a.batch_id = b.batch_id
                 LEFT JOIN ad_live_dispatches d ON a.ad_id = d.ad_id
@@ -761,6 +752,7 @@ def get_all_campaigns(
             "impressions": impressions,
             "has_rule_violation": bool(r[12]) if is_tracked else False,
             "tracked": is_tracked,
+            "is_sample": bool(r[14]),
         })
     return campaigns
 
@@ -837,7 +829,7 @@ def get_chat_history(
             cur.execute(
                 """
                 SELECT b.batch_id,
-                       COALESCE(MAX(a.client_id), MAX(c.client_id), 'brightleaf') as client_id,
+                       COALESCE(MAX(a.client_id), MAX(c.client_id), '') as client_id,
                        COUNT(a.ad_id) as ad_count,
                        b.created_at,
                        MAX(c.employee_email) as employee_email
@@ -852,49 +844,38 @@ def get_chat_history(
             rows = cur.fetchall()
 
     if not rows:
-        return [
-            {
-                "batch_id": "batch_bl_demo_101",
-                "title": "Summer Radiance Launch",
-                "client_id": "brightleaf",
-                "client_name": "BrightLeaf Wellness",
-                "ad_count": 8,
-                "status": "active_serving",
-                "created_at": "Today, 10:14 AM",
-                "employee_email": "sarah.ops@launchgate.com",
-            },
-            {
-                "batch_id": "batch_cl_demo_102",
-                "title": "Sleep & Calm Drops Push",
-                "client_id": "calmleaf",
-                "client_name": "CalmLeaf Extracts",
-                "ad_count": 6,
-                "status": "policy_warning",
-                "created_at": "Yesterday, 4:22 PM",
-                "employee_email": "david.buyer@launchgate.com",
-            },
-            {
-                "batch_id": "batch_oh_demo_103",
-                "title": "Autumn Home Decor Sale",
-                "client_id": "oakandhome",
-                "client_name": "Oak & Home Design",
-                "ad_count": 5,
-                "status": "active_serving",
-                "created_at": "Oct 12, 2:10 PM",
-                "employee_email": "sarah.ops@launchgate.com",
-            },
-        ]
+        return []
 
     return [
         {
             "batch_id": r[0],
-            "title": f"{r[1].replace('_', ' ').title()} Campaign Batch",
-            "client_id": r[1],
-            "client_name": r[1].replace("_", " ").title(),
-            "ad_count": int(r[2]) if r[2] else 4,
+            "title": f"{r[1].replace('_', ' ').title() if r[1] else 'Campaign'} Batch",
+            "client_id": r[1] or "",
+            "client_name": r[1].replace("_", " ").title() if r[1] else "General",
+            "ad_count": int(r[2]) if r[2] else 0,
             "status": "active_serving",
             "created_at": str(r[3])[:16] if r[3] else "Recent",
-            "employee_email": r[4] or "buyer@launchgate.com",
+            "employee_email": r[4] or (user.email if hasattr(user, "email") else "buyer@launchgate.com"),
         }
         for r in rows
     ]
+
+
+@router.get("/clients", summary="List clients for active campaigns and selector")
+def get_campaign_flow_clients(
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict[str, str]]:
+    """Return registered clients available to the user from the database."""
+    init_flow_tables()
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            allowed = list(user.assigned_client_ids)
+            if allowed:
+                cur.execute(
+                    "SELECT client_id, name FROM clients WHERE client_id = ANY(%s) ORDER BY name ASC;",
+                    (allowed,),
+                )
+            else:
+                cur.execute("SELECT client_id, name FROM clients ORDER BY name ASC;")
+            rows = cur.fetchall()
+    return [{"client_id": r[0], "name": r[1].replace("_", " ").title()} for r in rows]

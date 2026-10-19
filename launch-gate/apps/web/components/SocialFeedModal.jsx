@@ -9,14 +9,14 @@ export default function SocialFeedModal({ ad, onClose }) {
 
   if (!ad) return null;
 
-  const handle = ad.handle || `@${ad.client_id || "brand"}_official`;
-  const headline = ad.headline || "Transform Your Routine Naturally";
-  const text = ad.ad_text || ad.caption || "Discover pure organic botanical extracts clinically formulated for daily balance.";
+  const handle = ad.handle || (ad.client_id ? `@${ad.client_id}_official` : "@brand_official");
+  const headline = ad.headline || "Untitled Ad Headline";
+  const text = ad.ad_text || ad.caption || "";
   const cta = ad.cta_label || (text.toLowerCase().includes("shop") ? "Shop Now" : "Learn More");
-  const destUrl = ad.destination_url || "https://brightleafwellness.com/shop?utm_source=instagram&utm_medium=paid_social";
-  const reviewStatus = ad.platform_review_status || ad.review_status || "Approved & Serving Live";
-  const salesUsd = ad.inbound_sales_usd || 1250.0;
-  const ordersCount = ad.inbound_orders || 14;
+  const destUrl = ad.destination_url || "";
+  const reviewStatus = ad.platform_review_status || ad.review_status || "Pending Platform Review";
+  const salesUsd = ad.inbound_sales_usd;
+  const ordersCount = ad.inbound_orders;
 
   const platforms = [
     { id: "instagram", name: "Instagram", color: "#e1306c", icon: "📷" },

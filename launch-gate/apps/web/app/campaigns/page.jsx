@@ -137,14 +137,44 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
               </tr>
             </thead>
             <tbody>
-              {filteredCampaigns.map((c) => (
-                <tr key={c.ad_id} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.04)" }}>
-                  <td style={{ padding: "14px 18px" }}>
-                    <div style={{ fontWeight: "700", color: "#f8fafc", marginBottom: "2px" }}>
-                      "{c.headline}"
+              {filteredCampaigns.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: "48px 18px", textAlign: "center", color: "#64748b" }}>
+                    <div style={{ fontSize: "16px", fontWeight: "600", color: "#cbd5e1", marginBottom: "6px" }}>
+                      No campaigns launched yet
                     </div>
-                    <code style={{ fontSize: "11px", color: "#64748b" }}>{c.ad_id}</code>
+                    <div style={{ fontSize: "13px", color: "#64748b" }}>
+                      Upload and approve ad batches on the Home workspace to launch campaigns across platforms.
+                    </div>
                   </td>
+                </tr>
+              ) : (
+                filteredCampaigns.map((c) => (
+                  <tr key={c.ad_id} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.04)" }}>
+                    <td style={{ padding: "14px 18px" }}>
+                      <div style={{ fontWeight: "700", color: "#f8fafc", marginBottom: "2px" }}>
+                        "{c.headline}"
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <code style={{ fontSize: "11px", color: "#64748b" }}>{c.ad_id}</code>
+                        {(c.is_sample || c.ad_id?.startsWith("demo-")) && (
+                          <span
+                            style={{
+                              background: "rgba(234, 179, 8, 0.2)",
+                              color: "#facc15",
+                              border: "1px solid rgba(234, 179, 8, 0.4)",
+                              borderRadius: "4px",
+                              padding: "1px 5px",
+                              fontSize: "10px",
+                              fontWeight: "bold",
+                              letterSpacing: "0.05em",
+                            }}
+                          >
+                            [SAMPLE]
+                          </span>
+                        )}
+                      </div>
+                    </td>
 
                   <td style={{ padding: "14px 18px", fontWeight: "600", color: "#cbd5e1" }}>
                     {c.client_name}

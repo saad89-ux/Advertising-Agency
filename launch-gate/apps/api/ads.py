@@ -17,12 +17,14 @@ CREATE TABLE IF NOT EXISTS ads (
     creative_file TEXT,
     row_hash TEXT NOT NULL CHECK (length(trim(row_hash)) > 0),
     sheet_hash TEXT NOT NULL CHECK (length(trim(sheet_hash)) > 0),
+    is_sample BOOLEAN NOT NULL DEFAULT FALSE,
     CHECK (
         (ad_text IS NOT NULL AND length(trim(ad_text)) > 0)
         OR (headline IS NOT NULL AND length(trim(headline)) > 0)
     )
 )
 """
+ENSURE_ADS_IS_SAMPLE_COLUMN = "ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT FALSE;"
 
 INSERT_AD = """
 INSERT INTO ads (

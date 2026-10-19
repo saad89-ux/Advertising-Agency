@@ -21,7 +21,8 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   const [promptText, setPromptText] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
-  const [selectedClient, setSelectedClient] = useState("brightleaf");
+  const [selectedClient, setSelectedClient] = useState("");
+  const [availableClients, setAvailableClients] = useState([]);
   const [isCustomClient, setIsCustomClient] = useState(false);
   const [customClientName, setCustomClientName] = useState("");
 
@@ -35,6 +36,24 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   const [employeeEmail, setEmployeeEmail] = useState("sarah.ops@launchgate.com");
   const [employeePhone, setEmployeePhone] = useState("+1 (555) 382-9910");
   const [isLaunching, setIsLaunching] = useState(false);
+
+  // Fetch available clients from DB
+  const fetchClients = async () => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${apiBaseUrl}/campaign-flow/clients`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableClients(data);
+        if (data.length > 0 && !selectedClient) {
+          setSelectedClient(data[0].client_id);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch clients:", err);
+    }
+  };
 
   // Fetch batch chat history
   const fetchChatHistory = async () => {
@@ -75,6 +94,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       }
     }
     fetchChatHistory();
+    fetchClients();
   }, [apiBaseUrl]);
 
   // Preflight Review LLM Call
@@ -281,60 +301,69 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               Recent Batches
             </div>
           )}
-          {chatHistory.map((item) => {
-            const isActive = activeBatchId === item.batch_id;
-            return (
-              <div
-                key={item.batch_id}
-                onClick={() => {
-                  setActiveBatchId(item.batch_id);
-                  setSelectedClient(item.client_id || "brightleaf");
-                }}
-                style={{
-                  padding: sidebarOpen ? "12px 14px" : "10px",
-                  borderRadius: "8px",
-                  marginBottom: "6px",
-                  cursor: "pointer",
-                  background: isActive ? "rgba(99, 102, 241, 0.12)" : "transparent",
-                  border: isActive ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {sidebarOpen ? (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: "600", color: isActive ? "#ffffff" : "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.title}
-                      </span>
-                      <Link
-                        href={`/batches/${item.batch_id}`}
-                        data-testid="link-batch-review"
-                        style={{
-                          fontSize: "10px",
-                          padding: "1px 6px",
-                          borderRadius: "4px",
-                          background: item.status === "active_serving" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                          color: item.status === "active_serving" ? "#34d399" : "#fbbf24",
-                          fontWeight: "600",
-                          textDecoration: "none",
-                        }}
-                      >
-                        {item.status === "active_serving" ? "Live" : "Review"}
-                      </Link>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
-                      <span>{item.client_name || item.client_id}</span>
-                      <span>{item.ad_count} ads</span>
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ textAlign: "center", fontSize: "14px", color: isActive ? "#818cf8" : "#64748b" }}>
-                    ●
-                  </div>
-                )}
+          {chatHistory.length === 0 ? (
+            sidebarOpen && (
+              <div style={{ padding: "24px 12px", textAlign: "center", color: "#64748b", fontSize: "12px" }}>
+                <p style={{ margin: "0 0 6px 0", color: "#94a3b8", fontWeight: "600" }}>No batches uploaded yet</p>
+                <p style={{ margin: 0, fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>Upload a CSV or run preflight review to validate your first ad batch.</p>
               </div>
-            );
-          })}
+            )
+          ) : (
+            chatHistory.map((item) => {
+              const isActive = activeBatchId === item.batch_id;
+              return (
+                <div
+                  key={item.batch_id}
+                  onClick={() => {
+                    setActiveBatchId(item.batch_id);
+                    setSelectedClient(item.client_id || "");
+                  }}
+                  style={{
+                    padding: sidebarOpen ? "12px 14px" : "10px",
+                    borderRadius: "8px",
+                    marginBottom: "6px",
+                    cursor: "pointer",
+                    background: isActive ? "rgba(99, 102, 241, 0.12)" : "transparent",
+                    border: isActive ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {sidebarOpen ? (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "13px", fontWeight: "600", color: isActive ? "#ffffff" : "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {item.title}
+                        </span>
+                        <Link
+                          href={`/batches/${item.batch_id}`}
+                          data-testid="link-batch-review"
+                          style={{
+                            fontSize: "10px",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            background: item.status === "active_serving" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
+                            color: item.status === "active_serving" ? "#34d399" : "#fbbf24",
+                            fontWeight: "600",
+                            textDecoration: "none",
+                          }}
+                        >
+                          {item.status === "active_serving" ? "Live" : "Review"}
+                        </Link>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
+                        <span>{item.client_name || item.client_id}</span>
+                        <span>{item.ad_count} ads</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ textAlign: "center", fontSize: "14px", color: isActive ? "#818cf8" : "#64748b" }}>
+                      ●
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </aside>
 
@@ -383,32 +412,32 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             border: "1px solid rgba(255, 255, 255, 0.06)",
           }}>
             <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", textTransform: "uppercase" }}>Brand / Client:</span>
-            {[
-              { id: "brightleaf", label: "BrightLeaf Wellness" },
-              { id: "calmleaf", label: "CalmLeaf Extracts" },
-              { id: "oakandhome", label: "Oak & Home Design" },
-            ].map((c) => (
-              <button
-                key={c.id}
-                onClick={() => {
-                  setSelectedClient(c.id);
-                  setIsCustomClient(false);
-                }}
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: "6px",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  background: !isCustomClient && selectedClient === c.id ? "rgba(99, 102, 241, 0.2)" : "transparent",
-                  color: !isCustomClient && selectedClient === c.id ? "#818cf8" : "#94a3b8",
-                  border: !isCustomClient && selectedClient === c.id ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid transparent",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {c.label}
-              </button>
-            ))}
+            {availableClients.length > 0 ? (
+              availableClients.map((c) => (
+                <button
+                  key={c.client_id}
+                  onClick={() => {
+                    setSelectedClient(c.client_id);
+                    setIsCustomClient(false);
+                  }}
+                  style={{
+                    padding: "4px 12px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    background: !isCustomClient && selectedClient === c.client_id ? "rgba(99, 102, 241, 0.2)" : "transparent",
+                    color: !isCustomClient && selectedClient === c.client_id ? "#818cf8" : "#94a3b8",
+                    border: !isCustomClient && selectedClient === c.client_id ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid transparent",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {c.name || c.client_id}
+                </button>
+              ))
+            ) : (
+              <span style={{ fontSize: "12px", color: "#64748b" }}>No registered clients</span>
+            )}
 
             <button
               onClick={() => {
