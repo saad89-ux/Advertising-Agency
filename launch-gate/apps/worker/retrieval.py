@@ -8,6 +8,7 @@ import logging
 import math
 from typing import Any
 
+import psycopg
 from pgvector import Vector
 from pgvector.psycopg import register_vector
 
@@ -33,6 +34,21 @@ WHERE client_id = %s
 ORDER BY embedding <=> %s ASC
 LIMIT %s
 """
+
+
+def _table_exists(conn: Any, table_name: str) -> bool:
+    """Check if table exists in PostgreSQL without risking transaction abort."""
+    if not isinstance(conn, psycopg.Connection):
+        return True
+    try:
+        cursor = conn.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = %s",
+            (table_name,),
+        )
+        row = cursor.fetchone() if hasattr(cursor, "fetchone") else None
+        return bool(row)
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -125,6 +141,8 @@ def retrieve_client_rules(
     vector = _validated_query_vector(query_embedding)
 
     def _execute(conn: Any) -> list[RetrievedRule]:
+        if not _table_exists(conn, "client_rules"):
+            return []
         try:
             register_vector(conn)
         except Exception:
@@ -192,7 +210,27 @@ def retrieve_rule_by_entry(
     clean_client_id = client_id.strip()
     clean_entry_number = entry_number.strip()
 
+    def _from_files() -> RetrievedRule | None:
+        from apps.worker.client_rule_loader import load_rule_entries
+        try:
+            entries = load_rule_entries(client_id=clean_client_id)
+            for e in entries:
+                if e.client_id == clean_client_id and e.entry_number == clean_entry_number:
+                    return RetrievedRule(
+                        client_id=e.client_id,
+                        entry_number=e.entry_number,
+                        source_file=e.source_file,
+                        content=e.content,
+                        distance=None,
+                        retrieval_mode="exact_lookup",
+                    )
+            return None
+        except Exception:
+            return None
+
     def _execute(conn: Any) -> RetrievedRule | None:
+        if not _table_exists(conn, "client_rules"):
+            return _from_files()
         cursor = conn.execute(
             """
             SELECT client_id, entry_number, source_file, content
@@ -203,7 +241,7 @@ def retrieve_rule_by_entry(
         )
         rows = cursor.fetchall() if hasattr(cursor, "fetchall") else cursor
         if not rows:
-            return None
+            return _from_files()
         row = rows[0]
         if isinstance(row, dict):
             cid = row["client_id"]
@@ -261,6 +299,8 @@ def list_client_rules(
             return []
 
     def _execute(conn: Any) -> list[RetrievedRule]:
+        if not _table_exists(conn, "client_rules"):
+            return _from_files()
         try:
             cursor = conn.execute(
                 """

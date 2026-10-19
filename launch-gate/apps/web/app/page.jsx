@@ -74,25 +74,6 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   };
 
   useEffect(() => {
-    // Ensure default demo login token
-    if (typeof window !== "undefined") {
-      const token = localStorage.getItem("launch_gate_token");
-      if (!token) {
-        fetch(`${apiBaseUrl}/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: "buyer@launchgate.com", password: "password123" }),
-        })
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data) => {
-            if (data?.access_token) {
-              localStorage.setItem("launch_gate_token", data.access_token);
-              localStorage.setItem("launch_gate_user", JSON.stringify({ email: "buyer@launchgate.com", role: "buyer" }));
-            }
-          })
-          .catch(() => {});
-      }
-    }
     fetchChatHistory();
     fetchClients();
   }, [apiBaseUrl]);

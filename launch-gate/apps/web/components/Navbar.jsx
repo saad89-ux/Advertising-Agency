@@ -27,34 +27,28 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
           setUser({ email: "buyer@launchgate.com", role: "buyer" });
         }
       } else {
-        // Auto-login default demo buyer if no token yet
-        autoLoginDemo("buyer@launchgate.com", "password123", "buyer");
+        setToken(null);
+        setUser(null);
       }
     }
   };
 
-  const autoLoginDemo = async (email, password, role) => {
-    try {
-      const res = await fetch(`${apiBaseUrl}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const userObj = { email, role };
-        localStorage.setItem("launch_gate_token", data.access_token);
-        localStorage.setItem("launch_gate_user", JSON.stringify(userObj));
-        setToken(data.access_token);
-        setUser(userObj);
-      }
-    } catch {
-      setBackendOnline(false);
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("launch_gate_token");
+      localStorage.removeItem("launch_gate_user");
+      setToken(null);
+      setUser(null);
+      window.location.href = "/login";
     }
   };
 
   useEffect(() => {
     checkAuth();
+    if (typeof window !== "undefined") {
+      window.addEventListener("auth-changed", checkAuth);
+      window.addEventListener("storage", checkAuth);
+    }
     // Health & diagnostics polling
     fetch(`${apiBaseUrl}/health`)
       .then((res) => setBackendOnline(res.ok))
@@ -64,6 +58,13 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
       .then((res) => res.ok ? res.json() : null)
       .then((data) => setDiagInfo(data))
       .catch(() => {});
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("auth-changed", checkAuth);
+        window.removeEventListener("storage", checkAuth);
+      }
+    };
   }, [apiBaseUrl]);
 
   const isManager = false;
@@ -168,7 +169,7 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
           })}
         </nav>
 
-        {/* Right Section: Clean Status Capsule */}
+        {/* Right Section: Clean Status Capsule & Auth */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <div style={{
             display: "flex",
@@ -190,6 +191,47 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
               Live Engine Active
             </span>
           </div>
+
+          {token ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span data-testid="nav-user-email" style={{ fontSize: "12px", color: "#94a3b8" }}>
+                {user?.email || "Authenticated"}
+              </span>
+              <button
+                data-testid="nav-logout-btn"
+                onClick={handleLogout}
+                style={{
+                  background: "rgba(255, 255, 255, 0.06)",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: "6px",
+                  color: "#cbd5e1",
+                  fontSize: "11px",
+                  fontWeight: "600",
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                }}
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <Link
+              data-testid="nav-login-link"
+              href="/login"
+              style={{
+                background: "linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)",
+                border: "1px solid rgba(255, 255, 255, 0.2)",
+                borderRadius: "8px",
+                color: "#ffffff",
+                fontSize: "12px",
+                fontWeight: "700",
+                padding: "6px 12px",
+                textDecoration: "none",
+              }}
+            >
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
     </header>

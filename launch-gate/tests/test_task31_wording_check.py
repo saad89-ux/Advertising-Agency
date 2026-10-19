@@ -398,3 +398,43 @@ def test_wording_check_unranked_mode_truncates_over_forty_rules():
     assert any("rules_truncated" in f.finding_id for f in result.findings)
     trunc_finding = next(f for f in result.findings if "rules_truncated" in f.finding_id)
     assert "rules_truncated" in trunc_finding.message
+
+
+def test_clean_ad_oakandhome_under_forty_rules_not_needs_person():
+    """Verify clean ad for client with <= 40 rules does not get needs_person or rules_truncated."""
+    ad = AdContract(
+        ad_id="ad-oh-clean-1",
+        batch_id="batch-oh-1",
+        row_number=2,
+        client_id="oakandhome",
+        headline="Home Refresh Sale",
+        ad_text="Wool Rugs: 20% OFF this month.",
+        destination_url="https://oakandhome.example/rugs",
+        platform="facebook",
+        row_hash="oh_row_hash_1",
+        sheet_hash="oh_sheet_hash_1",
+    )
+    conn = FakeCostDBConnection()
+    mock_client = make_mock_gemini_client({
+        "findings": [],
+        "unknown": False,
+        "needs_person": False,
+        "summary": "Clean copy complies with all 9 Oak & Home rules.",
+    })
+
+    result = check_wording(
+        ad,
+        retrieved_rules=None,
+        embed_fn=None,
+        model_client=mock_client,
+        connection=conn,
+    )
+
+    # Oak & Home has exactly 9 active rules in files/index
+    assert len(result.retrieved_rules) == 9
+    assert result.retrieval_mode == "unranked_fallback"
+    assert result.needs_person is False
+    assert result.status == "ready"
+    assert not any("rules_truncated" in f.finding_id for f in result.findings)
+    assert len(result.findings) == 0
+

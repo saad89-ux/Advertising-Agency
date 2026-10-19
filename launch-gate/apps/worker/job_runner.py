@@ -455,6 +455,29 @@ def process_job(
                 except Exception:
                     pass
 
+        # 3.5 Run LLM Judge Audit
+        needs_person = False
+        if run_wording_checks and "wording_result" in locals() and wording_result is not None:
+            needs_person = wording_result.needs_person
+            judge_rules = wording_result.retrieved_rules
+        else:
+            judge_rules = retrieved_rules
+
+        from apps.worker.judge_eval import evaluate_with_llm_judge
+        judge_res = evaluate_with_llm_judge(
+            ad_contract,
+            findings,
+            retrieved_rules=judge_rules,
+            connection=conn,
+            model_client=model_client,
+            tracer=tracer,
+            trace_id=trace_id,
+        )
+        if judge_res.needs_person:
+            needs_person = True
+
+        active_findings = [f for f in findings if f.finding_id not in judge_res.false_alarms_dismissed]
+
         # If this ad was edited, delete stale findings from prior iterations before persisting new findings
         from apps.api.edits import count_ad_edits
         try:
@@ -464,11 +487,11 @@ def process_job(
             logger.debug("Failed checking or deleting stale findings for ad %s: %s", ad_contract.ad_id, exc)
 
         # 4. Persist findings idempotently
-        persist_findings_on_connection(conn, findings)
+        persist_findings_on_connection(conn, active_findings)
 
         # 5. Broadcast SSE live update & Finalize Trace
         from apps.worker.verdict import aggregate_ad_verdict
-        v_res = aggregate_ad_verdict(ad_contract, findings)
+        v_res = aggregate_ad_verdict(ad_contract, active_findings, needs_person=needs_person)
 
         try:
             tracer.end_trace(

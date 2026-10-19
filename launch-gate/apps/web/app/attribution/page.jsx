@@ -396,25 +396,29 @@ export default function AttributionPage() {
                         </div>
                       </td>
 
-                      <td style={{ padding: "14px 12px", fontWeight: 800, color: "#10b981", fontSize: "14px" }}>
-                        ${ad.inbound_sales_usd?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      <td style={{ padding: "14px 12px", fontWeight: 800, color: ad.inbound_sales_usd != null ? "#10b981" : "#64748b", fontSize: "14px" }}>
+                        {ad.inbound_sales_usd != null ? `$${ad.inbound_sales_usd.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "Not tracked"}
                       </td>
 
-                      <td style={{ padding: "14px 12px", color: "#cbd5e1" }}>
-                        {ad.inbound_orders}
+                      <td style={{ padding: "14px 12px", color: ad.inbound_orders != null ? "#cbd5e1" : "#64748b" }}>
+                        {ad.inbound_orders != null ? ad.inbound_orders : "Not tracked"}
                       </td>
 
                       <td style={{ padding: "14px 12px" }}>
-                        <span style={{
-                          padding: "3px 8px",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: 700,
-                          background: ad.roas >= 4.0 ? "rgba(16, 185, 129, 0.2)" : "rgba(59, 130, 246, 0.2)",
-                          color: ad.roas >= 4.0 ? "#34d399" : "#60a5fa",
-                        }}>
-                          {ad.roas}x
-                        </span>
+                        {ad.roas != null ? (
+                          <span style={{
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                            background: ad.roas >= 4.0 ? "rgba(16, 185, 129, 0.2)" : "rgba(59, 130, 246, 0.2)",
+                            color: ad.roas >= 4.0 ? "#34d399" : "#60a5fa",
+                          }}>
+                            {ad.roas}x
+                          </span>
+                        ) : (
+                          <span style={{ color: "#64748b", fontSize: "12px" }}>Not tracked</span>
+                        )}
                       </td>
 
                       <td style={{ padding: "14px 12px" }}>

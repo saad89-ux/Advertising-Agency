@@ -72,6 +72,9 @@ def infer_client_id(
     import re
     from dotenv import load_dotenv
     load_dotenv()
+    if normalized_host.endswith((".example", ".test", ".invalid", ".localhost")):
+        return None
+
     if os.environ.get("ALLOW_DYNAMIC_CLIENTS", "true").strip().lower() in {"true", "1", "yes"}:
         parts = normalized_host.split(".")
         if len(parts) >= 2:
@@ -79,7 +82,7 @@ def infer_client_id(
             if base in {"co", "com", "org", "net", "gov", "edu"} and len(parts) >= 3:
                 base = parts[-3]
             clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", base).casefold()
-            if len(clean_id) >= 2:
+            if len(clean_id) >= 2 and clean_id not in {"unknown", "invalid", "example"}:
                 return clean_id
     return None
 
@@ -97,7 +100,7 @@ def allowed_origins_for_client(
             origins.update({f"http://{normalized_host}", f"https://{normalized_host}"})
 
     # If client is dynamic and not in domain_map, allow its primary domains
-    if not origins and client_id:
+    if not origins and client_id and not client_id.startswith("client-"):
         origins.update({
             f"http://{client_id}.com",
             f"https://{client_id}.com",

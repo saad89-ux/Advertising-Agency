@@ -218,7 +218,7 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", marginBottom: "6px" }}>
                         <span style={{ fontWeight: "600", color: "#e2e8f0" }}>{p.display_name}</span>
                         <span style={{ fontWeight: "700", color: colors[idx % colors.length] }}>
-                          {activeTab === "roas" ? (p.roas != null ? `${p.roas}x ROAS` : "Not tracked") : `$${(val || 0).toLocaleString()}`}
+                          {activeTab === "roas" ? (p.roas != null ? `${p.roas}x ROAS` : "Not tracked") : (val != null ? `$${val.toLocaleString()}` : "Not tracked")}
                         </span>
                       </div>
 
