@@ -7,6 +7,12 @@ __pycache__/
 .venv/
 .pytest_temp/
 
-node_modules
-**/.next/
-**/node_modules/
+node_modules/
+
+
+
+# Next.js generated files
+apps/web/.next/
+
+# Local RAR backup (if inside the repository)
+launch-gate.rar
