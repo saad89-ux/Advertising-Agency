@@ -6,12 +6,20 @@ from pathlib import Path
 from typing import Sequence
 import pytest
 
+from apps.worker import retrieval
 from apps.worker.context_builder import ContextBuilder, StepContext, build_step_context
 from apps.worker.file_storage import LocalFileStore
 from apps.worker.retrieval import RetrievedRule
 from apps.worker.shared_state import SharedState
 from packages.contracts import AdContract
 from packages.guards.tool_policy import FORBIDDEN_TOOLS, STEP_TOOL_ALLOWLIST
+
+
+@pytest.fixture(autouse=True)
+def reset_table_cache():
+    retrieval.clear_table_cache()
+    yield
+    retrieval.clear_table_cache()
 
 
 def sample_ad(
@@ -81,11 +89,23 @@ class FakeContextDBConnection:
         return False
 
     def execute(self, query: str, params: tuple = ()):
+        if "information_schema.tables" in query:
+            self._is_info_schema = True
+            return self
+        self._is_info_schema = False
         client_id = params[0] if params else None
         self.matching = [r for r in self.rules if r["client_id"] == client_id]
         return self
 
+    def fetchone(self):
+        if getattr(self, "_is_info_schema", False):
+            return (1,)
+        rows = self.fetchall()
+        return rows[0] if rows else None
+
     def fetchall(self):
+        if getattr(self, "_is_info_schema", False):
+            return [(1,)]
         return [
             (
                 r["client_id"],

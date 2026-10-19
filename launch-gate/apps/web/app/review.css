@@ -31,6 +31,10 @@
   --verdict-needs-person-text: #c084fc;
   --verdict-needs-person-border: rgba(168, 85, 247, 0.3);
 
+  --verdict-model-unavailable-bg: rgba(245, 158, 11, 0.12);
+  --verdict-model-unavailable-text: #d97706;
+  --verdict-model-unavailable-border: rgba(245, 158, 11, 0.4);
+
   --verdict-pending-bg: rgba(148, 163, 184, 0.1);
   --verdict-pending-text: #94a3b8;
   --verdict-pending-border: rgba(148, 163, 184, 0.2);
@@ -179,6 +183,7 @@ body {
 .fix-needed-box { border-left: 4px solid var(--verdict-fix-border); color: var(--verdict-fix-text); }
 .blocked-box { border-left: 4px solid var(--verdict-blocked-border); color: var(--verdict-blocked-text); }
 .needs-person-box { border-left: 4px solid var(--verdict-needs-person-border); color: var(--verdict-needs-person-text); }
+.model-unavailable-box { border-left: 4px solid var(--verdict-model-unavailable-border); color: var(--verdict-model-unavailable-text); }
 .pending-box { border-left: 4px solid var(--verdict-pending-border); color: var(--verdict-pending-text); }
 
 .client-tags {
@@ -310,6 +315,7 @@ body {
 .verdict-fix-needed-border { border-left: 5px solid var(--verdict-fix-border); }
 .verdict-blocked-border { border-left: 5px solid var(--verdict-blocked-border); }
 .verdict-needs-person-border { border-left: 5px solid var(--verdict-needs-person-border); }
+.verdict-model-unavailable-border { border-left: 5px solid var(--verdict-model-unavailable-border); }
 .verdict-pending-border { border-left: 5px solid var(--verdict-pending-border); }
 
 .ad-beside-findings-grid {
@@ -389,6 +395,7 @@ body {
 .verdict-pill-badge.verdict-fix-needed { background: var(--verdict-fix-bg); color: var(--verdict-fix-text); }
 .verdict-pill-badge.verdict-blocked { background: var(--verdict-blocked-bg); color: var(--verdict-blocked-text); }
 .verdict-pill-badge.verdict-needs-person { background: var(--verdict-needs-person-bg); color: var(--verdict-needs-person-text); }
+.verdict-pill-badge.verdict-model-unavailable { background: var(--verdict-model-unavailable-bg); color: var(--verdict-model-unavailable-text); }
 .verdict-pill-badge.verdict-pending { background: var(--verdict-pending-bg); color: var(--verdict-pending-text); }
 
 .ad-content-body {

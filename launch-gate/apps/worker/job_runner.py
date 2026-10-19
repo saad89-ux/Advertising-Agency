@@ -457,8 +457,10 @@ def process_job(
 
         # 3.5 Run LLM Judge Audit
         needs_person = False
+        model_unavailable = False
         if run_wording_checks and "wording_result" in locals() and wording_result is not None:
             needs_person = wording_result.needs_person
+            model_unavailable = wording_result.model_unavailable
             judge_rules = wording_result.retrieved_rules
         else:
             judge_rules = retrieved_rules
@@ -475,6 +477,8 @@ def process_job(
         )
         if judge_res.needs_person:
             needs_person = True
+        if judge_res.model_unavailable:
+            model_unavailable = True
 
         active_findings = [f for f in findings if f.finding_id not in judge_res.false_alarms_dismissed]
 
@@ -491,7 +495,7 @@ def process_job(
 
         # 5. Broadcast SSE live update & Finalize Trace
         from apps.worker.verdict import aggregate_ad_verdict
-        v_res = aggregate_ad_verdict(ad_contract, active_findings, needs_person=needs_person)
+        v_res = aggregate_ad_verdict(ad_contract, active_findings, needs_person=needs_person, model_unavailable=model_unavailable)
 
         try:
             tracer.end_trace(

@@ -128,9 +128,9 @@ def test_fail_closed_on_model_api_exception():
         connection=FakeDBConnection(),
     )
 
-    assert result.verdict == "REQUIRES_HUMAN"
+    assert result.verdict == "MODEL_UNAVAILABLE"
     assert result.confidence_score == 0.0
-    assert result.needs_person is True
+    assert result.model_unavailable is True
     assert "Judge unavailable:" in result.judge_reasoning
     assert "Quota exceeded" in result.judge_reasoning
 

@@ -92,6 +92,7 @@ class JudgeEvaluationResult:
     judge_reasoning: str
     false_alarms_dismissed: list[str]
     cost_usd: float = 0.0
+    model_unavailable: bool = False
 
 
 def evaluate_with_llm_judge(
@@ -288,27 +289,34 @@ def evaluate_with_llm_judge(
         return result
 
     except Exception as exc:
+        is_unavail = any(
+            token in str(exc).lower()
+            for token in ["429", "quota", "resource_exhausted", "unavailable", "rate_limit", "rate limit", "503"]
+        )
+        verdict_str = "MODEL_UNAVAILABLE" if is_unavail else "REQUIRES_HUMAN"
         logger.warning(
-            "Live LLM Judge evaluation failed (%s). Failing closed to REQUIRES_HUMAN.",
+            "Live LLM Judge evaluation failed (%s). Failing closed to %s.",
             exc,
+            verdict_str,
         )
         if tracer and trace_id and span_id:
             try:
                 tracer.end_span(
                     span_id=span_id,
                     trace_id=trace_id,
-                    output_data={"error": str(exc), "verdict": "REQUIRES_HUMAN"},
+                    output_data={"error": str(exc), "verdict": verdict_str},
                     status="error",
                 )
             except Exception:
                 pass
 
         return JudgeEvaluationResult(
-            verdict="REQUIRES_HUMAN",
+            verdict=verdict_str,
             confidence_score=0.0,
             faithfulness_score=0.0,
             hallucinations_detected=False,
-            needs_person=True,
+            needs_person=not is_unavail,
+            model_unavailable=is_unavail,
             judge_reasoning=f"Judge unavailable: {exc}",
             false_alarms_dismissed=[],
             cost_usd=0.0,

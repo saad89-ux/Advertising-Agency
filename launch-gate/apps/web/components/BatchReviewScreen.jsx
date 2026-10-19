@@ -218,7 +218,8 @@ export default function BatchReviewScreen({
         if (ad.approval_state !== "dead_letter") return false;
       } else if (verdictFilter !== "all") {
         const v = (ad.verdict || "pending").toLowerCase();
-        if (v !== verdictFilter.toLowerCase()) return false;
+        const vf = verdictFilter.toLowerCase();
+        if (v !== vf && v.replace(/[\s-]+/g, "_") !== vf && vf.replace(/[\s-]+/g, "_") !== v) return false;
       }
 
       // Client filter
@@ -869,6 +870,7 @@ export default function BatchReviewScreen({
               { id: "fix_needed", label: "Fix Needed" },
               { id: "blocked", label: "Blocked" },
               { id: "needs_person", label: "Needs Person" },
+              { id: "model_unavailable", label: "⏳ Model Unavail" },
               { id: "pending", label: "Pending" },
               { id: "dead_letter", label: "⚠️ Dead Letter" },
               ...(unresolvedAlertsCount > 0

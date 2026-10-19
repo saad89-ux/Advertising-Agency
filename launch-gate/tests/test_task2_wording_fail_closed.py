@@ -137,8 +137,8 @@ def test_wording_check_fails_closed_on_model_api_exception():
         connection=conn,
     )
 
-    assert result.needs_person is True
-    assert result.status == "needs_person"
+    assert result.model_unavailable is True
+    assert result.status == "model unavailable"
     assert any(f.finding_id.endswith(":wording:model_unavailable") for f in result.findings)
     assert any("429 Quota exceeded" in f.message for f in result.findings)
 

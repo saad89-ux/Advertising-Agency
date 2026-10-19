@@ -210,8 +210,8 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
                     );
                   }
 
-                  const val = activeTab === "sales" ? p.inbound_sales_usd : (activeTab === "spend" ? p.spend_usd : (p.roas || 0) * 1000);
-                  const percent = Math.min(100, Math.max(5, (val / maxSales) * 100));
+                  const val = activeTab === "sales" ? p.inbound_sales_usd : (activeTab === "spend" ? p.spend_usd : (p.roas != null ? p.roas * 1000 : null));
+                  const percent = val != null ? Math.min(100, Math.max(5, (val / maxSales) * 100)) : 0;
 
                   return (
                     <div key={idx}>

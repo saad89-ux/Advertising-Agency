@@ -36,19 +36,35 @@ LIMIT %s
 """
 
 
+_TABLE_EXISTS_CACHE: dict[str, bool] = {}
+
+
+def clear_table_cache() -> None:
+    """Clear cached table existence checks (useful in migrations or tests)."""
+    _TABLE_EXISTS_CACHE.clear()
+
+
 def _table_exists(conn: Any, table_name: str) -> bool:
-    """Check if table exists in PostgreSQL without risking transaction abort."""
-    if not isinstance(conn, psycopg.Connection):
-        return True
+    """Check if table exists in PostgreSQL and cache the result."""
+    if table_name in _TABLE_EXISTS_CACHE:
+        return _TABLE_EXISTS_CACHE[table_name]
     try:
         cursor = conn.execute(
             "SELECT 1 FROM information_schema.tables WHERE table_name = %s",
             (table_name,),
         )
-        row = cursor.fetchone() if hasattr(cursor, "fetchone") else None
-        return bool(row)
+        if hasattr(cursor, "fetchone"):
+            row = cursor.fetchone()
+        elif hasattr(cursor, "fetchall"):
+            rows = cursor.fetchall()
+            row = rows[0] if rows else None
+        else:
+            row = None
+        exists = bool(row)
     except Exception:
-        return False
+        exists = False
+    _TABLE_EXISTS_CACHE[table_name] = exists
+    return exists
 
 
 @dataclass(frozen=True)

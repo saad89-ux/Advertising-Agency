@@ -43,32 +43,35 @@ def init_environment():
         init_schema()
         create_users_table()
 
-        pwd = hash_password("password123")
-        create_user(
-            user_id="demo_buyer",
-            email="buyer@launchgate.com",
-            display_name="Demo Buyer",
-            password_hash=pwd,
-            role="buyer",
-        )
-        for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
-            assign_user_to_client(user_id="demo_buyer", client_id=client_id)
+        seed_demo = os.environ.get("SEED_DEMO_DATA", "false").strip().lower() in ("true", "1", "yes")
+        if seed_demo:
+            pwd = hash_password("password123")
+            create_user(
+                user_id="demo_buyer",
+                email="buyer@launchgate.com",
+                display_name="Demo Buyer",
+                password_hash=pwd,
+                role="buyer",
+            )
+            for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
+                assign_user_to_client(user_id="demo_buyer", client_id=client_id)
 
-        create_user(
-            user_id="demo_manager",
-            email="manager@launchgate.com",
-            display_name="Demo Manager",
-            password_hash=pwd,
-            role="account_manager",
-        )
-        for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
-            assign_user_to_client(user_id="demo_manager", client_id=client_id)
+            create_user(
+                user_id="demo_manager",
+                email="manager@launchgate.com",
+                display_name="Demo Manager",
+                password_hash=pwd,
+                role="account_manager",
+            )
+            for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
+                assign_user_to_client(user_id="demo_manager", client_id=client_id)
 
-        from apps.api.mock_data import seed_demo_data
+            from apps.api.mock_data import seed_demo_data
 
-        seed_demo_data(force=False)
-
-        print("[OK] Database schema initialized and demo users/batches seeded.")
+            seed_demo_data(force=False)
+            print("[OK] Database schema initialized and demo users/batches seeded.")
+        else:
+            print("[OK] Database schema initialized in production mode; zero default users or demo batches seeded.")
     except Exception as exc:
         print(f"[WARN] Database initialization warning (may already be initialized): {exc}")
 

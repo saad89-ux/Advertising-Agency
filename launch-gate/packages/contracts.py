@@ -23,6 +23,7 @@ class VerdictStatus(str, Enum):
     FIX_NEEDED = "fix needed"
     BLOCKED = "blocked"
     NEEDS_PERSON = "needs a person"
+    MODEL_UNAVAILABLE = "model unavailable"
 
 
 class AdContract(ContractModel):

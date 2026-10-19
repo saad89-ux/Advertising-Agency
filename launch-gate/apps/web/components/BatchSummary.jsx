@@ -132,6 +132,13 @@ export default function BatchSummary({ batch, onToggleRejected, showRejected = f
           </span>
         </div>
 
+        <div className="metric-box verdict-pill model-unavailable-box" title="Upstream model rate-limited or temporarily unavailable">
+          <span className="metric-label">Model Unavail</span>
+          <span className="metric-value" data-testid="metric-verdict-model-unavailable">
+            {verdictCounts.model_unavailable ?? verdictCounts["model unavailable"] ?? 0}
+          </span>
+        </div>
+
         <div className="metric-box verdict-pill pending-box" title="Check in progress">
           <span className="metric-label">Pending</span>
           <span className="metric-value" data-testid="metric-verdict-pending">

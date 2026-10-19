@@ -4,6 +4,8 @@
   "brightleaf.example": "brightleaf",
   "calmleaf.example": "calmleaf",
   "oakandhome.example": "oakandhome",
+  "example.com": "oakandhome",
+  "www.example.com": "oakandhome",
   "tallyhq.example": null,
   "linen.example": null,
   "local_storefront_base": "http://localhost:8099/<client>"

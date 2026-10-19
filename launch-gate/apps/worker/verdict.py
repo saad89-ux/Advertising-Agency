@@ -52,13 +52,27 @@ _NEEDS_PERSON_FINDING_PATTERNS = re.compile(
 )
 
 
+_MODEL_UNAVAILABLE_FINDING_PATTERNS = re.compile(
+    r"(model_unavailable|rate_limit|rate limit|quota|429|resource_exhausted|model unavailable)",
+    re.IGNORECASE,
+)
+
+
 def classify_finding_severity(finding: FindingContract) -> VerdictStatus:
     """Classify the severity of an individual finding into VerdictStatus."""
     finding_id = finding.finding_id.casefold()
     message = finding.message.casefold()
     field = (finding.field or "").casefold()
 
-    # 1. Check for BLOCKED severity
+    # 1. Check for MODEL_UNAVAILABLE severity
+    if (
+        "model_unavailable" in finding_id
+        or _MODEL_UNAVAILABLE_FINDING_PATTERNS.search(finding_id)
+        or _MODEL_UNAVAILABLE_FINDING_PATTERNS.search(message)
+    ):
+        return VerdictStatus.MODEL_UNAVAILABLE
+
+    # 2. Check for BLOCKED severity
     if (
         "page_expired_offer" in finding_id
         or "forbidden_claim" in finding_id
@@ -67,7 +81,7 @@ def classify_finding_severity(finding: FindingContract) -> VerdictStatus:
     ):
         return VerdictStatus.BLOCKED
 
-    # 2. Check for NEEDS_PERSON severity
+    # 3. Check for NEEDS_PERSON severity (real uncertainty: unknown/ambiguous/unverified)
     if (
         "unknown" in finding_id
         or "unverified" in finding_id
@@ -80,7 +94,7 @@ def classify_finding_severity(finding: FindingContract) -> VerdictStatus:
     ):
         return VerdictStatus.NEEDS_PERSON
 
-    # 3. Default for mechanical and standard page/wording findings is FIX_NEEDED
+    # 4. Default for mechanical and standard page/wording findings is FIX_NEEDED
     return VerdictStatus.FIX_NEEDED
 
 
@@ -90,6 +104,7 @@ def aggregate_ad_verdict(
     *,
     verdict_floor: VerdictStatus | None = None,
     needs_person: bool = False,
+    model_unavailable: bool = False,
     step_count: int | None = None,
     max_steps: int = DEFAULT_MAX_STEPS_PER_ROW,
     summary: str | None = None,
@@ -113,10 +128,12 @@ def aggregate_ad_verdict(
 
     # Classify individual findings
     has_blocked = False
+    has_model_unavailable = model_unavailable
     has_needs_person = needs_person
     has_fix_needed = False
 
     blocked_reasons: list[str] = []
+    model_unavailable_reasons: list[str] = []
     needs_person_reasons: list[str] = []
     fix_fields: list[str] = []
 
@@ -128,6 +145,9 @@ def aggregate_ad_verdict(
         if sev is VerdictStatus.BLOCKED:
             has_blocked = True
             blocked_reasons.append(f.message)
+        elif sev is VerdictStatus.MODEL_UNAVAILABLE:
+            has_model_unavailable = True
+            model_unavailable_reasons.append(f.message)
         elif sev is VerdictStatus.NEEDS_PERSON:
             has_needs_person = True
             needs_person_reasons.append(f.message)
@@ -140,17 +160,24 @@ def aggregate_ad_verdict(
     # Evaluate verdict floor from advisory input/page guards
     if verdict_floor is VerdictStatus.BLOCKED:
         has_blocked = True
+    elif verdict_floor is VerdictStatus.MODEL_UNAVAILABLE:
+        has_model_unavailable = True
     elif verdict_floor is VerdictStatus.NEEDS_PERSON:
         has_needs_person = True
         needs_person_reasons.append("Advisory guard floor: human review required")
 
     # Determine final status according to hierarchy:
-    # BLOCKED > NEEDS_PERSON > FIX_NEEDED > READY
+    # BLOCKED > MODEL_UNAVAILABLE > NEEDS_PERSON > FIX_NEEDED > READY
     if has_blocked:
         status = VerdictStatus.BLOCKED
         if not summary:
             first_reason = blocked_reasons[0] if blocked_reasons else "Fatal policy or offer violation"
             summary = f"Blocked: {first_reason}."
+    elif has_model_unavailable:
+        status = VerdictStatus.MODEL_UNAVAILABLE
+        if not summary:
+            first_reason = model_unavailable_reasons[0] if model_unavailable_reasons else "Upstream model rate-limited or temporarily unavailable"
+            summary = f"Model unavailable: {first_reason}."
     elif has_needs_person:
         status = VerdictStatus.NEEDS_PERSON
         if not summary:
@@ -187,6 +214,7 @@ class BatchVerdictReport:
     verdicts: list[VerdictContract]
     summary: str
     batch_contract: BatchContract
+    model_unavailable_count: int = 0
 
 
 def aggregate_batch_verdicts(
@@ -217,6 +245,7 @@ def aggregate_batch_verdicts(
     fix_needed_count = 0
     blocked_count = 0
     needs_person_count = 0
+    model_unavailable_count = 0
 
     for ad in ads:
         ad_findings = findings_by_ad.get(ad.ad_id, [])
@@ -242,6 +271,8 @@ def aggregate_batch_verdicts(
             blocked_count += 1
         elif verdict.status is VerdictStatus.NEEDS_PERSON:
             needs_person_count += 1
+        elif verdict.status is VerdictStatus.MODEL_UNAVAILABLE:
+            model_unavailable_count += 1
 
     total_ads = len(ads)
     summary = (
@@ -265,6 +296,7 @@ def aggregate_batch_verdicts(
         fix_needed_count=fix_needed_count,
         blocked_count=blocked_count,
         needs_person_count=needs_person_count,
+        model_unavailable_count=model_unavailable_count,
         verdicts=verdicts,
         summary=summary,
         batch_contract=batch_contract,

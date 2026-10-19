@@ -130,6 +130,7 @@ class WordingCheckResult:
     prompt_ref: str | None = None
     response_ref: str | None = None
     retrieval_mode: str = "unranked_fallback"
+    model_unavailable: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -488,30 +489,31 @@ def check_wording(
             response_ref=response_ref,
         )
     except Exception as api_err:
-        logger.warning("Live Gemini API call failed (%s). Failing closed.", api_err)
-        needs_person = True
+        logger.warning("Live Gemini API call failed (%s). Failing closed to model_unavailable.", api_err)
         unavail_finding = FindingContract(
             finding_id=f"{ad.ad_id}:wording:model_unavailable",
             ad_id=ad.ad_id,
             row_number=ad.row_number,
             check_type=CheckType.WORDING,
-            message=f"Model unavailable ({api_err}); flagged for human review.",
+            message=f"Model unavailable or rate-limited ({api_err}); retry when quota resets.",
             field=None,
             rule_id=None,
         )
         all_findings.append(unavail_finding)
-        summary = f"Wording check: model unavailable ({api_err}); flagged for human review."
+        summary = f"Wording check: model unavailable or rate-limited ({api_err})."
         current_shared_state.summary = summary
-        current_shared_state.status = "needs_person"
+        current_shared_state.status = "model_unavailable"
         return WordingCheckResult(
             findings=all_findings,
-            needs_person=True,
-            status="needs_person",
+            needs_person=False,
+            model_unavailable=True,
+            status="model unavailable",
             summary=summary,
             retrieved_rules=active_retrieved_rules,
             shared_state=current_shared_state,
             prompt_ref=prompt_ref,
             response_ref=response_ref,
+            retrieval_mode=effective_retrieval_mode,
         )
 
     # Store raw model response in file storage if available

@@ -53,6 +53,12 @@ export default function AdCard({
       icon: "👤",
       desc: "Uncertain wording or claims requiring human review",
     },
+    model_unavailable: {
+      label: "Model Unavailable",
+      className: "verdict-model-unavailable",
+      icon: "⏳",
+      desc: "Upstream model rate-limited or temporarily unavailable; retry when quota resets",
+    },
     pending: {
       label: "Pending",
       className: "verdict-pending",
@@ -61,7 +67,9 @@ export default function AdCard({
     },
   };
 
-  const currentVerdict = verdictConfig[verdict] || verdictConfig.pending;
+  const normalizedVerdict = (ad.verdict || "pending").toLowerCase().replace(/[\s-]+/g, "_");
+  const verdictKey = normalizedVerdict === "needs_a_person" ? "needs_person" : normalizedVerdict;
+  const currentVerdict = verdictConfig[verdictKey] || verdictConfig[verdict] || verdictConfig.pending;
 
   return (
     <article

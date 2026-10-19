@@ -25,6 +25,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RULES_ROOT = REPO_ROOT / "data" / "clients"
 
 
+@pytest.fixture(autouse=True)
+def reset_table_cache():
+    retrieval.clear_table_cache()
+    yield
+    retrieval.clear_table_cache()
+
+
 def _cosine_dist(u: Sequence[float], v: Sequence[float]) -> float:
     dot = sum(a * b for a, b in zip(u, v))
     norm_u = math.sqrt(sum(a * a for a in u))
@@ -38,6 +45,9 @@ def _cosine_dist(u: Sequence[float], v: Sequence[float]) -> float:
 class FakeResult:
     def __init__(self, rows=()):
         self.rows = list(rows)
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
     def fetchall(self):
         return self.rows
@@ -69,6 +79,9 @@ class FakeVectorDBConnection:
         )
 
     def execute(self, statement: str, params: Any = None):
+        if "information_schema.tables" in statement:
+            return FakeResult([(1,)])
+
         self.calls.append((statement, params))
 
         if "FROM client_rules" in statement and "embedding" in statement:
@@ -194,6 +207,8 @@ def test_client_isolation_defense_in_depth_drops_cross_client_row():
     """If DB query somehow returned a row with another client_id, code drops it."""
     class LeakyConnection:
         def execute(self, statement, params=None):
+            if "information_schema.tables" in statement:
+                return FakeResult([(1,)])
             # Adversarial mock that injects an oakandhome row into brightleaf query
             return FakeResult(
                 [
