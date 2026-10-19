@@ -253,7 +253,7 @@ def launch_batch(
             # Initialize MCP platform tool dispatcher
             mcp_dispatcher = MCPPlatformDispatcher()
 
-            # Create live dispatches across requested platforms via MCP
+            # Execute MCP tool calls across requested platforms
             for ad_row in ads_list:
                 ad_id = ad_row[0]
                 headline = ad_row[1] if len(ad_row) > 1 else ""
@@ -261,7 +261,7 @@ def launch_batch(
                     disp_id = f"disp_{ad_id[:8]}_{plat[:2]}"
                     handle = f"@{req.client_id}_{plat}"
 
-                    # Execute certified MCP tool call
+                    # Execute MCP tool call
                     mcp_resp = mcp_dispatcher.call_tool(
                         platform=plat,
                         tool_name=f"{plat}_dispatch_ad",
@@ -273,10 +273,51 @@ def launch_batch(
                         },
                     )
 
+                    # Check success on every connector call; on failure do not write fake rows (route to dead letter/retry)
+                    if not mcp_resp.success:
+                        error_msg = mcp_resp.error or "connector_not_configured"
+                        cur.execute(
+                            """
+                            INSERT INTO ad_live_dispatches (
+                                dispatch_id, ad_id, batch_id, client_id, platform, handle,
+                                status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url
+                            ) VALUES (%s, %s, %s, %s, %s, %s, 'failed_dispatch', NULL, 'Rejected / Not Configured', %s, NULL)
+                            ON CONFLICT (dispatch_id) DO UPDATE SET
+                                status = 'failed_dispatch',
+                                platform_review_status = 'Rejected / Not Configured',
+                                platform_review_notes = EXCLUDED.platform_review_notes,
+                                last_tracked_at = NOW();
+                            """,
+                            (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, error_msg),
+                        )
+                        # Route ad to dead_letter state in ad_approvals
+                        cur.execute(
+                            """
+                            UPDATE ad_approvals
+                            SET state = 'dead_letter',
+                                dead_letter_reason = %s,
+                                updated_at = NOW()
+                            WHERE ad_id = %s;
+                            """,
+                            (f"MCP dispatch failed for {plat}: {error_msg}", ad_id),
+                        )
+                        # Record attempt in ad_sends as dead_letter for bounded retry tracking
+                        cur.execute(
+                            """
+                            INSERT INTO ad_sends (
+                                send_id, ad_id, platform, attempt_number, status, error_message, created_at
+                            ) VALUES (%s, %s, %s, 1, 'dead_letter', %s, NOW())
+                            ON CONFLICT (send_id) DO NOTHING;
+                            """,
+                            (f"send_{disp_id}", ad_id, plat, error_msg),
+                        )
+                        continue
+
+                    # If connector call succeeded:
                     mcp_result = mcp_resp.result
-                    plat_ad_id = mcp_result.get("platform_ad_id", f"{plat[:2].upper()}-{ad_id[:8]}")
-                    live_url = mcp_result.get("live_preview_url", f"https://www.{plat}.com/{handle.lstrip('@')}/p/{ad_id[:10]}")
-                    audit_notes = mcp_result.get("audit_notes", f"MCP RPC [{mcp_resp.rpc_id}] dispatched ad to {plat.title()}.")
+                    plat_ad_id = mcp_result.get("platform_ad_id")
+                    live_url = mcp_result.get("live_preview_url")
+                    audit_notes = mcp_result.get("audit_notes")
 
                     cur.execute(
                         """
@@ -293,38 +334,37 @@ def launch_batch(
                         (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, plat_ad_id, audit_notes, live_url),
                     )
 
-                    # Query initial performance tracking via MCP performance tool
                     perf_resp = mcp_dispatcher.call_tool(
                         platform=plat,
                         tool_name=f"{plat}_track_performance",
                         arguments={"platform_ad_id": plat_ad_id},
                     )
-                    perf_res = perf_resp.result
-
-                    cur.execute(
-                        """
-                        INSERT INTO ad_performance_tracking (
-                            ad_id, batch_id, client_id, platform, handle,
-                            inbound_sales_usd, inbound_orders, impressions, clicks, ctr_percent, roas, spend_usd,
-                            has_rule_violation, violation_details, last_event
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s)
-                        ON CONFLICT (ad_id) DO UPDATE SET
-                            platform = EXCLUDED.platform,
-                            handle = EXCLUDED.handle,
-                            updated_at = NOW();
-                        """,
-                        (
-                            ad_id, actual_batch_id, req.client_id, plat, handle,
-                            perf_res.get("inbound_sales_usd", 1280.00),
-                            16,
-                            perf_res.get("impressions", 18450),
-                            perf_res.get("clicks", 720),
-                            perf_res.get("ctr_percent", 3.90),
-                            perf_res.get("roas", 4.6),
-                            perf_res.get("spend_usd", 278.00),
-                            f"MCP tracking active (RPC: {perf_resp.rpc_id})",
-                        ),
-                    )
+                    if perf_resp.success:
+                        perf_res = perf_resp.result
+                        cur.execute(
+                            """
+                            INSERT INTO ad_performance_tracking (
+                                ad_id, batch_id, client_id, platform, handle,
+                                inbound_sales_usd, inbound_orders, impressions, clicks, ctr_percent, roas, spend_usd,
+                                has_rule_violation, violation_details, last_event
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s)
+                            ON CONFLICT (ad_id) DO UPDATE SET
+                                platform = EXCLUDED.platform,
+                                handle = EXCLUDED.handle,
+                                updated_at = NOW();
+                            """,
+                            (
+                                ad_id, actual_batch_id, req.client_id, plat, handle,
+                                perf_res.get("inbound_sales_usd", 0.0),
+                                perf_res.get("inbound_orders", 0),
+                                perf_res.get("impressions", 0),
+                                perf_res.get("clicks", 0),
+                                perf_res.get("ctr_percent", 0.0),
+                                perf_res.get("roas", 0.0),
+                                perf_res.get("spend_usd", 0.0),
+                                f"MCP tracking active (RPC: {perf_resp.rpc_id})",
+                            ),
+                        )
         conn.commit()
 
     return {
@@ -338,8 +378,7 @@ def launch_batch(
             "sms_dispatch": "CONFIRMED_ACTIVE",
         },
         "target_platforms": req.target_platforms,
-        "mcp_server_handshake": "SUCCESS",
-        "message": f"Campaign successfully launched across {len(req.target_platforms)} platforms via MCP servers. Live tracking active.",
+        "message": f"Campaign dispatched across {len(req.target_platforms)} platforms.",
     }
 
 
@@ -347,74 +386,45 @@ def launch_batch(
 def get_mcp_traces(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Return live traces of MCP servers for Instagram, Facebook, TikTok, X, and Snapchat."""
-    now = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    """Return real recorded traces of MCP tool calls, or empty if none recorded."""
+    init_flow_tables()
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            allowed = list(user.assigned_client_ids)
+            cur.execute(
+                """
+                SELECT
+                    dispatch_id, client_id, platform, handle, status, platform_review_status,
+                    platform_review_notes, live_preview_url, created_at
+                FROM ad_live_dispatches
+                WHERE client_id = ANY(%s)
+                ORDER BY created_at DESC
+                LIMIT 50;
+                """,
+                (allowed,),
+            )
+            rows = cur.fetchall()
 
     traces = [
         {
-            "server": "mcp_instagram_graph",
-            "tool": "mcp_instagram.authenticate_session",
-            "status": "200_OK",
-            "duration_ms": 312,
-            "handle": "@brightleaf_wellness",
-            "platform": "instagram",
-            "timestamp": now,
-            "payload_summary": "OAuth2 Bearer handshake verified; ads_management scope active; rate_limit_remaining=491",
-        },
-        {
-            "server": "mcp_meta_ads",
-            "tool": "mcp_meta.publish_ad_creative",
-            "status": "200_OK",
-            "duration_ms": 524,
-            "handle": "act_8492049102",
-            "platform": "facebook",
-            "timestamp": now,
-            "payload_summary": "1080x1080 container staged; aspect_ratio 1:1 verified; tracking pixel attached",
-        },
-        {
-            "server": "mcp_tiktok_spark",
-            "tool": "mcp_tiktok.dispatch_spark_ad",
-            "status": "200_OK",
-            "duration_ms": 480,
-            "handle": "@brightleaf_tok",
-            "platform": "tiktok",
-            "timestamp": now,
-            "payload_summary": "Sound rights license cleared (Commercial Library ID #9921); Spark authorization code accepted",
-        },
-        {
-            "server": "mcp_x_v2",
-            "tool": "mcp_x.create_promoted_tweet",
-            "status": "200_OK",
-            "duration_ms": 289,
-            "handle": "@calmleaf_x",
-            "platform": "x",
-            "timestamp": now,
-            "payload_summary": "Promoted card injected; destination link verified with UTM tracking parameters",
-        },
-        {
-            "server": "mcp_snapchat_commercial",
-            "tool": "mcp_snap.stage_full_screen_asset",
-            "status": "200_OK",
-            "duration_ms": 390,
-            "handle": "@calmleaf_snap",
-            "platform": "snapchat",
-            "timestamp": now,
-            "payload_summary": "9:16 vertical video validated; duration 15.0s compliant; swipe-up target live",
-        },
+            "server": f"mcp_{r[2]}",
+            "tool": f"{r[2]}_dispatch_ad",
+            "status": r[4],
+            "duration_ms": 0,
+            "handle": r[3],
+            "platform": r[2],
+            "timestamp": r[8].strftime("%H:%M:%S") if r[8] else "",
+            "payload_summary": r[6] or "",
+        }
+        for r in rows
     ]
 
     return {
-        "status": "active",
-        "mcp_active_servers": 5,
-        "total_dispatches": 142,
+        "status": "active" if traces else "unconfigured",
+        "mcp_active_servers": 0,
+        "total_dispatches": len(traces),
         "traces": traces,
-        "server_health": {
-            "mcp_instagram_graph": "HEALTHY",
-            "mcp_meta_ads": "HEALTHY",
-            "mcp_tiktok_spark": "HEALTHY",
-            "mcp_x_v2": "HEALTHY",
-            "mcp_snapchat_commercial": "HEALTHY",
-        },
+        "server_health": {},
     }
 
 
@@ -462,15 +472,14 @@ def get_platform_performance(
             imp = int(r[4])
             clicks = int(r[5])
         else:
-            # Baseline realistic metrics
-            sales = 3450.0 if plat == "instagram" else (2890.0 if plat == "tiktok" else 1740.0)
-            spend = 620.0 if plat == "instagram" else (510.0 if plat == "tiktok" else 390.0)
-            orders = int(sales / 78)
-            imp = int(sales * 18)
-            clicks = int(imp * 0.038)
+            sales = 0.0
+            spend = 0.0
+            orders = 0
+            imp = 0
+            clicks = 0
 
-        roas = round(sales / spend, 2) if spend > 0 else 4.2
-        ctr = round((clicks / imp * 100), 2) if imp > 0 else 3.8
+        roas = round(sales / spend, 2) if spend > 0 else 0.0
+        ctr = round((clicks / imp * 100), 2) if imp > 0 else 0.0
 
         total_sales += sales
         total_spend += spend
@@ -489,15 +498,32 @@ def get_platform_performance(
             "ctr_percent": ctr,
         })
 
-    blended_roas = round(total_sales / total_spend, 2) if total_spend > 0 else 4.5
+    blended_roas = round(total_sales / total_spend, 2) if total_spend > 0 else 0.0
 
-    # Donut chart data (delivery status)
-    donut_data = [
-        {"label": "Active & Serving", "value": 74, "color": "#10b981"},
-        {"label": "Under Platform Review", "value": 14, "color": "#f59e0b"},
-        {"label": "Policy Flagged / Paused", "value": 8, "color": "#f43f5e"},
-        {"label": "Scheduled / Staged", "value": 4, "color": "#8b5cf6"},
-    ]
+    # Donut chart data computed from real recorded dispatches
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            allowed = list(user.assigned_client_ids)
+            cur.execute(
+                """
+                SELECT status, COUNT(*)
+                FROM ad_live_dispatches
+                WHERE client_id = ANY(%s)
+                GROUP BY status;
+                """,
+                (allowed,),
+            )
+            status_counts = dict(cur.fetchall())
+
+    donut_data = []
+    if status_counts.get("active_live", 0) > 0:
+        donut_data.append({"label": "Active & Serving", "value": status_counts["active_live"], "color": "#10b981"})
+    if status_counts.get("under_review", 0) > 0:
+        donut_data.append({"label": "Under Platform Review", "value": status_counts["under_review"], "color": "#f59e0b"})
+    if status_counts.get("failed_dispatch", 0) > 0:
+        donut_data.append({"label": "Failed / Dead Letter", "value": status_counts["failed_dispatch"], "color": "#f43f5e"})
+    if status_counts.get("staged", 0) > 0:
+        donut_data.append({"label": "Scheduled / Staged", "value": status_counts["staged"], "color": "#8b5cf6"})
 
     return {
         "summary": {
@@ -506,7 +532,7 @@ def get_platform_performance(
             "blended_roas": blended_roas,
             "total_orders": total_orders,
             "total_impressions": total_imp,
-            "active_campaigns": len(platform_stats),
+            "active_campaigns": len([p for p in platform_stats if p["impressions"] > 0]),
         },
         "platform_breakdown": platform_stats,
         "donut_data": donut_data,
@@ -517,50 +543,50 @@ def get_platform_performance(
 def get_platform_violations(
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Return live tracking of platform review bot rejections and policy standard citations."""
+    """Return live tracking of platform review rejections and policy citations from database."""
+    init_flow_tables()
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            allowed = list(user.assigned_client_ids)
+            cur.execute(
+                """
+                SELECT
+                    d.dispatch_id, d.ad_id, d.client_id, d.platform, d.handle,
+                    COALESCE(a.headline, ''), COALESCE(a.ad_text, ''),
+                    d.platform_review_notes, d.created_at
+                FROM ad_live_dispatches d
+                LEFT JOIN ads a ON d.ad_id = a.ad_id
+                WHERE d.client_id = ANY(%s) AND d.status IN ('failed_dispatch', 'rejected')
+                ORDER BY d.created_at DESC
+                LIMIT 50;
+                """,
+                (allowed,),
+            )
+            rows = cur.fetchall()
+
     return [
         {
-            "violation_id": "viol_meta_01",
-            "ad_id": "ad_bl_005",
-            "client_id": "brightleaf",
-            "platform": "facebook",
-            "handle": "@brightleaf_ads",
-            "headline": "100% Miracle Remedy for Anxiety & Pain",
-            "ad_text": "Cure your chronic inflammation and stress in 24 hours guaranteed with pure botanical extracts.",
-            "platform_rule_code": "META-ADS-STD-§4.2",
-            "platform_rule_name": "Commercial Health Claims & Unsubstantiated Guarantees",
+            "violation_id": f"viol_{r[0]}",
+            "ad_id": r[1],
+            "client_id": r[2],
+            "platform": r[3],
+            "handle": r[4],
+            "headline": r[5],
+            "ad_text": r[6],
+            "platform_rule_code": "CONNECTOR-POLICY",
+            "platform_rule_name": "Connector Failure or Platform Rejection",
             "severity": "CRITICAL_BLOCKER",
             "status": "flagged_by_platform",
-            "crawler_feedback": "Meta Automated Compliance Crawler flagged absolute medical claim ('Cure in 24 hours') and forbidden guarantee ('100% Miracle'). Ad delivery halted.",
-            "flagged_tokens": ["100% Miracle", "Cure", "guaranteed"],
-            "llm_root_cause": "The ad copy uses medical diagnostic disease claims prohibited under Meta §4.2 without disclaimer. Fails to frame benefits around natural wellness or cosmetic appearance.",
+            "crawler_feedback": r[7] or "Dispatch failed: connector_not_configured",
+            "flagged_tokens": [],
+            "llm_root_cause": r[7] or "Connector not configured in local environment.",
             "proposed_ai_fix": {
-                "revised_headline": "Calm, Balanced Wellness Naturally",
-                "revised_text": "Support your daily calmness and restorative comfort with organic botanical extracts.",
+                "revised_headline": r[5],
+                "revised_text": r[6],
             },
-            "timestamp": "12 minutes ago",
-        },
-        {
-            "violation_id": "viol_tiktok_02",
-            "ad_id": "ad_cl_008",
-            "client_id": "calmleaf",
-            "platform": "tiktok",
-            "handle": "@calmleaf_tok",
-            "headline": "Sleep Like a Baby Tonight",
-            "ad_text": "Guaranteed insomnia relief with our organic oil drops. Order now for risk-free trial.",
-            "platform_rule_code": "TIKTOK-COMMERCIAL-§3.1",
-            "platform_rule_name": "Exaggerated Claims & Medical Sleep Condition Treatment",
-            "severity": "POLICY_WARNING",
-            "status": "flagged_by_platform",
-            "crawler_feedback": "TikTok Brand Safety Filter detected medical condition treatment claim ('insomnia relief'). Spark Ad promotion suspended pending revision.",
-            "flagged_tokens": ["insomnia relief", "Guaranteed"],
-            "llm_root_cause": "Treating or diagnosing 'insomnia' requires medical OTC drug classification. Claim must be pivoted to 'evening relaxation ritual'.",
-            "proposed_ai_fix": {
-                "revised_headline": "Your Evening Relaxation Ritual",
-                "revised_text": "Wind down peacefully after long days with our gentle organic herbal drops.",
-            },
-            "timestamp": "34 minutes ago",
-        },
+            "timestamp": r[8].strftime("%Y-%m-%d %H:%M") if r[8] else "recently",
+        }
+        for r in rows
     ]
 
 
@@ -661,12 +687,12 @@ def get_all_campaigns(
                 SELECT
                     a.ad_id, a.client_id, a.platform, a.headline, a.destination_url,
                     COALESCE(d.handle, '@' || a.client_id || '_official') as handle,
-                    COALESCE(d.status, 'active_live') as delivery_status,
-                    COALESCE(d.platform_review_status, 'Approved & Serving Live') as review_status,
-                    COALESCE(p.inbound_sales_usd, 1850.00) as sales,
-                    COALESCE(p.spend_usd, 380.00) as spend,
-                    COALESCE(p.roas, 4.8) as roas,
-                    COALESCE(p.impressions, 34200) as impressions,
+                    COALESCE(d.status, 'not_dispatched') as delivery_status,
+                    COALESCE(d.platform_review_status, 'unconfigured') as review_status,
+                    COALESCE(p.inbound_sales_usd, 0.0) as sales,
+                    COALESCE(p.spend_usd, 0.0) as spend,
+                    COALESCE(p.roas, 0.0) as roas,
+                    COALESCE(p.impressions, 0) as impressions,
                     COALESCE(p.has_rule_violation, FALSE) as has_violation
                 FROM ads a
                 LEFT JOIN ad_live_dispatches d ON a.ad_id = d.ad_id
@@ -706,66 +732,51 @@ def get_revenue_analytics(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return Daily, Weekly, and Monthly revenue breakdown by client across all platforms."""
-    # Data models for daily, weekly, and monthly
-    daily = [
-        {"date": "Mon", "sales": 4120.00, "spend": 890.00, "roas": 4.6},
-        {"date": "Tue", "sales": 5340.00, "spend": 1050.00, "roas": 5.1},
-        {"date": "Wed", "sales": 4890.00, "spend": 980.00, "roas": 5.0},
-        {"date": "Thu", "sales": 6420.00, "spend": 1210.00, "roas": 5.3},
-        {"date": "Fri", "sales": 7890.00, "spend": 1450.00, "roas": 5.4},
-        {"date": "Sat", "sales": 9210.00, "spend": 1680.00, "roas": 5.5},
-        {"date": "Sun", "sales": 8450.00, "spend": 1520.00, "roas": 5.6},
-    ]
+    init_flow_tables()
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            allowed = list(user.assigned_client_ids)
+            if client_id and client_id in allowed:
+                query_clients = [client_id]
+            else:
+                query_clients = allowed
 
-    weekly = [
-        {"week": "Week 1", "sales": 28400.00, "spend": 5890.00, "roas": 4.8},
-        {"week": "Week 2", "sales": 34100.00, "spend": 6720.00, "roas": 5.1},
-        {"week": "Week 3", "sales": 39800.00, "spend": 7450.00, "roas": 5.3},
-        {"week": "Week 4", "sales": 46320.00, "spend": 8780.00, "roas": 5.3},
-    ]
+            cur.execute(
+                """
+                SELECT
+                    client_id,
+                    COALESCE(SUM(inbound_sales_usd), 0.0),
+                    COALESCE(SUM(spend_usd), 0.0),
+                    COALESCE(SUM(inbound_orders), 0)
+                FROM ad_performance_tracking
+                WHERE client_id = ANY(%s)
+                GROUP BY client_id;
+                """,
+                (query_clients,),
+            )
+            client_rows = cur.fetchall()
 
-    monthly = [
-        {"month": "Jul", "sales": 112000.00, "spend": 24000.00, "roas": 4.7},
-        {"month": "Aug", "sales": 138000.00, "spend": 28500.00, "roas": 4.8},
-        {"month": "Sep", "sales": 162000.00, "spend": 31200.00, "roas": 5.2},
-        {"month": "Oct (MTD)", "sales": 148620.00, "spend": 28840.00, "roas": 5.2},
-    ]
-
-    client_breakdown = [
-        {
-            "client_id": "brightleaf",
-            "client_name": "BrightLeaf Wellness",
-            "daily_sales": 3840.00,
-            "weekly_sales": 22100.00,
-            "monthly_sales": 84500.00,
-            "top_platform": "Instagram (52%)",
-            "blended_roas": 5.4,
-        },
-        {
-            "client_id": "calmleaf",
-            "client_name": "CalmLeaf Extracts",
-            "daily_sales": 2910.00,
-            "weekly_sales": 16800.00,
-            "monthly_sales": 61200.00,
-            "top_platform": "TikTok (44%)",
-            "blended_roas": 4.9,
-        },
-        {
-            "client_id": "oakandhome",
-            "client_name": "Oak & Home Design",
-            "daily_sales": 1700.00,
-            "weekly_sales": 9740.00,
-            "monthly_sales": 38920.00,
-            "top_platform": "Meta / Facebook (58%)",
-            "blended_roas": 4.6,
-        },
-    ]
+    clients_data = []
+    for r in client_rows:
+        cid = r[0]
+        sales = float(r[1])
+        spend = float(r[2])
+        roas = round(sales / spend, 2) if spend > 0 else 0.0
+        clients_data.append({
+            "client_id": cid,
+            "client_name": cid.replace("_", " ").title(),
+            "daily_sales": round(sales / 30, 2),
+            "weekly_sales": round(sales / 4, 2),
+            "monthly_sales": sales,
+            "top_platform": "Unconfigured",
+            "blended_roas": roas,
+        })
 
     return {
-        "daily": daily,
-        "weekly": weekly,
-        "monthly": monthly,
-        "clients": client_breakdown,
+        "daily": [],
+        "weekly": [],
+        "monthly": [],
+        "clients": clients_data,
     }
 
 

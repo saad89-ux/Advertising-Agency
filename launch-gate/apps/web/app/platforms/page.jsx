@@ -224,8 +224,8 @@ export default function PlatformsPage() {
               }}>
                 Social Gateway Vault
               </span>
-              <span style={{ fontSize: "12px", color: "#10b981", fontWeight: 600 }}>
-                ● 10 Accounts Connected
+              <span style={{ fontSize: "12px", color: accounts.length > 0 ? "#10b981" : "#94a3b8", fontWeight: 600 }}>
+                ● {accounts.length} {accounts.length === 1 ? "Account" : "Accounts"} Connected
               </span>
             </div>
             <h1 style={{ fontSize: "28px", fontWeight: 800, margin: "0 0 6px 0", letterSpacing: "-0.02em" }}>
@@ -296,6 +296,12 @@ export default function PlatformsPage() {
           {loading ? (
             <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
               Loading platform accounts...
+            </div>
+          ) : accounts.length === 0 ? (
+            <div style={{ padding: "48px 24px", textAlign: "center", background: "rgba(15, 23, 42, 0.4)", borderRadius: "16px", border: "1px dashed rgba(255, 255, 255, 0.1)" }}>
+              <span style={{ fontSize: "32px", display: "block", marginBottom: "12px" }}>🔌</span>
+              <h3 style={{ fontSize: "16px", fontWeight: "700", color: "#f8fafc", margin: "0 0 6px 0" }}>No Platform Accounts Configured</h3>
+              <p style={{ fontSize: "13px", color: "#94a3b8", margin: 0 }}>Connect an account handle or configure platform credentials in .env to enable direct dispatching.</p>
             </div>
           ) : (
             <div style={{

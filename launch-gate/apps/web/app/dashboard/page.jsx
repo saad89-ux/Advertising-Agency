@@ -159,50 +159,56 @@ export default function DashboardPage({ apiBaseUrl = "http://localhost:8000" }) 
           </div>
 
           {/* SVG Bar Chart Visualization */}
-          <div style={{ display: "flex", alignItems: "flex-end", height: "220px", gap: "20px", padding: "10px 0", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" }}>
-            {activeSeries.map((item, idx) => {
-              const salesHeight = Math.min(190, Math.max(20, (item.sales / maxSeriesSales) * 190));
-              const spendHeight = Math.min(190, Math.max(10, (item.spend / maxSeriesSales) * 190));
-              const label = item.date || item.week || item.month;
+          {activeSeries.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "220px", color: "#64748b", fontSize: "14px", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" }}>
+              No revenue tracking series recorded yet. Attributed customer revenue will graph here when platform connectors stream events.
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "flex-end", height: "220px", gap: "20px", padding: "10px 0", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" }}>
+              {activeSeries.map((item, idx) => {
+                const salesHeight = Math.min(190, Math.max(20, (item.sales / maxSeriesSales) * 190));
+                const spendHeight = Math.min(190, Math.max(10, (item.spend / maxSeriesSales) * 190));
+                const label = item.date || item.week || item.month;
 
-              return (
-                <div key={idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end" }}>
-                  <div style={{ fontSize: "11px", fontWeight: "700", color: "#10b981", marginBottom: "6px" }}>
-                    ${Math.round(item.sales / 1000)}k
-                  </div>
+                return (
+                  <div key={idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end" }}>
+                    <div style={{ fontSize: "11px", fontWeight: "700", color: "#10b981", marginBottom: "6px" }}>
+                      ${Math.round(item.sales / 1000)}k
+                    </div>
 
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: "6px" }}>
-                    {/* Sales Bar */}
-                    <div
-                      title={`Sales: $${item.sales.toLocaleString()}`}
-                      style={{
-                        width: "24px",
-                        height: `${salesHeight}px`,
-                        background: "linear-gradient(180deg, #10b981 0%, #059669 100%)",
-                        borderRadius: "4px 4px 0 0",
-                        transition: "height 0.4s ease",
-                      }}
-                    />
-                    {/* Spend Bar */}
-                    <div
-                      title={`Spend: $${item.spend.toLocaleString()}`}
-                      style={{
-                        width: "16px",
-                        height: `${spendHeight}px`,
-                        background: "linear-gradient(180deg, #818cf8 0%, #4f46e5 100%)",
-                        borderRadius: "4px 4px 0 0",
-                        transition: "height 0.4s ease",
-                      }}
-                    />
-                  </div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: "6px" }}>
+                      {/* Sales Bar */}
+                      <div
+                        title={`Sales: $${item.sales.toLocaleString()}`}
+                        style={{
+                          width: "24px",
+                          height: `${salesHeight}px`,
+                          background: "linear-gradient(180deg, #10b981 0%, #059669 100%)",
+                          borderRadius: "4px 4px 0 0",
+                          transition: "height 0.4s ease",
+                        }}
+                      />
+                      {/* Spend Bar */}
+                      <div
+                        title={`Spend: $${item.spend.toLocaleString()}`}
+                        style={{
+                          width: "16px",
+                          height: `${spendHeight}px`,
+                          background: "linear-gradient(180deg, #818cf8 0%, #4f46e5 100%)",
+                          borderRadius: "4px 4px 0 0",
+                          transition: "height 0.4s ease",
+                        }}
+                      />
+                    </div>
 
-                  <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "10px", fontWeight: "600" }}>
-                    {label}
+                    <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "10px", fontWeight: "600" }}>
+                      {label}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* 3. Client Breakdown Cards: Daily, Weekly, Monthly Stats */}
@@ -210,7 +216,14 @@ export default function DashboardPage({ apiBaseUrl = "http://localhost:8000" }) 
           Client-by-Client Growth Matrix
         </h2>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "20px" }}>
+        {filteredClients.length === 0 ? (
+          <div style={{ padding: "48px 24px", textAlign: "center", background: "rgba(15, 23, 42, 0.4)", borderRadius: "16px", border: "1px dashed rgba(255, 255, 255, 0.1)" }}>
+            <span style={{ fontSize: "32px", display: "block", marginBottom: "12px" }}>📊</span>
+            <h3 style={{ fontSize: "16px", fontWeight: "700", color: "#f8fafc", margin: "0 0 6px 0" }}>No Client Performance Data</h3>
+            <p style={{ fontSize: "13px", color: "#94a3b8", margin: 0 }}>Client growth matrix will populate when ad spend and orders are recorded.</p>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "20px" }}>
           {filteredClients.map((c) => (
             <div
               key={c.client_id}

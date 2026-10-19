@@ -27,16 +27,10 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
     fetchPerformance();
   }, [apiBaseUrl]);
 
-  const liveOrders = [
-    { orderId: "#LG-9921", amount: "$142.50", client: "BrightLeaf", platform: "Instagram", adId: "IG-BL-88491", time: "2 min ago", city: "Los Angeles, CA" },
-    { orderId: "#LG-9920", amount: "$89.00", client: "CalmLeaf", platform: "TikTok", adId: "TT-CL-22019", time: "5 min ago", city: "Austin, TX" },
-    { orderId: "#LG-9919", amount: "$320.00", client: "Oak & Home", platform: "Facebook", adId: "FB-OH-11029", time: "11 min ago", city: "Seattle, WA" },
-    { orderId: "#LG-9918", amount: "$115.00", client: "BrightLeaf", platform: "Instagram", adId: "IG-BL-88491", time: "18 min ago", city: "Miami, FL" },
-    { orderId: "#LG-9917", amount: "$64.00", client: "CalmLeaf", platform: "X / Twitter", adId: "X-CL-55102", time: "24 min ago", city: "Chicago, IL" },
-  ];
+  const liveOrders = [];
 
   const platforms = data?.platform_breakdown || [];
-  const maxSales = Math.max(...platforms.map((p) => p.inbound_sales_usd || 1), 5000);
+  const maxSales = Math.max(...platforms.map((p) => p.inbound_sales_usd || 0), 1000);
 
   return (
     <div style={{
@@ -94,11 +88,11 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
           marginBottom: "28px",
         }}>
           {[
-            { label: "Total Inbound Sales", value: `$${(data?.summary?.total_sales_usd || 12480).toLocaleString()}`, color: "#10b981", change: "+18.4% vs last week" },
-            { label: "Blended ROAS", value: `${data?.summary?.blended_roas || 5.1}x`, color: "#818cf8", change: "Target 4.0x exceeded" },
-            { label: "Total Ad Spend", value: `$${(data?.summary?.total_spend_usd || 2450).toLocaleString()}`, color: "#f59e0b", change: "Under spend caps" },
-            { label: "Attributed Orders", value: `${data?.summary?.total_orders || 148}`, color: "#38bdf8", change: "100% verified via UTMs" },
-            { label: "Total Impressions", value: `${(data?.summary?.total_impressions || 184000).toLocaleString()}`, color: "#ec4899", change: "Live across 5 networks" },
+            { label: "Total Inbound Sales", value: `$${(data?.summary?.total_sales_usd ?? 0).toLocaleString()}`, color: "#10b981", change: (data?.summary?.total_sales_usd || 0) > 0 ? "Tracking live" : "No sales recorded" },
+            { label: "Blended ROAS", value: `${data?.summary?.blended_roas ?? 0}x`, color: "#818cf8", change: (data?.summary?.blended_roas || 0) > 0 ? "Target active" : "Unconfigured" },
+            { label: "Total Ad Spend", value: `$${(data?.summary?.total_spend_usd ?? 0).toLocaleString()}`, color: "#f59e0b", change: "Spend tracking active" },
+            { label: "Attributed Orders", value: `${data?.summary?.total_orders ?? 0}`, color: "#38bdf8", change: "Verified via UTMs" },
+            { label: "Total Impressions", value: `${(data?.summary?.total_impressions ?? 0).toLocaleString()}`, color: "#ec4899", change: "Live across networks" },
           ].map((kpi, idx) => (
             <div
               key={idx}
@@ -249,20 +243,21 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
 
             {/* Legend */}
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
-              {[
-                { label: "Active Live & Serving", share: "74%", color: "#10b981" },
-                { label: "Under Platform Review", share: "14%", color: "#f59e0b" },
-                { label: "Policy Flagged / Paused", share: "8%", color: "#f43f5e" },
-                { label: "Scheduled / Staged", share: "4%", color: "#8b5cf6" },
-              ].map((item, idx) => (
-                <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: item.color }} />
-                    <span style={{ color: "#cbd5e1" }}>{item.label}</span>
+              {(data?.donut_data && data.donut_data.length > 0) ? (
+                data.donut_data.map((item, idx) => (
+                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: item.color }} />
+                      <span style={{ color: "#cbd5e1" }}>{item.label}</span>
+                    </div>
+                    <span style={{ fontWeight: "700", color: "#ffffff" }}>{item.value}</span>
                   </div>
-                  <span style={{ fontWeight: "700", color: "#ffffff" }}>{item.share}</span>
+                ))
+              ) : (
+                <div style={{ fontSize: "12px", color: "#64748b", textAlign: "center", padding: "12px 0" }}>
+                  No active platform dispatches recorded.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -279,8 +274,8 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
             <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#f8fafc" }}>
               Continuous Inbound Conversion Stream (Live Attribution)
             </h3>
-            <span style={{ fontSize: "12px", color: "#10b981", fontWeight: "600" }}>
-              ● Live Stream Active
+            <span style={{ fontSize: "12px", color: liveOrders.length > 0 ? "#10b981" : "#64748b", fontWeight: "600" }}>
+              ● {liveOrders.length > 0 ? "Live Stream Active" : "Stream Idle (No Orders)"}
             </span>
           </div>
 
@@ -298,21 +293,29 @@ export default function PerformancePage({ apiBaseUrl = "http://localhost:8000" }
                 </tr>
               </thead>
               <tbody>
-                {liveOrders.map((ord, idx) => (
-                  <tr key={idx} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.04)" }}>
-                    <td style={{ padding: "12px 14px", fontWeight: "600", color: "#e2e8f0" }}>{ord.orderId}</td>
-                    <td style={{ padding: "12px 14px", fontWeight: "700", color: "#10b981" }}>{ord.amount}</td>
-                    <td style={{ padding: "12px 14px", color: "#cbd5e1" }}>{ord.client}</td>
-                    <td style={{ padding: "12px 14px" }}>
-                      <span style={{ padding: "2px 8px", background: "rgba(99, 102, 241, 0.15)", color: "#818cf8", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
-                        {ord.platform}
-                      </span>
+                {liveOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: "32px 14px", textAlign: "center", color: "#64748b" }}>
+                      No live inbound conversions recorded yet. Attributed sales will appear here when campaigns are active.
                     </td>
-                    <td style={{ padding: "12px 14px", color: "#94a3b8" }}>{ord.adId}</td>
-                    <td style={{ padding: "12px 14px", color: "#cbd5e1" }}>{ord.city}</td>
-                    <td style={{ padding: "12px 14px", color: "#64748b" }}>{ord.time}</td>
                   </tr>
-                ))}
+                ) : (
+                  liveOrders.map((ord, idx) => (
+                    <tr key={idx} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.04)" }}>
+                      <td style={{ padding: "12px 14px", fontWeight: "600", color: "#e2e8f0" }}>{ord.orderId}</td>
+                      <td style={{ padding: "12px 14px", fontWeight: "700", color: "#10b981" }}>{ord.amount}</td>
+                      <td style={{ padding: "12px 14px", color: "#cbd5e1" }}>{ord.client}</td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <span style={{ padding: "2px 8px", background: "rgba(99, 102, 241, 0.15)", color: "#818cf8", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
+                          {ord.platform}
+                        </span>
+                      </td>
+                      <td style={{ padding: "12px 14px", color: "#94a3b8" }}>{ord.adId}</td>
+                      <td style={{ padding: "12px 14px", color: "#cbd5e1" }}>{ord.city}</td>
+                      <td style={{ padding: "12px 14px", color: "#64748b" }}>{ord.time}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

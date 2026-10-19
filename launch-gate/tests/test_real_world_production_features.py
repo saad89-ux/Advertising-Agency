@@ -102,9 +102,8 @@ def test_mcp_platform_dispatcher(monkeypatch):
             "destination_url": "https://glowcare.com",
         },
     )
-    assert resp.success is True
-    assert resp.result["status"] == "LIVE_ACTIVE"
-    assert "platform_ad_id" in resp.result
+    assert resp.success is False
+    assert resp.error == "connector_not_configured"
 
 
 def test_dynamic_client_inference():
