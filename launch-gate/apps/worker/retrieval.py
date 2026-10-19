@@ -43,11 +43,14 @@ class RetrievedRule:
     entry_number: str
     source_file: str
     content: str
-    distance: float = 0.0
+    distance: float | None = None
+    retrieval_mode: str = "vector_search"
 
     @property
-    def similarity(self) -> float:
+    def similarity(self) -> float | None:
         """Cosine similarity derived from distance (1 - distance)."""
+        if self.distance is None:
+            return None
         return 1.0 - self.distance
 
 
@@ -218,7 +221,8 @@ def retrieve_rule_by_entry(
             entry_number=entry,
             source_file=source,
             content=content,
-            distance=0.0,
+            distance=None,
+            retrieval_mode="exact_lookup",
         )
 
     if connection is not None:
@@ -247,7 +251,8 @@ def list_client_rules(
                     entry_number=e.entry_number,
                     source_file=e.source_file,
                     content=e.content,
-                    distance=0.0,
+                    distance=None,
+                    retrieval_mode="unranked_fallback",
                 )
                 for e in entries
                 if e.client_id == clean_client_id
@@ -289,7 +294,8 @@ def list_client_rules(
                         entry_number=entry_number,
                         source_file=source_file,
                         content=content,
-                        distance=0.0,
+                        distance=None,
+                        retrieval_mode="unranked_fallback",
                     )
                 )
             return results or _from_files()

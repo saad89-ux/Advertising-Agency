@@ -129,6 +129,7 @@ class WordingCheckResult:
     output_guard_result: OutputGuardResult | None = None
     prompt_ref: str | None = None
     response_ref: str | None = None
+    retrieval_mode: str = "unranked_fallback"
 
 
 @lru_cache(maxsize=1)
@@ -292,10 +293,50 @@ def check_wording(
                 )
             else:
                 # Retrieve from database without vector embedder or fallback to listing
-                active_retrieved_rules = list_client_rules(ad.client_id, connection=connection)[:top_k]
+                all_client_rules = list_client_rules(ad.client_id, connection=connection)
+                if len(all_client_rules) <= 40:
+                    active_retrieved_rules = all_client_rules
+                else:
+                    active_retrieved_rules = all_client_rules[:40]
+                    needs_person = True
+                    rules_trunc_finding = FindingContract(
+                        finding_id=f"{ad.ad_id}:wording:rules_truncated",
+                        ad_id=ad.ad_id,
+                        row_number=ad.row_number,
+                        check_type=CheckType.WORDING,
+                        message=f"rules_truncated: client rule count ({len(all_client_rules)}) exceeds 40 in unranked mode; human review required.",
+                        field="ad_text",
+                        proposed_fix="Configure semantic retrieval or partition client rules.",
+                        rule_id=None,
+                    )
+                    all_findings.append(rules_trunc_finding)
         except Exception as exc:
             logger.warning("Retrieval failed for ad %s: %s", ad.ad_id, exc)
             active_retrieved_rules = []
+
+    # If unranked rules exceed 40 (e.g. passed explicitly), truncate and flag rules_truncated
+    if any(getattr(r, "retrieval_mode", None) == "unranked_fallback" for r in active_retrieved_rules) and len(active_retrieved_rules) > 40:
+        total_unranked = len(active_retrieved_rules)
+        active_retrieved_rules = active_retrieved_rules[:40]
+        needs_person = True
+        rules_trunc_finding = FindingContract(
+            finding_id=f"{ad.ad_id}:wording:rules_truncated",
+            ad_id=ad.ad_id,
+            row_number=ad.row_number,
+            check_type=CheckType.WORDING,
+            message=f"rules_truncated: client rule count ({total_unranked}) exceeds 40 in unranked mode; human review required.",
+            field="ad_text",
+            proposed_fix="Configure semantic retrieval or partition client rules.",
+            rule_id=None,
+        )
+        if not any(f.finding_id == rules_trunc_finding.finding_id for f in all_findings):
+            all_findings.append(rules_trunc_finding)
+
+    effective_retrieval_mode = (
+        active_retrieved_rules[0].retrieval_mode
+        if active_retrieved_rules and hasattr(active_retrieved_rules[0], "retrieval_mode")
+        else "unranked_fallback"
+    )
 
     # If no rules exist for this client, it's an unknown situation -> needs_person
     if not active_retrieved_rules:
@@ -323,6 +364,7 @@ def check_wording(
             shared_state=current_shared_state,
             prompt_ref=prompt_ref,
             response_ref=response_ref,
+            retrieval_mode=effective_retrieval_mode,
         )
 
     # 4. Keyword Pre-filter (deterministic, source=keyword_rule)
@@ -408,7 +450,12 @@ def check_wording(
                     prompt_tokens=model_response.prompt_tokens,
                     completion_tokens=model_response.completion_tokens,
                     cost_usd=model_response.cost_usd,
-                    metadata={"client_id": ad.client_id, "ad_id": ad.ad_id, "batch_id": ad.batch_id},
+                    metadata={
+                        "client_id": ad.client_id,
+                        "ad_id": ad.ad_id,
+                        "batch_id": ad.batch_id,
+                        "retrieval_mode": effective_retrieval_mode,
+                    },
                 )
             except Exception as t_err:
                 logger.debug("Failed recording generation to tracer: %s", t_err)
@@ -651,4 +698,5 @@ def check_wording(
         output_guard_result=output_guard_result,
         prompt_ref=prompt_ref,
         response_ref=response_ref,
+        retrieval_mode=effective_retrieval_mode,
     )

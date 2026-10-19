@@ -303,5 +303,22 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
   - Version **v21.0** (released October 2, 2024) remains **fully supported** by Meta through **January 21, 2027** under Meta's 2-year lifecycle policy.
   - Live diagnostics (`scripts/meta_token_diagnostics.py`) upgraded to `v26.0`. Current token session expired on Saturday, 17-Oct-26 13:00:00 PDT with 0 remaining lifetime until token rotation.
 
+## D60 — Retrieval Fallback Hardening, Citation Matching Direction, Cloud Limits & Embedding Probe (v1 Pre-Task 3)
+
+- **Retrieval Fallback Hardening**:
+  - `apps/worker/retrieval.py`: `RetrievedRule.distance` defaults to `None` (rather than `0.0`), `RetrievedRule.similarity` safely returns `None` when `distance` is `None`, and `retrieval_mode` field added (`"vector_search"` for vector retrieval, `"unranked_fallback"` for client rules listing, `"exact_lookup"` for entry lookup).
+  - `apps/worker/wording_check.py`: When semantic retrieval is absent (`embed_fn is None`), all rules for the target client are evaluated. For small rule sets ($\le 40$ rules), all rules are sent to the wording check prompt (e.g. Brightleaf: 11 rules, Calmleaf: 9 rules, Oak&Home: 9 rules). If client rule count exceeds 40, the rule set is truncated to 40, `needs_person=True` is asserted, and a `rules_truncated` finding is recorded. `retrieval_mode` is recorded in tracer generation metadata.
+- **Citation Verification Matching Direction**:
+  - `apps/worker/citation_verification.py`: `is_phrase_grounded` strictly enforces that a forbidden phrase must appear INSIDE the quote (or be equal after normalization). A short quote that is merely a substring of a longer forbidden phrase (e.g. quote `"wrinkles"` from forbidden phrase `"reduces wrinkles in 14 days"`) is rejected (`is_phrase_grounded(...) == False`).
+- **Official Cloud Sources & Free-Tier Limits**:
+  - **Meta Graph API**: Changelog and version schedule canonical URL: `https://developers.facebook.com/docs/graph-api/changelog`. v26.0 released July 29, 2026. v21.0 released October 2, 2024; supported until January 21, 2027.
+  - **Neon PostgreSQL**: Official documentation: `https://neon.tech/docs/introduction/plans#free-plan` (and `https://neon.tech/pricing`). Free plan includes: 100 CU-hours per project per month, compute autoscales up to 2 CU (~8 GB RAM), scale-to-zero after 5 minutes of inactivity, 1 GB PostgreSQL storage per project (account-wide ceiling of 20 GB across projects).
+  - **Supabase**: Official pricing: `https://supabase.com/pricing`. Free tier includes: 500 MB database size per active project, shared CPU (~500 MB RAM), 5 GB database egress + 5 GB cached egress (10 GB total egress/month), up to 2 active projects (auto-pauses after 1 week complete inactivity).
+- **Live Gemini API Embedding Capability Probe**:
+  - Probed live `models.list()` filtered for `embedContent` action on the active key.
+  - Models supporting `embedContent`: `models/gemini-embedding-001`, `models/gemini-embedding-2-preview`, `models/gemini-embedding-2`.
+  - Probed `models/gemini-embedding-001` and `gemini-embedding-2`: returned 3072-dimensional vector (`res.embeddings[0].values`).
+  - Probed `text-embedding-004`: returned `404 NOT_FOUND` (`models/text-embedding-004 is not found for API version v1beta, or is not supported for embedContent`).
+
 
 

@@ -336,3 +336,65 @@ def test_wording_check_no_rules_found_goes_to_person():
     assert result.needs_person is True
     assert result.status == "needs_person"
     assert any("no_retrieved_rules" in f.finding_id for f in result.findings)
+
+
+def test_wording_check_unranked_mode_sends_all_rules_when_under_forty():
+    ad = sample_ad()
+    conn = FakeCostDBConnection()
+    mock_client = make_mock_gemini_client({
+        "findings": [],
+        "unknown": False,
+        "needs_person": False,
+        "summary": "All rules verified.",
+    })
+
+    # In unranked mode (embed_fn is None, retrieved_rules is None), brightleaf has 11 rules (<= 40)
+    result = check_wording(
+        ad,
+        retrieved_rules=None,
+        embed_fn=None,
+        model_client=mock_client,
+        connection=conn,
+    )
+
+    assert len(result.retrieved_rules) == 11
+    assert result.retrieval_mode == "unranked_fallback"
+    assert result.needs_person is False
+    assert not any("rules_truncated" in f.finding_id for f in result.findings)
+
+
+def test_wording_check_unranked_mode_truncates_over_forty_rules():
+    ad = sample_ad()
+    conn = FakeCostDBConnection()
+    mock_client = make_mock_gemini_client({
+        "findings": [],
+        "unknown": False,
+        "needs_person": False,
+        "summary": "Evaluation with truncated rules.",
+    })
+
+    # Synthesize 45 rules in unranked fallback mode
+    many_rules = [
+        RetrievedRule(
+            client_id="brightleaf",
+            entry_number=f"BL-SYN-{i:03d}",
+            source_file="brand_book.md",
+            content=f"Synthetic rule {i}",
+            distance=None,
+            retrieval_mode="unranked_fallback",
+        )
+        for i in range(45)
+    ]
+
+    result = check_wording(
+        ad,
+        retrieved_rules=many_rules,
+        model_client=mock_client,
+        connection=conn,
+    )
+
+    assert len(result.retrieved_rules) == 40
+    assert result.needs_person is True
+    assert any("rules_truncated" in f.finding_id for f in result.findings)
+    trunc_finding = next(f for f in result.findings if "rules_truncated" in f.finding_id)
+    assert "rules_truncated" in trunc_finding.message

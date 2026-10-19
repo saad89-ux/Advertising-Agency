@@ -41,13 +41,19 @@ def test_extract_forbidden_phrases():
 def test_is_phrase_grounded_exact_and_substring():
     forbidden = ["clinically proven", "reduces wrinkles in 14 days"]
     
-    # Exact and substring matches
+    # Exact and forbidden-phrase-inside-quote matches
     assert is_phrase_grounded("clinically proven", forbidden) is True
     assert is_phrase_grounded("our clinically proven serum", forbidden) is True
-    assert is_phrase_grounded("reduces wrinkles", forbidden) is True
+    assert is_phrase_grounded("serum that reduces wrinkles in 14 days with daily use", forbidden) is True
 
     # Typo match (dist <= 1)
     assert is_phrase_grounded("clincally proven", forbidden) is True
+
+    # Negative: quote is merely a substring of a longer forbidden phrase (must NOT match)
+    assert is_phrase_grounded("clinically", forbidden) is False
+    assert is_phrase_grounded("proven", forbidden) is False
+    assert is_phrase_grounded("reduces wrinkles", forbidden) is False
+    assert is_phrase_grounded("14 days", forbidden) is False
 
     # Ungrounded quote
     assert is_phrase_grounded("cures arthritis in 2 days guaranteed", forbidden) is False

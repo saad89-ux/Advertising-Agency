@@ -293,8 +293,8 @@ def is_phrase_grounded(quote: str, forbidden_phrases: Sequence[str]) -> bool:
         norm_phrase = _normalize_phrase(phrase)
         if not norm_phrase:
             continue
-        # Direct substring containment in either direction
-        if norm_phrase in norm_quote or norm_quote in norm_phrase:
+        # Direction: forbidden phrase must appear INSIDE the quote (or equal after normalisation)
+        if norm_phrase in norm_quote:
             return True
         # Check single-word near match (typo distance <= 1 for words of length >= 5)
         phrase_words = norm_phrase.split()

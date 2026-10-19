@@ -413,3 +413,29 @@ def test_isolation_with_all_real_data_pack_entries():
                 "oakandhome": "OH-",
             }[client_id]
             assert r.entry_number.startswith(expected_prefix)
+
+
+def test_retrieved_rule_unranked_mode_and_distance_none():
+    rule = RetrievedRule("brightleaf", "BL-BB-1.1", "brand_book.md", "Voice text")
+    assert rule.distance is None
+    assert rule.similarity is None
+    assert rule.retrieval_mode == "vector_search"
+
+    fallback_rules = list_client_rules("brightleaf")
+    assert len(fallback_rules) == 11
+    for r in fallback_rules:
+        assert r.distance is None
+        assert r.similarity is None
+        assert r.retrieval_mode == "unranked_fallback"
+
+
+def test_client_rule_counts_all_under_forty():
+    counts = {
+        cid: len(list_client_rules(cid))
+        for cid in ["brightleaf", "calmleaf", "oakandhome"]
+    }
+    assert counts["brightleaf"] == 11
+    assert counts["calmleaf"] == 9
+    assert counts["oakandhome"] == 9
+    for cid, cnt in counts.items():
+        assert cnt <= 40, f"Client {cid} has {cnt} rules, which exceeds 40 limit"
