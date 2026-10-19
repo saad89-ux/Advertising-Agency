@@ -24,7 +24,7 @@ from apps.api.database import get_session
 from apps.api.edits import count_ad_edits, get_ad_edits_history
 from apps.api.settings import DEFAULT_MAX_EDIT_LOOPS, max_edit_loops
 from apps.worker.checkpointer import make_thread_id
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, UnifiedFileStore
 from apps.worker.graph import run_ad_worker_flow
 from apps.worker.job_runner import (
     load_creative_manifest,
@@ -171,7 +171,7 @@ def recheck_ad(
     platform_limits: Mapping[str, Any] | None = None,
     run_page_checks: bool = False,
     run_wording_checks: bool = False,
-    file_store: LocalFileStore | None = None,
+    file_store: LocalFileStore | UnifiedFileStore | None = None,
     model_client: Any = None,
     embed_fn: Any = None,
     retrieved_rules: Sequence[Any] | None = None,

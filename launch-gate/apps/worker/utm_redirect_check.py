@@ -6,7 +6,7 @@ from collections import Counter
 from urllib.parse import parse_qsl, urlsplit
 
 from apps.api.client_inference import allowed_origins_for_client, load_domain_map
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, UnifiedFileStore, get_file_store
 from apps.worker.page_browser import PageOpenError, open_page_read_only
 from packages.contracts import AdContract, CheckType, FindingContract
 
@@ -55,7 +55,7 @@ async def check_utm_survives_redirect(
     ad: AdContract,
     *,
     timeout_ms: int,
-    file_store: LocalFileStore | None = None,
+    file_store: LocalFileStore | UnifiedFileStore | None = None,
 ) -> list[FindingContract]:
     """Return page findings for original UTM values that changed or disappeared.
 
@@ -90,7 +90,9 @@ async def check_utm_survives_redirect(
 
     if opened.screenshot_bytes is None:
         raise PageOpenError("screenshot_unavailable", "Page screenshot evidence is unavailable")
-    file_ref = (file_store or LocalFileStore()).put(opened.screenshot_bytes)
+    file_ref = (file_store or get_file_store()).put(
+        opened.screenshot_bytes, resource_type="image", filename="redirect_screenshot.png"
+    )
 
     findings: list[FindingContract] = []
     for key, issue in changed:

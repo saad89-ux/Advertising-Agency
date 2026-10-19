@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 import re
 from uuid import uuid4
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 
 _FILE_REF_PATTERN = re.compile(r"^[0-9a-f]{32}$")
@@ -25,7 +28,7 @@ class LocalFileStore:
             root = configured_root
         self.root = Path(root).expanduser().resolve()
 
-    def put(self, content: bytes) -> str:
+    def put(self, content: bytes, *args: Any, **kwargs: Any) -> str:
         """Persist bytes and return a file_ref relative to the configured storage root."""
         if not isinstance(content, bytes):
             raise TypeError("content must be bytes")
@@ -47,7 +50,7 @@ class LocalFileStore:
                 raise
         raise FileExistsError("could not allocate a unique storage reference")
 
-    def get(self, file_ref: str) -> bytes:
+    def get(self, file_ref: str, *args: Any, **kwargs: Any) -> bytes:
         """Read a stored object after validating that its resolved path stays in storage."""
         target = self._path_for_ref(file_ref)
         if not target.is_file():
@@ -88,36 +91,65 @@ class UnifiedFileStore:
             from apps.worker.cloud_storage import CloudinaryFileStore, is_cloudinary_configured
             if is_cloudinary_configured():
                 self.cloud = CloudinaryFileStore()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Cloudinary initialization skipped or failed: %s", exc)
             self.cloud = None
 
-    def put(self, content: bytes, resource_type: str = "auto") -> str:
+    def put(self, content: bytes, resource_type: str = "auto", filename: str | None = None) -> str:
         """Persist content to Cloudinary if configured; otherwise use LocalFileStore."""
         if self.cloud is not None:
             try:
-                return self.cloud.put(content, resource_type=resource_type)
-            except Exception:
-                pass
+                return self.cloud.put(content, resource_type=resource_type, filename=filename)
+            except Exception as exc:
+                logger.warning("Cloudinary upload failed (%s); falling back to local file store: %s", filename or "unnamed", exc)
         return self.local.put(content)
 
-    def get(self, file_ref: str) -> bytes:
+    def get(self, file_ref: str, timeout_seconds: float = 15.0) -> bytes:
         """Retrieve content from Cloudinary CDN URL or local storage."""
-        if file_ref.startswith("http://") or file_ref.startswith("https://"):
+        if file_ref.startswith(("http://", "https://")):
             if self.cloud is not None:
-                return self.cloud.get(file_ref)
-            import urllib.request
-            req = urllib.request.Request(file_ref, headers={"User-Agent": "LaunchGate/1.0"})
-            with urllib.request.urlopen(req) as resp:
-                return resp.read()
+                try:
+                    return self.cloud.get(file_ref, timeout_seconds=timeout_seconds)
+                except Exception as exc:
+                    logger.debug("Cloud store get failed for %s: %s", file_ref, exc)
+            try:
+                import httpx
+                resp = httpx.get(
+                    file_ref,
+                    headers={"User-Agent": "LaunchGate/1.0"},
+                    timeout=timeout_seconds,
+                    follow_redirects=True,
+                )
+                resp.raise_for_status()
+                return resp.content
+            except Exception as exc:
+                logger.debug("httpx get failed for %s (%s), attempting urllib", file_ref, exc)
+                try:
+                    import urllib.request
+                    req = urllib.request.Request(file_ref, headers={"User-Agent": "LaunchGate/1.0"})
+                    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                        return resp.read()
+                except Exception as u_exc:
+                    logger.error("Failed downloading remote file %s via both httpx and urllib: %s", file_ref, u_exc)
+                    raise FileNotFoundError(f"Could not retrieve remote file {file_ref}: {u_exc}") from u_exc
         return self.local.get(file_ref)
 
     def delete(self, file_ref: str) -> None:
         """Delete from Cloudinary if URL; otherwise from local storage."""
-        if file_ref.startswith("http://") or file_ref.startswith("https://"):
+        if file_ref.startswith(("http://", "https://")):
             if self.cloud is not None:
-                self.cloud.delete(file_ref)
+                try:
+                    self.cloud.delete(file_ref)
+                except Exception as exc:
+                    logger.warning("Cloud store delete failed for %s: %s", file_ref, exc)
         else:
             self.local.delete(file_ref)
+
+    def path_for(self, file_ref: str) -> Path | None:
+        """Return local path if stored locally; return None if stored on cloud."""
+        if file_ref.startswith(("http://", "https://")):
+            return None
+        return self.local.path_for(file_ref)
 
 
 def get_file_store(root: str | Path | None = None) -> UnifiedFileStore:

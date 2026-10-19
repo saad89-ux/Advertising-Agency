@@ -131,19 +131,21 @@ def notify_ad_update(
     batch_id: str,
     ad_id: str,
     *,
-    verdict: str,
+    verdict: str | None = None,
+    stage: str | None = None,
     row_number: int | None = None,
     client_id: str | None = None,
     approval_state: str = "pending_review",
     findings_count: int = 0,
 ) -> None:
-    """Convenience helper to broadcast an individual ad's verdict update."""
+    """Convenience helper to broadcast an individual ad's verdict and stage updates."""
     payload = {
         "batch_id": batch_id,
         "ad_id": ad_id,
         "row_number": row_number,
         "client_id": client_id,
         "verdict": verdict,
+        "stage": stage,
         "approval_state": approval_state,
         "findings_count": findings_count,
         "timestamp": datetime.now(timezone.utc).isoformat(),

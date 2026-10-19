@@ -30,7 +30,7 @@ from apps.api.approvals import (
 )
 from apps.api.auth import CurrentUser, get_current_user, require_role
 from apps.api.database import get_session
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, get_file_store
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +85,9 @@ def create_approval_evidence_table(connection: Any = None) -> None:
 
 
 def save_evidence_file(file_bytes: bytes, file_name: str | None = None) -> str:
-    """Persist evidence bytes via LocalFileStore (Needs: 21) and return opaque 32-hex ref."""
-    store = LocalFileStore()
-    return store.put(file_bytes)
+    """Persist evidence bytes via UnifiedFileStore (Cloudinary if configured, otherwise LocalFileStore)."""
+    store = get_file_store()
+    return store.put(file_bytes, filename=file_name)
 
 
 def record_approval_evidence(
@@ -446,9 +446,14 @@ def get_ad_evidence_endpoint(
 def get_ad_evidence_file_endpoint(
     ad_id: str,
     file_ref: str | None = None,
+    redirect: bool = False,
     user: CurrentUser = Depends(get_current_user),
 ) -> Response:
-    """Download or view stored evidence file, protected by client scoping."""
+    """Download or view stored evidence file, protected by client scoping.
+    
+    Handles both external HTTPS URLs (Cloudinary CDN, via streaming or redirect)
+    and local relative paths safely.
+    """
     with get_session() as conn:
         ad = get_ad_record(conn, ad_id)
         if ad is None:
@@ -464,8 +469,13 @@ def get_ad_evidence_file_endpoint(
         if not target_ref:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no evidence file attached")
 
+        # If caller requested redirect for external HTTPS URLs
+        if target_ref.startswith(("https://", "http://")) and redirect:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=target_ref, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
         try:
-            store = LocalFileStore()
+            store = get_file_store()
             file_bytes = store.get(target_ref)
         except Exception as exc:
             logger.debug("Failed retrieving evidence file %s: %s", target_ref, exc)
@@ -480,6 +490,10 @@ def get_ad_evidence_file_endpoint(
             row = cur.fetchone()
             if row and row[0]:
                 media_type = row[0]
+            elif target_ref.startswith(("https://", "http://")):
+                guessed = mimetypes.guess_type(target_ref)[0]
+                if guessed:
+                    media_type = guessed
         except Exception:
             pass
 

@@ -19,13 +19,13 @@ _PHONE_PATTERN = re.compile(
     r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
 )
 _CREDIT_CARD_PATTERN = re.compile(
-    r"\b(?:\d{4}[-\s]?){3}\d{4}\b|\b\d{15,16}\b"
+    r"\b(?:\d{4}[-\s]?){3}\d{4}\b|\b\d{4}[-\s]?\d{6}[-\s]?\d{5}\b|\b\d{15,16}\b"
 )
 _SSN_PATTERN = re.compile(
     r"\b\d{3}-\d{2}-\d{4}\b"
 )
 _SECRET_KEY_PATTERN = re.compile(
-    r"\b(?:sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z-_]{35}|ghp_[a-zA-Z0-9]{36}|Bearer\s+[a-zA-Z0-9_\-\.]{25,})\b"
+    r"\b(?:sk-(?:proj-)?[a-zA-Z0-9_\-]{16,}|AIza[0-9A-Za-z\-_]{25,45}|ghp_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9_\-]{20,}|Bearer\s+[a-zA-Z0-9_\-\.]{25,})\b"
 )
 _IPV4_PATTERN = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
@@ -99,7 +99,7 @@ def scrub_pii(text: str) -> PiiSanitizeResult:
     cleaned = _replace_entity(_CREDIT_CARD_PATTERN, "CREDIT_CARD", "[REDACTED_PAYMENT_CARD]", cleaned)
 
     # 3. Scrub SSNs
-    cleaned = _replace_entity(_SSN_PATTERN, "SSN", "[REDACTED_GOV_ID]", cleaned)
+    cleaned = _replace_entity(_SSN_PATTERN, "SSN", "[REDACTED_SSN]", cleaned)
 
     # 4. Scrub email addresses
     cleaned = _replace_entity(_EMAIL_PATTERN, "EMAIL", "[REDACTED_EMAIL]", cleaned)

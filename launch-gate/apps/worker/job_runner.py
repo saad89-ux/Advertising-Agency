@@ -21,7 +21,7 @@ from apps.api.client_inference import allowed_origins_for_client, load_domain_ma
 from apps.api.database import get_session
 from apps.api.findings import persist_findings_on_connection
 from apps.api.queue import AD_JOB_QUEUE, AdJob, _redis_client
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, UnifiedFileStore, get_file_store
 from apps.worker.page_browser import PageOpenError
 from apps.worker.page_offer_check import check_offer_price_dates
 from apps.worker.page_text_capture import capture_page_snapshot
@@ -146,11 +146,11 @@ async def _execute_page_checks(
     *,
     allowed_origins: frozenset[str] | set[str] | None = None,
     timeout_ms: int = 5000,
-    file_store: LocalFileStore | None = None,
+    file_store: LocalFileStore | UnifiedFileStore | None = None,
     as_of: date | None = None,
 ) -> tuple[list[FindingContract], SharedState]:
     """Execute UTM redirect checks and page offer checks against rendered page text."""
-    store = file_store or LocalFileStore()
+    store = file_store or get_file_store()
     if allowed_origins is None:
         domain_map = load_domain_map(include_local_storefront=True)
         origins = allowed_origins_for_client(ad.client_id, domain_map)
@@ -342,145 +342,71 @@ def process_job(
         except Exception as exc:
             logger.debug("Failed start_trace for %s: %s", trace_id, exc)
 
-        # 1. Run mechanical checks
-        findings: list[FindingContract] = []
-        span_mech = None
-        try:
-            span_mech = tracer.start_span(
-                trace_id,
-                "mechanical_checks",
-                input_data={"platform": ad_contract.platform, "destination_url": ad_contract.destination_url},
-            )
-        except Exception:
-            pass
+        # 1. Collect mechanical spec findings (ratios, stale limits, text limits)
+        initial_findings: list[FindingContract] = []
+        initial_findings.extend(check_stale_platform_limits(ad_contract, limits_config))
+        initial_findings.extend(check_creative_size_ratio(ad_contract, manifest_map, platforms_map))
+        initial_findings.extend(check_platform_text_limits(ad_contract, platforms_map))
 
-        findings.extend(check_utm_presence(ad_contract))
-        findings.extend(check_utm_naming(ad_contract))
-        findings.extend(check_platform_text_limits(ad_contract, platforms_map))
-        findings.extend(check_stale_platform_limits(ad_contract, limits_config))
-        findings.extend(check_creative_size_ratio(ad_contract, manifest_map, platforms_map))
+        # 2. Execute Specialized Multi-Agent Worker Team with Autonomous Feedback Loop
+        from apps.worker.graph import run_multi_agent_worker_flow
 
-        if span_mech:
-            try:
-                tracer.end_span(
-                    span_mech,
-                    trace_id,
-                    output_data={"findings_count": len(findings)},
-                    status="completed",
-                )
-            except Exception:
-                pass
-
-        # 2. Run page checks
-        if run_page_checks:
-            span_page = None
-            try:
-                span_page = tracer.start_span(
-                    trace_id,
-                    "page_offer_checks",
-                    input_data={"destination_url": ad_contract.destination_url},
-                )
-            except Exception:
-                pass
-
-            page_findings, shared_state = asyncio.run(
-                _execute_page_checks(
-                    ad_contract,
-                    allowed_origins=allowed_origins,
-                    timeout_ms=page_timeout_ms,
-                    file_store=file_store,
-                    as_of=as_of,
-                )
-            )
-            findings.extend(page_findings)
-            LATEST_SHARED_STATE[ad_contract.ad_id] = shared_state
-            if hasattr(job, "__dict__"):
-                try:
-                    setattr(job, "shared_state", shared_state)
-                except Exception:
-                    pass
-
-            if span_page:
-                try:
-                    tracer.end_span(
-                        span_page,
-                        trace_id,
-                        output_data={"findings_count": len(page_findings)},
-                        status="completed",
-                    )
-                except Exception:
-                    pass
-
-        # 3. Run wording checks
-        if run_wording_checks:
-            span_wording = None
-            try:
-                span_wording = tracer.start_span(
-                    trace_id,
-                    "wording_checks",
-                    input_data={"headline": ad_contract.headline, "ad_text": ad_contract.ad_text},
-                )
-            except Exception:
-                pass
-
-            from apps.worker.wording_check import check_wording
-            existing_shared_state = LATEST_SHARED_STATE.get(ad_contract.ad_id)
-            wording_result = check_wording(
-                ad_contract,
-                retrieved_rules=retrieved_rules,
-                model_client=model_client,
-                embed_fn=embed_fn,
-                file_store=file_store,
-                shared_state=existing_shared_state,
-                connection=conn,
-                tracer=tracer,
-                trace_id=trace_id,
-            )
-            findings.extend(wording_result.findings)
-            LATEST_SHARED_STATE[ad_contract.ad_id] = wording_result.shared_state
-            if hasattr(job, "__dict__"):
-                try:
-                    setattr(job, "shared_state", wording_result.shared_state)
-                except Exception:
-                    pass
-
-            if span_wording:
-                try:
-                    tracer.end_span(
-                        span_wording,
-                        trace_id,
-                        output_data={"findings_count": len(wording_result.findings)},
-                        status="completed",
-                    )
-                except Exception:
-                    pass
-
-        # 3.5 Run LLM Judge Audit
-        needs_person = False
-        model_unavailable = False
-        if run_wording_checks and "wording_result" in locals() and wording_result is not None:
-            needs_person = wording_result.needs_person
-            model_unavailable = wording_result.model_unavailable
-            judge_rules = wording_result.retrieved_rules
-        else:
-            judge_rules = retrieved_rules
-
-        from apps.worker.judge_eval import evaluate_with_llm_judge
-        judge_res = evaluate_with_llm_judge(
+        result = run_multi_agent_worker_flow(
             ad_contract,
-            findings,
-            retrieved_rules=judge_rules,
+            shared_state=LATEST_SHARED_STATE.get(ad_contract.ad_id),
+            initial_findings=initial_findings,
             connection=conn,
+            file_store=file_store,
+            manifest=manifest_map,
+            platform_limits=limits_config,
+            run_page_checks=run_page_checks,
+            run_wording_checks=run_wording_checks,
             model_client=model_client,
+            embed_fn=embed_fn,
+            retrieved_rules=retrieved_rules,
             tracer=tracer,
             trace_id=trace_id,
+            allowed_origins=allowed_origins,
+            page_timeout_ms=page_timeout_ms,
+            as_of=as_of,
         )
-        if judge_res.needs_person:
-            needs_person = True
-        if judge_res.model_unavailable:
-            model_unavailable = True
 
-        active_findings = [f for f in findings if f.finding_id not in judge_res.false_alarms_dismissed]
+        findings = result.findings
+        refined_ad = result.ad
+        LATEST_SHARED_STATE[ad_contract.ad_id] = result.shared_state
+        if hasattr(job, "__dict__"):
+            try:
+                setattr(job, "shared_state", result.shared_state)
+            except Exception:
+                pass
+
+        # 3. If ad was refined autonomously by the supervisor loop, preserve in database
+        if refined_ad.headline != ad_contract.headline or refined_ad.ad_text != ad_contract.ad_text:
+            logger.info(
+                "[AUTONOMOUS REFINEMENT] Preserving refined ad in DB for Ad %s: headline='%s' (was '%s')",
+                ad_contract.ad_id, refined_ad.headline, ad_contract.headline,
+            )
+            from apps.api.ingest import hash_normalized_row
+            new_row_hash = hash_normalized_row({
+                "platform": refined_ad.platform,
+                "headline": refined_ad.headline or "",
+                "ad_text": refined_ad.ad_text or "",
+                "destination_url": refined_ad.destination_url,
+                "creative_file": refined_ad.creative_file or "",
+            })
+            try:
+                conn.execute(
+                    """
+                    UPDATE ads
+                    SET headline = %s,
+                        ad_text = %s,
+                        row_hash = %s
+                    WHERE ad_id = %s;
+                    """,
+                    (refined_ad.headline, refined_ad.ad_text, new_row_hash, ad_contract.ad_id),
+                )
+            except Exception as exc:
+                logger.warning("Failed updating refined ad in database: %s", exc)
 
         # If this ad was edited, delete stale findings from prior iterations before persisting new findings
         from apps.api.edits import count_ad_edits
@@ -491,17 +417,16 @@ def process_job(
             logger.debug("Failed checking or deleting stale findings for ad %s: %s", ad_contract.ad_id, exc)
 
         # 4. Persist findings idempotently
-        persist_findings_on_connection(conn, active_findings)
+        persist_findings_on_connection(conn, findings)
 
         # 5. Broadcast SSE live update & Finalize Trace
-        from apps.worker.verdict import aggregate_ad_verdict
-        v_res = aggregate_ad_verdict(ad_contract, active_findings, needs_person=needs_person, model_unavailable=model_unavailable)
+        v_res = result.verdict
 
         try:
             tracer.end_trace(
                 trace_id=trace_id,
                 verdict=v_res.status.value,
-                step_count=3 if run_wording_checks else 2,
+                step_count=result.step_count,
             )
             tracer.flush()
         except Exception as exc:
@@ -512,6 +437,7 @@ def process_job(
             notify_ad_update(
                 ad_contract.batch_id,
                 ad_contract.ad_id,
+                stage="complete",
                 verdict=v_res.status.value,
                 row_number=ad_contract.row_number,
                 client_id=ad_contract.client_id,

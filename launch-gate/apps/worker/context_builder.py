@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any
 
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, UnifiedFileStore
 from apps.worker.retrieval import (
     RetrievedRule,
     format_retrieved_rules_for_context,
@@ -103,7 +103,7 @@ class ContextBuilder:
 
     def __init__(
         self,
-        file_store: LocalFileStore | None = None,
+        file_store: LocalFileStore | UnifiedFileStore | None = None,
         connection: Any = None,
         embed_fn: Callable[[str], Sequence[float]] | None = None,
     ) -> None:
@@ -239,7 +239,7 @@ def build_step_context(
     retrieved_rules: Sequence[RetrievedRule] | None = None,
     retrieve_rules: bool | None = None,
     read_file_refs: Sequence[str] | bool = False,
-    file_store: LocalFileStore | None = None,
+    file_store: LocalFileStore | UnifiedFileStore | None = None,
     connection: Any = None,
     embed_fn: Callable[[str], Sequence[float]] | None = None,
 ) -> StepContext:

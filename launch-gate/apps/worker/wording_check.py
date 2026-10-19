@@ -30,7 +30,7 @@ from apps.worker.citation_verification import (
     verify_findings_citations,
 )
 from apps.worker.cost_ledger import CostLedgerEntry, SpendCapExceededError
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, UnifiedFileStore
 from apps.worker.model_client import ModelResponse, call_gemini_model, is_gemini_configured
 from apps.worker.retrieval import (
     RetrievedRule,
@@ -236,7 +236,7 @@ def check_wording(
     client_texts: dict[str, str] | None = None,
     model_client: Any = None,
     embed_fn: Any = None,
-    file_store: LocalFileStore | None = None,
+    file_store: LocalFileStore | UnifiedFileStore | None = None,
     shared_state: SharedState | None = None,
     connection: Any = None,
     top_k: int = 5,

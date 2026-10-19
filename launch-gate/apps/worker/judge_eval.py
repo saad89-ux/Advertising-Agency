@@ -237,11 +237,11 @@ def evaluate_with_llm_judge(
 
             target_finding = finding_map[fid]
 
-            # Invariant: Mechanical findings (UTM, character limits, ratios) cannot be dismissed by LLM
-            if target_finding.check_type == CheckType.MECHANICAL:
+            # Invariant: Mechanical and page findings (UTM, character limits, ratios, page offers) cannot be dismissed by LLM
+            if target_finding.check_type in (CheckType.MECHANICAL, CheckType.PAGE):
                 logger.warning(
-                    "Judge attempted to dismiss mechanical finding '%s'. "
-                    "Mechanical violations cannot be overruled by an LLM.",
+                    "Judge attempted to dismiss mechanical/page finding '%s'. "
+                    "Mechanical and page violations cannot be overruled by an LLM.",
                     fid,
                 )
                 needs_person = True

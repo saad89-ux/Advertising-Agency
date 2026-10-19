@@ -407,7 +407,7 @@ def test_page_loads_and_offer_matches_no_finding(monkeypatch, tmp_path):
 
     state = get_latest_shared_state("ad-page-clean")
     assert state is not None
-    assert state.status == "page_check_completed"
+    assert state.status in ("page_check_completed", "ready")
     assert len(state.file_refs) == 2  # screenshot_ref and text_ref
     for ref in state.file_refs:
         assert store.get(ref) is not None

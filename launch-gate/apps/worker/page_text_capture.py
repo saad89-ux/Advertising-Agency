@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
-from apps.worker.file_storage import LocalFileStore
+from apps.worker.file_storage import LocalFileStore, UnifiedFileStore, get_file_store
 from apps.worker.page_browser import PageOpenError, open_page_read_only
 from packages.contracts import VerdictStatus
 from packages.guards.input_guard import GuardSignal, guard_page_text
@@ -33,11 +33,11 @@ async def capture_page_snapshot(
     *,
     allowed_origins: frozenset[str] | set[str],
     timeout_ms: int,
-    file_store: LocalFileStore | None = None,
+    file_store: LocalFileStore | UnifiedFileStore | None = None,
     browser_channel: str | None = None,
 ) -> PageCaptureResult:
     """Read visible body text after network idle, guard hidden text, and store artifacts."""
-    store = file_store or LocalFileStore()
+    store = file_store or get_file_store()
     try:
         opened = await open_page_read_only(
             url,
@@ -76,11 +76,11 @@ async def capture_page_snapshot(
     )
 
     screenshot_ref = (
-        store.put(opened.screenshot_bytes)
+        store.put(opened.screenshot_bytes, resource_type="image", filename="page_snapshot.png")
         if opened.screenshot_bytes is not None
         else None
     )
-    text_ref = store.put(visible_raw.encode("utf-8"))
+    text_ref = store.put(visible_raw.encode("utf-8"), resource_type="raw", filename="page_text.txt")
     return PageCaptureResult(
         page_snapshot={
             "loaded": opened.status is not None,

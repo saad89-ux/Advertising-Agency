@@ -23,6 +23,7 @@ from apps.api.platforms import router as platforms_router
 from apps.api.attribution import router as attribution_router
 from apps.api.pipeline import router as pipeline_router
 from apps.api.campaign_flow import router as campaign_flow_router
+from apps.api.middleware_pii import PIISanitizationMiddleware
 from apps.api.platforms_schema import seed_platform_demo_data
 from apps.api.uploads import UploadBodyLimitMiddleware, router as upload_router
 
@@ -70,6 +71,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(UploadBodyLimitMiddleware)
+app.add_middleware(PIISanitizationMiddleware)
 
 app.include_router(auth_router)
 app.include_router(upload_router)
