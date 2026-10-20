@@ -13,11 +13,13 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
 
   // Form edit states
   const [editFields, setEditFields] = useState({});
+  const [launcherEmail, setLauncherEmail] = useState("");
 
-  const employeeContact = {
-    email: "sarah.ops@launchgate.com",
-    phone: "+1 (555) 382-9910",
-  };
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setLauncherEmail(localStorage.getItem("launcher_email") || "saadkamran485@gmail.com");
+    }
+  }, []);
 
   const fetchIssues = async () => {
     try {
@@ -125,7 +127,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
               </h1>
             </div>
             <p style={{ fontSize: "14px", color: "#94a3b8", margin: 0 }}>
-              Inspect flagged issues, notify designated employees via SMS/Email, and execute 1-click human-in-the-loop AI auto-remediation.
+              Inspect flagged issues, notify designated employees by SMTP email, and execute human-in-the-loop remediation.
             </p>
           </div>
 
@@ -140,9 +142,9 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
             alignItems: "center",
             gap: "8px",
           }}>
-            <span>📱</span>
+            <span>📧</span>
             <span>
-              Notification Dispatch Active: <strong>{employeeContact.email}</strong> • <strong>{employeeContact.phone}</strong>
+              Notification Dispatch Active: <strong>{launcherEmail || "saadkamran485@gmail.com"}</strong>
             </span>
           </div>
         </div>
@@ -164,7 +166,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
                 ✓ {successNotif.message}
               </div>
               <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                Instant SMS & Email alert sent to <strong>{successNotif.notif.employee_email}</strong> ({successNotif.notif.employee_phone}) before re-dispatch.
+                Instant SMTP email alert sent to <strong>{successNotif.notif.employee_email}</strong> (phone retained in the campaign contact record) before re-dispatch.
               </div>
             </div>
             <Link
@@ -198,7 +200,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
               Zero Active Issues Pending Remediation
             </h3>
             <p style={{ fontSize: "14px", color: "#94a3b8", margin: 0 }}>
-              All campaigns across Instagram, TikTok, Meta, X, and Snapchat are serving live with 100% compliance.
+              All approved Meta campaigns are monitored for policy compliance and live delivery status.
             </p>
           </div>
         ) : (

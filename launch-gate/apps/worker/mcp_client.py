@@ -1,19 +1,15 @@
-"""Model Context Protocol (MCP) Client & Tool Dispatcher for Social Ad Platforms.
+"""Model Context Protocol (MCP) Client & Tool Dispatcher for Meta Ads.
 
 Implements JSON-RPC 2.0 tool execution protocol for:
 - Meta Ads Graph MCP
-- TikTok Marketing MCP
-- X (Twitter) Ads MCP
-- Snapchat Business MCP
 
-Standardizes campaign deployment, live status polling, and policy violation alerts
-via standard MCP tool contracts.
+Standardizes Meta campaign deployment, live status polling, and policy violation
+alerts via standard MCP tool contracts.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -45,12 +41,10 @@ class MCPResponse:
 
 
 class MCPPlatformDispatcher:
-    """Manages Model Context Protocol (MCP) tool execution for multi-platform ad lifecycles."""
+    """Manages Meta MCP tool execution for Facebook and Instagram placements."""
 
     def __init__(self) -> None:
         self.meta_mcp_url = os.environ.get("MCP_META_SERVER_URL", "").strip()
-        self.tiktok_mcp_url = os.environ.get("MCP_TIKTOK_SERVER_URL", "").strip()
-        self.x_mcp_url = os.environ.get("MCP_X_SERVER_URL", "").strip()
 
     def list_tools(self, platform: str) -> list[MCPToolDefinition]:
         """Return available MCP tools defined for a specific platform."""
@@ -109,7 +103,47 @@ class MCPPlatformDispatcher:
 
         logger.info("[MCP EXECUTE] Platform: %s | Tool: %s | RPC ID: %s", platform, tool_name, rpc_id)
 
-        # Connector execution is disabled / not configured in local environment
+        if platform not in {"facebook", "instagram"}:
+            return MCPResponse(
+                success=False,
+                platform=platform,
+                tool_name=tool_name,
+                result={},
+                error="unsupported_platform_meta_only",
+                rpc_id=rpc_id,
+            )
+
+        live_mcp_enabled = os.environ.get("META_MCP_ENABLE_LIVE", "false").strip().lower() in {
+            "1", "true", "yes"
+        }
+        if live_mcp_enabled and self.meta_mcp_url and os.environ.get("META_MCP_ACCESS_TOKEN", "").strip():
+            try:
+                from apps.worker.meta_mcp_client import MetaMCPClient
+
+                response = MetaMCPClient().call_tool_sync(
+                    tool_name,
+                    arguments,
+                    tool_description=f"Meta {tool_name} campaign lifecycle operation",
+                )
+                return MCPResponse(
+                    success=response.success,
+                    platform=platform,
+                    tool_name=tool_name,
+                    result=response.result,
+                    error=response.error,
+                    rpc_id=response.rpc_id,
+                )
+            except Exception as exc:
+                logger.exception("Meta MCP dispatch failed for %s", tool_name)
+                return MCPResponse(
+                    success=False,
+                    platform=platform,
+                    tool_name=tool_name,
+                    result={},
+                    error=f"meta_mcp_error: {exc}",
+                    rpc_id=rpc_id,
+                )
+
         return MCPResponse(
             success=False,
             platform=platform,
@@ -118,4 +152,3 @@ class MCPPlatformDispatcher:
             error="connector_not_configured",
             rpc_id=rpc_id,
         )
-

@@ -192,46 +192,21 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
             </span>
           </div>
 
-          {token ? (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span data-testid="nav-user-email" style={{ fontSize: "12px", color: "#94a3b8" }}>
-                {user?.email || "Authenticated"}
-              </span>
-              <button
-                data-testid="nav-logout-btn"
-                onClick={handleLogout}
-                style={{
-                  background: "rgba(255, 255, 255, 0.06)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  borderRadius: "6px",
-                  color: "#cbd5e1",
-                  fontSize: "11px",
-                  fontWeight: "600",
-                  padding: "4px 8px",
-                  cursor: "pointer",
-                }}
-              >
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <Link
-              data-testid="nav-login-link"
-              href="/login"
-              style={{
-                background: "linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)",
-                border: "1px solid rgba(255, 255, 255, 0.2)",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontSize: "12px",
-                fontWeight: "700",
-                padding: "6px 12px",
-                textDecoration: "none",
-              }}
-            >
-              Sign In
-            </Link>
-          )}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            background: "rgba(99, 102, 241, 0.12)",
+            border: "1px solid rgba(99, 102, 241, 0.25)",
+            borderRadius: "8px",
+            padding: "5px 12px",
+            fontSize: "12px",
+            fontWeight: "600",
+            color: "#a5b4fc",
+          }}>
+            <span>⚡</span>
+            <span>Meta Campaign Launcher</span>
+          </div>
         </div>
       </div>
     </header>

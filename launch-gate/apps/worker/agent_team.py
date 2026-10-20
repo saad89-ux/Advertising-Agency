@@ -408,3 +408,300 @@ class JudgeAuditorNode:
             tracer=tracer,
             trace_id=trace_id,
         )
+
+
+# ===========================================================================
+# Live Tracking Specialist Multi-Agent Nodes (PRD Live Ops & Guardrails)
+# ===========================================================================
+
+@dataclass
+class RevenueAnalysisResult:
+    """Performance analysis, ROAS categorization, and budget recommendations from RevenueTrackingSpecialistNode."""
+    ad_id: str
+    platform: str
+    spend: float
+    revenue: float
+    roas: float | None
+    orders: int
+    impressions: int
+    ctr: float
+    profitability_status: str  # "UNPROFITABLE_BLEEDING", "SCALING_CANDIDATE", "MODERATE_PERFORMING", "LEARNING_PHASE"
+    recommendation: str
+    ai_insights: str | None = None
+
+
+@dataclass
+class IssueAuditResult:
+    """Live platform audit, blocker diagnosis, and remediation alert emitted by IssueTrackingSpecialistNode."""
+    ad_id: str
+    client_id: str
+    platform: str
+    dispatch_status: str
+    is_blocked: bool
+    severity: str  # "CRITICAL_BLOCKER", "WARNING", "CLEAN"
+    root_cause: str
+    proposed_fix: str
+    alert_dispatched: bool = False
+    notification_result: dict[str, Any] | None = None
+
+
+class RevenueTrackingSpecialistNode:
+    """Specialist Node: Dedicated to real-time revenue analytics, ROAS tracking, and LLM budget scaling guidance."""
+
+    name = "revenue_tracking_specialist"
+
+    def analyze_performance(
+        self,
+        ad_id: str,
+        platform: str,
+        metrics_data: dict[str, Any],
+        model_client: Any = None,
+        use_llm: bool = False,
+    ) -> RevenueAnalysisResult:
+        """Evaluate real-time ad performance metrics and generate actionable budget guidance."""
+        spend = float(metrics_data.get("spend_usd") if metrics_data.get("spend_usd") is not None else metrics_data.get("spend") or 0.0)
+        revenue = float(metrics_data.get("inbound_sales_usd") if metrics_data.get("inbound_sales_usd") is not None else metrics_data.get("revenue") or 0.0)
+        orders = int(metrics_data.get("inbound_orders") if metrics_data.get("inbound_orders") is not None else metrics_data.get("orders") or 0)
+        impressions = int(metrics_data.get("impressions") or 0)
+        clicks = int(metrics_data.get("clicks") or 0)
+
+        raw_ctr = metrics_data.get("ctr_percent") if metrics_data.get("ctr_percent") is not None else metrics_data.get("ctr")
+        if raw_ctr is not None:
+            ctr = float(raw_ctr)
+        else:
+            ctr = round((clicks / impressions) * 100, 2) if impressions > 0 else 0.0
+
+        raw_roas = metrics_data.get("roas")
+        if raw_roas is not None:
+            roas = float(raw_roas)
+        else:
+            roas = round(revenue / spend, 2) if spend > 0 else (0.0 if revenue == 0.0 else None)
+
+        # 1. Deterministic Profitability Threshold Calculation
+        if spend <= 0.0 or impressions < 50:
+            profitability_status = "LEARNING_PHASE"
+            fallback_rec = f"Campaign on {platform.title()} is in the initial learning phase with ${spend:.2f} spend. Allow impressions to accumulate before adjusting budgets."
+        elif roas is not None and roas < 1.2:
+            profitability_status = "UNPROFITABLE_BLEEDING"
+            fallback_rec = f"ROAS of {roas}x on {platform.title()} is below the 1.2x breakeven threshold. Reduce ad budget by 40% or pause low-converting audiences."
+        elif roas is not None and roas >= 2.5:
+            profitability_status = "SCALING_CANDIDATE"
+            fallback_rec = f"ROAS of {roas}x on {platform.title()} demonstrates high profitability. Scale campaign budget by 20-30% while monitoring CTR stability."
+        else:
+            profitability_status = "MODERATE_PERFORMING"
+            fallback_rec = f"ROAS of {roas if roas is not None else 0.0}x on {platform.title()} is stable. Maintain current ad budget allocation and test incremental creative variations."
+
+        # 2. Compact Context LLM Guidance (Fail-Closed)
+        recommendation = fallback_rec
+        ai_insights = None
+
+        has_llm = (model_client is not None) or use_llm
+        if use_llm and model_client is None:
+            try:
+                from apps.worker.model_client import is_gemini_configured
+                has_llm = is_gemini_configured()
+            except Exception:
+                has_llm = False
+
+        if has_llm:
+            prompt = (
+                f"You are a Senior Performance Marketing AI Specialist for Launch Gate.\n"
+                f"Evaluate the following real-time campaign performance metrics for Ad '{ad_id}' on {platform.title()}:\n"
+                f"- Spend: ${spend:.2f}\n"
+                f"- Inbound Revenue: ${revenue:.2f}\n"
+                f"- ROAS: {roas if roas is not None else 'N/A'}\n"
+                f"- Orders: {orders}\n"
+                f"- Impressions: {impressions}\n"
+                f"- CTR: {ctr}%\n"
+                f"- Calculated Status: {profitability_status}\n\n"
+                f"Provide exactly 2 concise, actionable sentences recommending whether to increase, decrease, or maintain ad spend, and why. Avoid any hallucination."
+            )
+            try:
+                ai_text = ""
+                if hasattr(model_client, "generate") and callable(getattr(model_client, "generate", None)):
+                    res_val = model_client.generate(prompt)
+                    ai_text = str(res_val).strip() if res_val is not None else ""
+                elif hasattr(model_client, "models") and hasattr(model_client.models, "generate_content"):
+                    resp = model_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+                    ai_text = str(resp.text).strip() if hasattr(resp, "text") and resp.text else ""
+                else:
+                    from apps.worker.model_client import call_gemini_model
+                    resp = call_gemini_model(
+                        prompt,
+                        client_id=platform,
+                        ad_id=ad_id,
+                        step_name="revenue_tracking_analysis",
+                        client=model_client,
+                    )
+                    ai_text = str(resp.text).strip() if hasattr(resp, "text") and resp.text else ""
+
+                if ai_text and isinstance(ai_text, str):
+                    ai_insights = ai_text
+                    recommendation = ai_text
+            except Exception as exc:
+                logger.warning(
+                    "[REVENUE SPECIALIST] LLM performance analysis failed (%s); failing closed to deterministic recommendation: %s",
+                    ad_id,
+                    exc,
+                )
+
+        return RevenueAnalysisResult(
+            ad_id=ad_id,
+            platform=platform,
+            spend=spend,
+            revenue=revenue,
+            roas=roas,
+            orders=orders,
+            impressions=impressions,
+            ctr=ctr,
+            profitability_status=profitability_status,
+            recommendation=recommendation,
+            ai_insights=ai_insights,
+        )
+
+
+class IssueTrackingSpecialistNode:
+    """Specialist Node: Monitors live crawler feedback, detects platform rejections/suspensions, and dispatches immediate launcher alerts."""
+
+    name = "issue_tracking_specialist"
+
+    BLOCKER_STATUSES = {
+        "blocked",
+        "blocked_connector_not_configured",
+        "rejected",
+        "suspended",
+        "flagged_by_platform",
+        "failed_dispatch",
+        "dead_letter",
+    }
+
+    def audit_live_status(
+        self,
+        ad_id: str,
+        client_id: str,
+        platform: str,
+        dispatch_status: str,
+        crawler_feedback: str | None = None,
+        contact_email: str | None = None,
+        contact_phone: str | None = None,
+        model_client: Any = None,
+        trigger_alert: bool = True,
+        use_llm: bool = False,
+    ) -> IssueAuditResult:
+        """Audit live ad status and crawler feedback. Dispatches immediate alerts if blocked or suspended."""
+        status_lower = (dispatch_status or "").strip().lower()
+        feedback_text = (crawler_feedback or "").strip()
+        feedback_lower = feedback_text.lower()
+
+        is_blocked = (
+            status_lower in self.BLOCKER_STATUSES
+            or any(k in status_lower for k in ("blocked", "reject", "suspend", "flagged", "failed", "dead_letter"))
+            or any(k in feedback_lower for k in ("suspend", "reject", "prohibit", "violat", "disallow", "blocked"))
+        )
+
+        if not is_blocked:
+            return IssueAuditResult(
+                ad_id=ad_id,
+                client_id=client_id,
+                platform=platform,
+                dispatch_status=dispatch_status,
+                is_blocked=False,
+                severity="CLEAN",
+                root_cause="No platform policy issues or review blocks detected.",
+                proposed_fix="Ad is compliant and actively serving live impressions.",
+                alert_dispatched=False,
+                notification_result=None,
+            )
+
+        # Critical blocker detected
+        severity = "CRITICAL_BLOCKER"
+        is_suspension = "suspend" in status_lower or "suspend" in feedback_lower
+        alert_type = "campaign_suspension" if is_suspension else "platform_rejection"
+
+        root_cause = feedback_text or f"Platform dispatch status '{dispatch_status}' indicates an active policy block or review rejection."
+        proposed_fix = "Revise copy to eliminate non-compliant or medical claims, verify landing page URL parameters, and submit for human reviewer approval."
+
+        # Optional LLM root-cause diagnostic
+        has_llm = (model_client is not None) or use_llm
+        if use_llm and model_client is None:
+            try:
+                from apps.worker.model_client import is_gemini_configured
+                has_llm = is_gemini_configured()
+            except Exception:
+                has_llm = False
+
+        if has_llm:
+            prompt = (
+                f"You are a Platform Policy Compliance Specialist for Launch Gate.\n"
+                f"Ad '{ad_id}' for client '{client_id}' on {platform.title()} was blocked/suspended with status '{dispatch_status}'.\n"
+                f"Platform Feedback: '{root_cause}'\n\n"
+                f"Provide exactly one clear sentence identifying the root cause, and one compliant proposed copy fix."
+            )
+            try:
+                ai_text = ""
+                if hasattr(model_client, "generate") and callable(getattr(model_client, "generate", None)):
+                    res_val = model_client.generate(prompt)
+                    ai_text = str(res_val).strip() if res_val is not None else ""
+                elif hasattr(model_client, "models") and hasattr(model_client.models, "generate_content"):
+                    resp = model_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+                    ai_text = str(resp.text).strip() if hasattr(resp, "text") and resp.text else ""
+                else:
+                    from apps.worker.model_client import call_gemini_model
+                    resp = call_gemini_model(
+                        prompt,
+                        client_id=client_id,
+                        ad_id=ad_id,
+                        step_name="issue_tracking_diagnostic",
+                        client=model_client,
+                    )
+                    ai_text = str(resp.text).strip() if hasattr(resp, "text") and resp.text else ""
+
+                if ai_text and isinstance(ai_text, str):
+                    proposed_fix = ai_text
+            except Exception as exc:
+                logger.warning("[ISSUE SPECIALIST] LLM diagnostic failed (%s); using deterministic fix: %s", ad_id, exc)
+
+        # Trigger an immediate SMTP email alert to the campaign launcher.
+        alert_dispatched = False
+        notification_result = None
+
+        if trigger_alert and (contact_email or contact_phone):
+            try:
+                from apps.api.notifications import NotificationDispatcher
+                subject = f"CRITICAL ALERT: Ad {ad_id} {dispatch_status.replace('_', ' ').title()} on {platform.title()}"
+                message_body = (
+                    f"Launch Gate Issue Tracking Specialist Node detected a critical blocker:\n\n"
+                    f"Client: {client_id}\n"
+                    f"Ad ID: {ad_id}\n"
+                    f"Platform: {platform.title()}\n"
+                    f"Status: {dispatch_status}\n"
+                    f"Root Cause: {root_cause}\n"
+                    f"Proposed Remediation: {proposed_fix}\n\n"
+                    f"Please log in to the Launch Gate console to remediate and resume live serving."
+                )
+                notification_result = NotificationDispatcher.dispatch_campaign_alert(
+                    client_id=client_id,
+                    recipient_email=contact_email,
+                    recipient_phone=contact_phone,
+                    alert_type=alert_type,
+                    subject=subject,
+                    message_body=message_body,
+                    ad_id=ad_id,
+                    platform=platform,
+                )
+                alert_dispatched = True
+            except Exception as exc:
+                logger.exception("[ISSUE SPECIALIST] Failed dispatching alert for blocked ad %s: %s", ad_id, exc)
+
+        return IssueAuditResult(
+            ad_id=ad_id,
+            client_id=client_id,
+            platform=platform,
+            dispatch_status=dispatch_status,
+            is_blocked=True,
+            severity=severity,
+            root_cause=root_cause,
+            proposed_fix=proposed_fix,
+            alert_dispatched=alert_dispatched,
+            notification_result=notification_result,
+        )

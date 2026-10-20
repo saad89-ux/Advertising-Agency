@@ -130,7 +130,7 @@ def test_upload_stores_canonical_and_raw_platforms_and_flags_unknown(monkeypatch
 
     assert [(ad[4], ad[5]) for ad in inserted_ads] == [
         ("facebook", "Meta"),
-        ("Snapchat", "Snapchat"),
+        ("snapchat", "Snapchat"),
     ]
     assert result.response["platform_unrecognized"] == [
         {"data_row_index": 2, "platform_raw": "Snapchat", "reason_code": "platform_unrecognized"}
@@ -147,6 +147,12 @@ def test_init_schema_runs_platform_raw_migration(monkeypatch):
     monkeypatch.setattr(schema.deduplication, "create_deduplication_constraints", lambda: called.append("dedup"))
     monkeypatch.setattr(schema.rejected_rows, "create_rejected_rows_table", lambda: called.append("rejected"))
     monkeypatch.setattr(schema.findings, "create_findings_table", lambda: called.append("findings"))
+    monkeypatch.setattr(schema.approvals, "create_approval_tables", lambda: called.append("approvals"))
+    monkeypatch.setattr(schema.evidence, "create_approval_evidence_table", lambda: called.append("evidence"))
+    monkeypatch.setattr(schema.edits, "create_ad_edits_table", lambda: called.append("edits"))
+    monkeypatch.setattr(schema.cost_ledger, "create_cost_ledger_table", lambda: called.append("cost_ledger"))
+    monkeypatch.setattr(schema.sender, "create_send_tables", lambda: called.append("sender"))
+    monkeypatch.setattr(schema, "create_trace_tables", lambda: called.append("traces"))
 
     schema.init_schema()
 

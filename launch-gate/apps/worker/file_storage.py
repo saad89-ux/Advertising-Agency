@@ -82,9 +82,14 @@ class LocalFileStore:
 
 
 class UnifiedFileStore:
-    """Unified file store prioritizing Cloudinary for persistent CDN storage with local disk fallback."""
+    """Cloudinary-backed store with local disk reserved for development/testing."""
 
     def __init__(self, root: str | Path | None = None) -> None:
+        load_dotenv()
+        self.cloudinary_required = (
+            os.environ.get("REQUIRE_CLOUDINARY", "").strip().lower() in {"1", "true", "yes"}
+            or os.environ.get("APP_ENV", "").strip().lower() in {"production", "prod"}
+        )
         self.local = LocalFileStore(root=root)
         self.cloud = None
         try:
@@ -92,16 +97,26 @@ class UnifiedFileStore:
             if is_cloudinary_configured():
                 self.cloud = CloudinaryFileStore()
         except Exception as exc:
+            if self.cloudinary_required:
+                raise RuntimeError("Cloudinary is required but could not be initialized") from exc
             logger.debug("Cloudinary initialization skipped or failed: %s", exc)
             self.cloud = None
+        if self.cloudinary_required and self.cloud is None:
+            raise RuntimeError(
+                "Cloudinary is required in production. Configure CLOUDINARY_URL or all Cloudinary credentials."
+            )
 
     def put(self, content: bytes, resource_type: str = "auto", filename: str | None = None) -> str:
-        """Persist content to Cloudinary if configured; otherwise use LocalFileStore."""
+        """Persist content to Cloudinary, or local disk only outside production."""
         if self.cloud is not None:
             try:
                 return self.cloud.put(content, resource_type=resource_type, filename=filename)
             except Exception as exc:
+                if self.cloudinary_required:
+                    raise RuntimeError("Cloudinary upload failed; local fallback is disabled") from exc
                 logger.warning("Cloudinary upload failed (%s); falling back to local file store: %s", filename or "unnamed", exc)
+        if self.cloudinary_required:
+            raise RuntimeError("Cloudinary is required; refusing local asset storage")
         return self.local.put(content)
 
     def get(self, file_ref: str, timeout_seconds: float = 15.0) -> bytes:
@@ -155,4 +170,3 @@ class UnifiedFileStore:
 def get_file_store(root: str | Path | None = None) -> UnifiedFileStore:
     """Return a unified file store instance configured for the environment."""
     return UnifiedFileStore(root=root)
-

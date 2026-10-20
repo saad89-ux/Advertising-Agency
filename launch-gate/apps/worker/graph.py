@@ -91,6 +91,9 @@ class WorkerGraphState(TypedDict, total=False):
     copy_feedback: str | None
     refinement_history: list[dict[str, Any]]
     judge_result: Any | None
+    tracer: Any
+    trace_id: str | None
+    emit_progress: bool
 
 
 @dataclass(frozen=True)
@@ -523,6 +526,7 @@ def run_ad_worker_flow(
         "verdict_floor": verdict_floor,
         "run_page_checks": run_page_checks,
         "run_wording_checks": run_wording_checks,
+        "emit_progress": run_page_checks or run_wording_checks,
         "connection": connection,
         "file_store": file_store,
         "model_client": model_client,
@@ -585,7 +589,7 @@ def headline_specialist_node(state: WorkerGraphState) -> dict[str, Any]:
 
     try:
         from apps.api.sse import notify_ad_update
-        if ad.batch_id:
+        if state.get("emit_progress", True) and ad.batch_id:
             notify_ad_update(ad.batch_id, ad.ad_id, stage="inspecting_headline", client_id=ad.client_id, row_number=ad.row_number)
     except Exception:
         pass
@@ -620,7 +624,7 @@ def url_specialist_node(state: WorkerGraphState) -> dict[str, Any]:
 
     try:
         from apps.api.sse import notify_ad_update
-        if ad.batch_id:
+        if state.get("emit_progress", True) and ad.batch_id:
             notify_ad_update(ad.batch_id, ad.ad_id, stage="auditing_url", client_id=ad.client_id, row_number=ad.row_number)
     except Exception:
         pass
@@ -710,7 +714,7 @@ def supervisor_reviewer_node(state: WorkerGraphState) -> dict[str, Any]:
 
     try:
         from apps.api.sse import notify_ad_update
-        if ad.batch_id:
+        if state.get("emit_progress", True) and ad.batch_id:
             notify_ad_update(ad.batch_id, ad.ad_id, stage="supervisor_review", client_id=ad.client_id, row_number=ad.row_number)
     except Exception:
         pass
@@ -754,7 +758,7 @@ def judge_auditor_node(state: WorkerGraphState) -> dict[str, Any]:
 
     try:
         from apps.api.sse import notify_ad_update
-        if ad.batch_id:
+        if state.get("emit_progress", True) and ad.batch_id:
             notify_ad_update(ad.batch_id, ad.ad_id, stage="judge_certification", client_id=ad.client_id, row_number=ad.row_number)
     except Exception:
         pass
@@ -813,7 +817,7 @@ def multi_agent_verdict_node(state: WorkerGraphState) -> dict[str, Any]:
 
     try:
         from apps.api.sse import notify_ad_update
-        if ad.batch_id:
+        if state.get("emit_progress", True) and ad.batch_id:
             notify_ad_update(
                 ad.batch_id,
                 ad.ad_id,
@@ -968,6 +972,7 @@ def run_multi_agent_worker_flow(
         "verdict_floor": verdict_floor,
         "run_page_checks": run_page_checks,
         "run_wording_checks": run_wording_checks,
+        "emit_progress": run_page_checks or run_wording_checks,
         "connection": connection,
         "file_store": file_store,
         "model_client": model_client,

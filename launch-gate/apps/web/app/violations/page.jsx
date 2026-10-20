@@ -56,7 +56,7 @@ export default function ViolationsPage({ apiBaseUrl = "http://localhost:8000" })
               </h1>
             </div>
             <p style={{ fontSize: "14px", color: "#94a3b8", margin: 0 }}>
-              Live algorithmic review monitoring: track why platform bots (Meta, TikTok, X, Snapchat) rejected or flagged ad campaigns.
+              Live algorithmic review monitoring: track why Meta platform bots rejected or flagged ad campaigns.
             </p>
           </div>
 

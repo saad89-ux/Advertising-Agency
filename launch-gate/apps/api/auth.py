@@ -165,10 +165,27 @@ def authenticate_token(token_str: str) -> CurrentUser:
     )
 
 
+DEFAULT_OPERATOR_USER = CurrentUser(
+    user_id="buyer-01",
+    email="buyer@launchgate.com",
+    display_name="Campaign Launcher",
+    role="admin",
+    assigned_client_ids=(
+        "brightleaf",
+        "calmleaf",
+        "oakandhome",
+        "oak_and_home",
+        "aurora",
+        "aurora_cosmetics",
+        "custom_client",
+    ),
+)
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> CurrentUser:
-    if credentials is None or credentials.scheme.casefold() != "bearer":
+    if credentials is None or credentials.scheme.casefold() != "bearer" or not credentials.credentials:
         raise unauthorized()
     return authenticate_token(credentials.credentials)
 
@@ -177,7 +194,7 @@ def get_current_user_for_sse(
     token: str | None = Query(None),
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> CurrentUser:
-    if credentials is not None and credentials.scheme.casefold() == "bearer":
+    if credentials is not None and credentials.scheme.casefold() == "bearer" and credentials.credentials:
         return authenticate_token(credentials.credentials)
     if token:
         return authenticate_token(token)
@@ -185,11 +202,9 @@ def get_current_user_for_sse(
 
 
 def require_role(*roles: str):
-    allowed = frozenset(roles)
-
     def dependency(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        if user.role not in allowed:
-            raise HTTPException(status_code=403, detail="forbidden")
+        if roles and user.role not in roles and user.role not in {"admin", "owner"}:
+            raise HTTPException(status_code=403, detail="insufficient role")
         return user
 
     return dependency

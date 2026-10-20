@@ -8,14 +8,15 @@ from pathlib import PurePath, PureWindowsPath
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile as FastAPIUploadFile
 from fastapi.responses import JSONResponse
-from starlette.datastructures import UploadFile
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from apps.api import ads, batches, deduplication, rejected_rows
 from apps.api import outbox
 from apps.api.access import require_client_access
-from apps.api.auth import CurrentUser, require_role
+from apps.api.auth import CurrentUser, get_current_user, require_role
+from apps.worker.file_storage import get_file_store
 from apps.api.client_inference import infer_client_id, load_domain_map
 from apps.api.database import get_session
 from apps.api.ingest import (
@@ -71,11 +72,11 @@ def _display_bytes(value: int) -> str:
     return f"{value} bytes"
 
 
-def _content_type(file: UploadFile) -> str:
+def _content_type(file: StarletteUploadFile | FastAPIUploadFile) -> str:
     return (file.content_type or "").split(";", 1)[0].strip().casefold()
 
 
-def _validate_file_type(file: UploadFile) -> str:
+def _validate_file_type(file: StarletteUploadFile | FastAPIUploadFile) -> str:
     filename = file.filename or ""
     suffix = PurePath(filename.replace("\\", "/")).suffix.casefold()
     content_type = _content_type(file)
@@ -117,6 +118,8 @@ def _persist_upload(
     user: CurrentUser,
     filename: str,
     domain_map: dict[str, str | None],
+    file_ref: str | None = None,
+    uploader_ip: str | None = None,
 ) -> UploadResult:
     known_rows_by_client: dict[str, list[tuple[int, dict[str, str]]]] = {}
     rejected = list(parsed.rejected_rows)
@@ -166,7 +169,7 @@ def _persist_upload(
     unrecognized_platforms: list[dict[str, object]] = []
     for index, row in zip(parsed.valid_row_indices, parsed.rows):
         platform = normalize_platform(row.get("platform", ""))
-        if platform.flagged:
+        if platform.flagged or platform.canonical_value not in {"facebook", "instagram"}:
             unrecognized_platforms.append(
                 {
                     "data_row_index": index,
@@ -183,6 +186,11 @@ def _persist_upload(
                 uploaded_by=user.user_id,
                 filename=base_name,
                 sheet_hash=parsed.sheet_hash,
+                file_ref=file_ref,
+            )
+            connection.execute(
+                "UPDATE batches SET uploader_ip = %s WHERE batch_id = %s;",
+                (uploader_ip, batch_id),
             )
             rows_to_save: list[dict[str, object]] = []
             for client_id, indexed_rows in known_rows_by_client.items():
@@ -251,6 +259,8 @@ def _persist_upload(
         "unmapped_columns": list(parsed.unmapped_columns),
         "platform_unrecognized": unrecognized_platforms,
         "duplicate_sheet": False,
+        "file_ref": file_ref,
+        "storage_url": file_ref,
     }
     if duplicate_clients:
         visible_clients = set(user.assigned_client_ids)
@@ -279,7 +289,7 @@ async def upload_batch(
             },
         ) from None
     items = list(form.multi_items())
-    file_items = [item for item in items if isinstance(item[1], UploadFile)]
+    file_items = [item for item in items if isinstance(item[1], (StarletteUploadFile, FastAPIUploadFile))]
     allowed_fields = all(name in {"file", "batch_id"} for name, _ in items)
     if (
         len(file_items) != 1
@@ -306,6 +316,9 @@ async def upload_batch(
         )
 
     filename = uploaded_file.filename or ""
+    file_store = get_file_store()
+    stored_file_ref = file_store.put(content, resource_type="raw", filename=filename)
+
     try:
         if parser_type == "csv":
             parsed = parse_csv_upload(filename, content, max_file_bytes=upload_limit)
@@ -324,11 +337,18 @@ async def upload_batch(
             raise HTTPException(status_code=415, detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
         raise HTTPException(status_code=422, detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
 
+    uploader_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or request.headers.get("x-real-ip", "").strip()
+        or (request.client.host if request.client else "127.0.0.1")
+    )
     result = _persist_upload(
         parsed=parsed,
         user=user,
         filename=filename,
         domain_map=load_domain_map(),
+        file_ref=stored_file_ref,
+        uploader_ip=uploader_ip,
     )
     return JSONResponse(status_code=result.status_code, content=result.response)
 
@@ -405,3 +425,59 @@ class UploadBodyLimitMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": message})
+
+
+SUPPORTED_CREATIVE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".pdf"}
+SUPPORTED_CREATIVE_MIMES = {
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "video/mp4",
+    "application/pdf",
+}
+
+
+@router.post("/uploads/creative")
+async def upload_creative(
+    file: FastAPIUploadFile = File(...),
+    client_id: str | None = Form(None),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Upload a single creative asset (image, video, PDF) to persistent Cloudinary / unified storage."""
+    filename = file.filename or "creative_asset"
+    ext = PurePath(filename.replace("\\", "/")).suffix.casefold()
+    content_type = (file.content_type or "").split(";", 1)[0].strip().casefold()
+
+    if ext not in SUPPORTED_CREATIVE_EXTENSIONS and content_type not in SUPPORTED_CREATIVE_MIMES:
+        raise HTTPException(
+            status_code=415,
+            detail={
+                "reason_code": "unsupported_file_type",
+                "message": "Unsupported creative file type. Supported formats are: PNG, JPG, WEBP, MP4, PDF.",
+            },
+        )
+
+    if client_id and user.role == "buyer":
+        require_client_access(user, client_id)
+
+    upload_limit = max_upload_bytes() * 10
+    content = await file.read(upload_limit + 1)
+    await file.close()
+
+    if len(content) > upload_limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is larger than {_display_bytes(upload_limit)} (limit: {upload_limit} bytes)",
+        )
+
+    file_store = get_file_store()
+    stored_ref = file_store.put(content, resource_type="auto", filename=filename)
+
+    return {
+        "status": "uploaded",
+        "file_ref": stored_ref,
+        "url": stored_ref,
+        "filename": filename,
+        "size_bytes": len(content),
+    }

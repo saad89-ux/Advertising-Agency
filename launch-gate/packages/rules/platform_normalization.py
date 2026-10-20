@@ -13,6 +13,8 @@ _PLATFORM_ALIASES = {
     "tiktok": {"tiktok", "tik tok", "tt"},
     "google": {"google", "google ads", "adwords"},
     "linkedin": {"linkedin", "li"},
+    "x": {"x", "twitter", "tweet", "x ads", "twitter ads"},
+    "snapchat": {"snapchat", "snap", "snap ads"},
 }
 
 

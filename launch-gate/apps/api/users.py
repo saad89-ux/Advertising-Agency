@@ -113,3 +113,39 @@ def list_all_users() -> list[dict[str, object]]:
         result.append(u_dict)
     return result
 
+
+
+def ensure_default_users() -> None:
+    """Ensure baseline platform clients and default user accounts exist for seamless first-run."""
+    create_users_table()
+    with get_session() as conn:
+        for cid, cname in [
+            ("brightleaf", "BrightLeaf Botanicals"),
+            ("calmleaf", "CalmLeaf Wellness"),
+            ("oak_and_home", "Oak & Home Furniture"),
+        ]:
+            conn.execute(
+                "INSERT INTO clients (client_id, name) VALUES (%s, %s) ON CONFLICT (client_id) DO NOTHING;",
+                (cid, cname),
+            )
+
+    from apps.api.auth import hash_password
+    default_users = [
+        ("buyer-01", "buyer@launchgate.com", "Media Buyer", "password123", "buyer"),
+        ("manager-01", "manager@launchgate.com", "Account Manager", "password123", "account_manager"),
+    ]
+    for uid, uemail, uname, upass, urole in default_users:
+        existing = get_user_by_email(uemail)
+        if not existing:
+            create_user(
+                user_id=uid,
+                email=uemail,
+                display_name=uname,
+                password_hash=hash_password(upass),
+                role=urole,
+            )
+        for cid in ["brightleaf", "calmleaf", "oak_and_home"]:
+            try:
+                assign_user_to_client(uid, cid)
+            except Exception:
+                pass

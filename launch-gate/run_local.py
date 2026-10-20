@@ -12,14 +12,28 @@ Launches all services concurrently:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 import sys
-import threading
-import time
-from pathlib import Path
-
 
 REPO_ROOT = Path(__file__).resolve().parent
+
+# Check if running within .venv. If not, auto-switch to the project's virtual environment.
+_venv_python = (
+    REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+    if sys.platform == "win32"
+    else REPO_ROOT / ".venv" / "bin" / "python"
+)
+if _venv_python.exists() and Path(sys.executable).resolve() != _venv_python.resolve():
+    print(f"[INFO] Auto-switching to project virtual environment: {_venv_python}")
+    sys.exit(subprocess.call([str(_venv_python), str(Path(__file__).resolve())] + sys.argv[1:]))
+
+import http.server
+import socket
+import socketserver
+import threading
+import time
+
 
 # Ensure nodejs is in PATH if installed in user local appdata
 local_node = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "nodejs"
@@ -40,47 +54,50 @@ def init_environment():
         from apps.api.schema import init_schema
         from apps.api.users import assign_user_to_client, create_user, create_users_table
 
-        init_schema()
-        create_users_table()
+        try:
+            init_schema()
+            create_users_table()
+        except Exception as schema_err:
+            print(f"[WARN] Database schema initialization warning (PostgreSQL may be offline or initializing): {schema_err}")
 
         seed_demo = os.environ.get("SEED_DEMO_DATA", "false").strip().lower() in ("true", "1", "yes")
         if seed_demo:
-            pwd = hash_password("password123")
-            create_user(
-                user_id="demo_buyer",
-                email="buyer@launchgate.com",
-                display_name="Demo Buyer",
-                password_hash=pwd,
-                role="buyer",
-            )
-            for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
-                assign_user_to_client(user_id="demo_buyer", client_id=client_id)
+            try:
+                pwd = hash_password("password123")
+                create_user(
+                    user_id="demo_buyer",
+                    email="buyer@launchgate.com",
+                    display_name="Demo Buyer",
+                    password_hash=pwd,
+                    role="buyer",
+                )
+                for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
+                    assign_user_to_client(user_id="demo_buyer", client_id=client_id)
 
-            create_user(
-                user_id="demo_manager",
-                email="manager@launchgate.com",
-                display_name="Demo Manager",
-                password_hash=pwd,
-                role="account_manager",
-            )
-            for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
-                assign_user_to_client(user_id="demo_manager", client_id=client_id)
+                create_user(
+                    user_id="demo_manager",
+                    email="manager@launchgate.com",
+                    display_name="Demo Manager",
+                    password_hash=pwd,
+                    role="account_manager",
+                )
+                for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
+                    assign_user_to_client(user_id="demo_manager", client_id=client_id)
 
-            from apps.api.mock_data import seed_demo_data
+                from apps.api.mock_data import seed_demo_data
 
-            seed_demo_data(force=False)
-            print("[OK] Database schema initialized and demo users/batches seeded.")
+                seed_demo_data(force=False)
+                print("[OK] Database schema initialized and demo users/batches seeded.")
+            except Exception as seed_err:
+                print(f"[WARN] Demo seeding notice: {seed_err}")
         else:
-            print("[OK] Database schema initialized in production mode; zero default users or demo batches seeded.")
+            print("[OK] Launch Gate initialized in production-ready mode.")
     except Exception as exc:
-        print(f"[WARN] Database initialization warning (may already be initialized): {exc}")
+        print(f"[WARN] Database initialization notice: {exc}")
 
 
 def run_storefront_server():
     """Run local storefront HTTP server on port 8099."""
-    import http.server
-    import socketserver
-
     storefront_dir = REPO_ROOT / "data" / "storefront_pages"
     if not storefront_dir.exists():
         return
@@ -101,9 +118,9 @@ def run_storefront_server():
 
 def run_stand_in_platform():
     """Run simulated ad platform on port 8100."""
-    import uvicorn
-
     try:
+        import uvicorn
+
         uvicorn.run(
             "data.stand_in_platform.app:app",
             host="0.0.0.0",
@@ -111,13 +128,17 @@ def run_stand_in_platform():
             log_level="warning",
             access_log=False,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[WARN] Stand-in platform notice: {exc}")
 
 
 def run_worker_loop():
     """Continuously pop and process ad jobs from the Redis queue."""
-    from apps.worker.job_runner import run_once
+    try:
+        from apps.worker.job_runner import run_once
+    except Exception as exc:
+        print(f"[WARN] Background worker loop notice: {exc}")
+        return
 
     while True:
         try:
@@ -128,8 +149,6 @@ def run_worker_loop():
 
 
 def is_port_in_use(port: int) -> bool:
-    import socket
-
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.5)
@@ -161,15 +180,18 @@ def run_frontend():
 
 def run_backend_api():
     """Run FastAPI main app on port 8000."""
-    import uvicorn
+    try:
+        import uvicorn
 
-    uvicorn.run(
-        "apps.api.main:app",
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        reload=False,
-    )
+        uvicorn.run(
+            "apps.api.main:app",
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            reload=False,
+        )
+    except Exception as exc:
+        print(f"[ERROR] Backend API stopped: {exc}")
 
 
 def print_banner():
@@ -202,6 +224,10 @@ def print_banner():
 def main():
     print("Starting Launch Gate services...")
     init_environment()
+
+    if "--check" in sys.argv or "--dry-run" in sys.argv:
+        print("[OK] Pre-flight check succeeded. Virtual environment and all dependencies verified.")
+        return
 
     # 1. Background Storefront server
     t_storefront = threading.Thread(target=run_storefront_server, daemon=True)

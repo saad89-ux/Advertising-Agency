@@ -5,6 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import GlassToast from "../components/GlassToast";
 
+const AVAILABLE_PLATFORMS = [
+  { id: "facebook", label: "Facebook", icon: "📘" },
+  { id: "instagram", label: "Instagram", icon: "📸" },
+];
+
 export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   const router = useRouter();
 
@@ -31,11 +36,23 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   const [reviewResult, setReviewResult] = useState(null);
   const [missingForm, setMissingForm] = useState({});
 
-  // HITL Launch Modal with Employee Contact
+  // HITL Launch Modal & Notification Contact Settings
   const [showLaunchModal, setShowLaunchModal] = useState(false);
-  const [employeeEmail, setEmployeeEmail] = useState("sarah.ops@launchgate.com");
-  const [employeePhone, setEmployeePhone] = useState("+1 (555) 382-9910");
+  const [employeeEmail, setEmployeeEmail] = useState("");
+  const [employeePhone, setEmployeePhone] = useState("");
+  const [selectedPlatforms, setSelectedPlatforms] = useState(["facebook", "instagram"]);
   const [isLaunching, setIsLaunching] = useState(false);
+
+  // Sync launcher contact with localStorage
+  const updateLauncherEmail = (val) => {
+    setEmployeeEmail(val);
+    if (typeof window !== "undefined") localStorage.setItem("launcher_email", val);
+  };
+
+  const updateLauncherPhone = (val) => {
+    setEmployeePhone(val);
+    if (typeof window !== "undefined") localStorage.setItem("launcher_phone", val);
+  };
 
   // Fetch available clients from DB
   const fetchClients = async () => {
@@ -73,6 +90,31 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
     }
   };
 
+  // Fetch launcher contact from DB or localStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedEmail = localStorage.getItem("launcher_email");
+      const savedPhone = localStorage.getItem("launcher_phone");
+      const storedUser = localStorage.getItem("launch_gate_user");
+
+      if (savedEmail) {
+        setEmployeeEmail(savedEmail);
+      } else if (storedUser) {
+        try {
+          const parsed = JSON.parse(storedUser);
+          if (parsed?.email) {
+            setEmployeeEmail(parsed.email);
+            localStorage.setItem("launcher_email", parsed.email);
+          }
+        } catch (_) {}
+      }
+
+      if (savedPhone) {
+        setEmployeePhone(savedPhone);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     fetchChatHistory();
     fetchClients();
@@ -98,16 +140,8 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
         ad_overrides: {
           ...missingForm,
         },
-        social_handles: {
-          instagram: missingForm.instagram_handle,
-          facebook: missingForm.facebook_handle,
-          tiktok: missingForm.tiktok_handle,
-        },
-        social_tokens: {
-          instagram: missingForm.instagram_token,
-          facebook: missingForm.facebook_token,
-          tiktok: missingForm.tiktok_token,
-        },
+        social_handles: {},
+        social_tokens: {},
       };
 
       const res = await fetch(`${apiBaseUrl}/campaign-flow/preflight-review`, {
@@ -120,7 +154,11 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
         const data = await res.json();
         setReviewResult(data);
       } else {
-        setToast({ message: "Preflight review failed. Please check connection.", type: "error" });
+        const errorData = await res.json().catch(() => ({}));
+        const detail = typeof errorData.detail === "string"
+          ? errorData.detail
+          : errorData.message || "The preflight review could not be completed.";
+        setToast({ message: detail, type: "error" });
       }
     } catch (err) {
       console.error(err);
@@ -132,8 +170,12 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
 
   // Launch Campaign & Capture Employee Contact
   const handleConfirmLaunch = async () => {
-    if (!employeeEmail || !employeePhone) {
-      setToast({ message: "Please provide employee notification email and phone number.", type: "warning" });
+    if (!employeeEmail || !employeeEmail.includes("@")) {
+      setToast({ message: "Please enter a valid launcher email address.", type: "error" });
+      return;
+    }
+    if ((employeePhone || "").replace(/\D/g, "").length < 7) {
+      setToast({ message: "Please enter a valid phone number with at least 7 digits.", type: "error" });
       return;
     }
 
@@ -145,32 +187,104 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
 
-      const payload = {
-        client_id: selectedClient,
-        batch_id: activeBatchId || `batch_${selectedClient}_${Date.now()}`,
-        campaign_name: `${selectedClient.toUpperCase()} Multi-Platform Growth`,
+      const clientId = selectedClient || "brightleaf";
+      const metaPlatforms = selectedPlatforms.length > 0 ? selectedPlatforms : ["facebook", "instagram"];
+      let currentBatchId = activeBatchId || `batch_${clientId}_${Date.now()}`;
+
+      // 1. If user uploaded a campaign sheet (Method 2: CSV/XLSX), persist it to batch table
+      if (selectedFile) {
+        try {
+          const fileFormData = new FormData();
+          fileFormData.append("file", selectedFile);
+          fileFormData.append("batch_id", currentBatchId);
+          const uploadRes = await fetch(`${apiBaseUrl}/uploads`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: fileFormData,
+          });
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            if (uploadData.batch_id) {
+              currentBatchId = uploadData.batch_id;
+              setActiveBatchId(currentBatchId);
+            }
+          } else {
+            const uploadError = await uploadRes.json().catch(() => ({}));
+            throw new Error(typeof uploadError.detail === "string" ? uploadError.detail : "Campaign sheet upload failed.");
+          }
+        } catch (uploadErr) {
+          throw uploadErr;
+        }
+      }
+
+      // 2. If user attached a creative asset (Method 3: Image/Video), persist to Cloud creative storage
+      if (selectedImage) {
+        try {
+          const creativeFormData = new FormData();
+          creativeFormData.append("file", selectedImage);
+          creativeFormData.append("client_id", clientId);
+          const creativeRes = await fetch(`${apiBaseUrl}/uploads/creative`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: creativeFormData,
+          });
+          if (!creativeRes.ok) {
+            const creativeError = await creativeRes.json().catch(() => ({}));
+            throw new Error(typeof creativeError.detail === "string" ? creativeError.detail : "Creative upload failed.");
+          }
+        } catch (creativeErr) {
+          throw creativeErr;
+        }
+      }
+
+      // 3. Dispatch to Meta Platforms (Instagram & Facebook)
+      const campaignTitle = promptText && promptText.trim().length > 0
+        ? (promptText.trim().split("\n")[0].slice(0, 60))
+        : `${clientId.toUpperCase()} Meta Growth Burst`;
+
+      const launchPayload = {
+        client_id: clientId,
+        batch_id: currentBatchId,
+        campaign_name: campaignTitle,
         employee_email: employeeEmail,
         employee_phone: employeePhone,
-        target_platforms: ["instagram", "facebook", "tiktok", "x", "snapchat"],
+        target_platforms: metaPlatforms,
+        headline: reviewResult?.campaign_summary?.headline || promptText.trim().split("\n")[0] || null,
+        ad_text: reviewResult?.campaign_summary?.ad_text || promptText || null,
+        destination_url: reviewResult?.campaign_summary?.destination_url || missingForm.destination_url || null,
+        creative_file: selectedImage?.name || selectedFile?.name || null,
       };
 
-      const res = await fetch(`${apiBaseUrl}/campaign-flow/launch-batch`, {
+      const launchRes = await fetch(`${apiBaseUrl}/campaign-flow/launch-batch`, {
         method: "POST",
         headers,
-        body: JSON.stringify(payload),
+        body: JSON.stringify(launchPayload),
       });
 
-      if (res.ok) {
+      if (launchRes.ok) {
         setShowLaunchModal(false);
-        // Direct navigation to Dispatches page
+        setToast({
+          message: "Campaign reviewed & dispatched to Meta platforms (Instagram & Facebook) successfully!",
+          type: "success",
+        });
+        // Refresh IP-scoped sidebar batches
+        fetchChatHistory();
         router.push("/dispatches");
       } else {
-        const err = await res.json().catch(() => ({}));
-        setToast({ message: err.detail || "Failed to launch campaign. Please check inputs.", type: "error" });
+        const err = await launchRes.json().catch(() => ({}));
+        let errMsg = "Failed to launch campaign. Please check inputs.";
+        if (typeof err.detail === "string") {
+          errMsg = err.detail;
+        } else if (Array.isArray(err.detail) && err.detail.length > 0) {
+          errMsg = err.detail.map((d) => (typeof d === "string" ? d : d.msg || JSON.stringify(d))).join(", ");
+        } else if (err.message) {
+          errMsg = err.message;
+        }
+        setToast({ message: errMsg, type: "error" });
       }
     } catch (err) {
       console.error(err);
-      setToast({ message: "Network error dispatching campaign.", type: "error" });
+      setToast({ message: err?.message || "Meta launch could not be completed. The server did not confirm the operation.", type: "error" });
     } finally {
       setIsLaunching(false);
     }
@@ -298,6 +412,11 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   onClick={() => {
                     setActiveBatchId(item.batch_id);
                     setSelectedClient(item.client_id || "");
+                    if (typeof window !== "undefined") {
+                      localStorage.setItem("launch_gate_active_client", item.client_id || "");
+                      localStorage.setItem("launch_gate_active_batch", item.batch_id || "");
+                    }
+                    router.push(`/batches/${item.batch_id}`);
                   }}
                   style={{
                     padding: sidebarOpen ? "12px 14px" : "10px",
@@ -377,7 +496,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               margin: 0,
               fontWeight: "400",
             }}>
-              A place where you review, launch, and track live ad campaigns with automated MCP multi-platform agents
+              A place where you review, launch, and track live Meta ad campaigns with automated MCP agents
             </p>
           </div>
 
@@ -507,7 +626,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               <textarea
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
-                placeholder="Enter campaign prompt, headline, ad copy, or creative instructions (e.g. 'Launch our summer serum campaign across Instagram Reels and TikTok Spark ads targeting organic skincare buyers')..."
+                placeholder="Enter campaign prompt, headline, ad copy, or creative instructions (e.g. 'Launch our summer campaign across Meta placements targeting skincare buyers')..."
                 rows={5}
                 style={{
                   width: "100%",
@@ -584,7 +703,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             {/* Action Bar */}
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "18px" }}>
               <button
-                onClick={handleReviewAndCheck}
+                onClick={() => setShowLaunchModal(true)}
                 disabled={isReviewing}
                 style={{
                   padding: "12px 28px",
@@ -701,7 +820,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       Pre-Flight Passed — Paused for Human Review
                     </h3>
                     <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                      Compliance Score: 98.4% • All platform handles & tokens validated
+                      Meta preflight passed • Paused for human approval
                     </div>
                   </div>
                 </div>
@@ -746,7 +865,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 <div style={{ gridColumn: "1 / -1" }}>
                   <span style={{ color: "#64748b", display: "block", marginBottom: "2px" }}>Platforms Ready:</span>
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-                    {["Instagram", "Facebook", "TikTok", "X", "Snapchat"].map((p) => (
+                    {["Instagram", "Facebook"].map((p) => (
                       <span key={p} style={{ padding: "3px 8px", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
                         ✓ {p}
                       </span>
@@ -781,11 +900,91 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
           }}>
             <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: "800", color: "#f8fafc" }}>
-              Automated Dispatch Notification Authorization
+              Review and Launch Campaign
             </h2>
             <p style={{ fontSize: "13px", color: "#94a3b8", lineHeight: "1.5", margin: "0 0 20px 0" }}>
-              Please enter the responsible media buyer / employee contact details. If platform review bots flag policy issues, our automated LLM agent will inspect and send a direct SMS & Email alert before re-launching.
+              Enter the responsible media buyer email address before launch. Launch Gate dispatches rejection, blocker, and suspension alerts directly to this address via SMTP email.
             </p>
+
+            {/* Target Platforms Checkboxes */}
+            <div style={{ marginBottom: "18px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <label style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1" }}>
+                  Meta Launch Destinations ({selectedPlatforms.length}/{AVAILABLE_PLATFORMS.length}):
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedPlatforms.length === AVAILABLE_PLATFORMS.length) {
+                      setSelectedPlatforms([]);
+                    } else {
+                      setSelectedPlatforms(AVAILABLE_PLATFORMS.map((p) => p.id));
+                    }
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#38bdf8",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    padding: "2px 6px",
+                    fontWeight: "600",
+                  }}
+                >
+                  {selectedPlatforms.length === AVAILABLE_PLATFORMS.length ? "Deselect All" : "Select All Meta Destinations"}
+                </button>
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                gap: "8px",
+                background: "rgba(8, 12, 20, 0.6)",
+                padding: "10px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+              }}>
+                {AVAILABLE_PLATFORMS.map((p) => {
+                  const isChecked = selectedPlatforms.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px 10px",
+                        borderRadius: "8px",
+                        background: isChecked ? "rgba(56, 189, 248, 0.15)" : "rgba(255, 255, 255, 0.03)",
+                        border: `1px solid ${isChecked ? "rgba(56, 189, 248, 0.4)" : "rgba(255, 255, 255, 0.08)"}`,
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        color: isChecked ? "#f8fafc" : "#94a3b8",
+                        fontWeight: isChecked ? "600" : "400",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          setSelectedPlatforms((prev) =>
+                            prev.includes(p.id) ? prev.filter((item) => item !== p.id) : [...prev, p.id]
+                          );
+                        }}
+                        style={{ cursor: "pointer", accentColor: "#38bdf8" }}
+                      />
+                      <span>{p.icon}</span>
+                      <span>{p.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {selectedPlatforms.length === 0 && (
+                <p style={{ margin: "6px 0 0 0", fontSize: "11px", color: "#f43f5e" }}>
+                  ⚠️ Select at least one platform to proceed with launch.
+                </p>
+              )}
+            </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "24px" }}>
               <div>
@@ -795,13 +994,13 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 <input
                   type="email"
                   value={employeeEmail}
-                  onChange={(e) => setEmployeeEmail(e.target.value)}
-                  placeholder="e.g. sarah.ops@launchgate.com"
+                  onChange={(e) => updateLauncherEmail(e.target.value)}
+                  placeholder="e.g. buyer@launchgate.com"
                   style={{
                     width: "100%",
                     padding: "10px 14px",
                     background: "rgba(8, 12, 20, 0.8)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    border: `1px solid ${!employeeEmail || !employeeEmail.includes("@") ? "rgba(244, 63, 94, 0.4)" : "rgba(255, 255, 255, 0.15)"}`,
                     borderRadius: "8px",
                     color: "#ffffff",
                     fontSize: "13px",
@@ -809,22 +1008,26 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                     boxSizing: "border-box",
                   }}
                 />
+                {(!employeeEmail || !employeeEmail.includes("@")) && (
+                  <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#f43f5e" }}>
+                    ⚠️ Valid email containing '@' is required.
+                  </p>
+                )}
               </div>
-
               <div>
                 <label style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", display: "block", marginBottom: "6px" }}>
-                  Employee Phone Number (for SMS policy alerts):
+                  Alert Phone Number:
                 </label>
                 <input
                   type="tel"
                   value={employeePhone}
-                  onChange={(e) => setEmployeePhone(e.target.value)}
-                  placeholder="e.g. +1 (555) 382-9910"
+                  onChange={(e) => updateLauncherPhone(e.target.value)}
+                  placeholder="e.g. +1 555 123 4567"
                   style={{
                     width: "100%",
                     padding: "10px 14px",
                     background: "rgba(8, 12, 20, 0.8)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    border: `1px solid ${employeePhone.replace(/\D/g, "").length < 7 ? "rgba(244, 63, 94, 0.4)" : "rgba(255, 255, 255, 0.15)"}`,
                     borderRadius: "8px",
                     color: "#ffffff",
                     fontSize: "13px",
@@ -832,6 +1035,11 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                     boxSizing: "border-box",
                   }}
                 />
+                {employeePhone.replace(/\D/g, "").length < 7 && (
+                  <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#f43f5e" }}>
+                    ⚠️ A phone number with at least 7 digits is required.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -851,23 +1059,36 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               >
                 Cancel
               </button>
-              <button
-                onClick={handleConfirmLaunch}
-                disabled={isLaunching}
-                style={{
-                  padding: "10px 24px",
-                  background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                  border: "none",
-                  borderRadius: "8px",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: "700",
-                  cursor: isLaunching ? "not-allowed" : "pointer",
-                  boxShadow: "0 4px 14px rgba(16, 185, 129, 0.3)",
-                }}
-              >
-                {isLaunching ? "Connecting MCP Servers..." : "Authorize & Launch via MCP Agents 🚀"}
-              </button>
+              {(() => {
+                const isLaunchDisabled =
+                  isLaunching ||
+                  selectedPlatforms.length === 0 ||
+                  !employeeEmail ||
+                  !employeeEmail.includes("@") ||
+                  employeePhone.replace(/\D/g, "").length < 7;
+                return (
+                  <button
+                    onClick={handleConfirmLaunch}
+                    disabled={isLaunchDisabled}
+                    style={{
+                      padding: "10px 24px",
+                      background: isLaunchDisabled
+                        ? "rgba(255, 255, 255, 0.1)"
+                        : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                      border: "none",
+                      borderRadius: "8px",
+                      color: isLaunchDisabled ? "#64748b" : "#ffffff",
+                      fontSize: "13px",
+                      fontWeight: "700",
+                      cursor: isLaunchDisabled ? "not-allowed" : "pointer",
+                      boxShadow: isLaunchDisabled ? "none" : "0 4px 14px rgba(16, 185, 129, 0.3)",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {isLaunching ? "Connecting MCP Servers..." : "Authorize & Launch via MCP Agents 🚀"}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>

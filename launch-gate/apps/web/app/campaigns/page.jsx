@@ -263,7 +263,7 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
                     </div>
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>
@@ -272,10 +272,14 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
       {/* Photorealistic Feed Preview Modal */}
       {previewAd && (
         <SocialFeedModal
+          ad={previewAd}
           adId={previewAd.ad_id}
           platform={previewAd.platform}
           headline={previewAd.headline}
           clientHandle={previewAd.handle}
+          clientId={previewAd.client_id}
+          destinationUrl={previewAd.destination_url}
+          reviewStatus={previewAd.platform_review_status}
           onClose={() => setPreviewAd(null)}
         />
       )}

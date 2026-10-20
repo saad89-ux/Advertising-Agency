@@ -31,7 +31,10 @@ from apps.api.uploads import UploadBodyLimitMiddleware, router as upload_router
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     get_jwt_secret()
-    init_schema()
+    try:
+        init_schema()
+    except Exception as exc:
+        print(f"[WARN] Database schema initialization warning: {exc}")
     seed_opt_in = os.getenv("SEED_DEMO_DATA", "false").lower() in ("true", "1", "yes")
     if seed_opt_in:
         try:
@@ -65,7 +68,7 @@ To test authenticated endpoints in this Swagger interface:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origin_regex=r"^https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

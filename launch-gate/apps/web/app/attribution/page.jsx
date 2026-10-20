@@ -320,12 +320,9 @@ export default function AttributionPage() {
                   outline: "none",
                 }}
               >
-                <option value="">All Platforms</option>
+                <option value="">All Meta Platforms</option>
                 <option value="instagram">Instagram</option>
-                <option value="tiktok">TikTok</option>
                 <option value="facebook">Meta / Facebook</option>
-                <option value="x">X</option>
-                <option value="snapchat">Snapchat</option>
               </select>
 
               <select

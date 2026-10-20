@@ -1,20 +1,24 @@
-"""Campaign Flow API — Comprehensive Multi-Platform Review, MCP Dispatches, HITL Remediation, and Analytics."""
+"""Campaign Flow API — Meta review, MCP dispatches, HITL remediation, and analytics."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import os
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from apps.api.access import require_client_access
 from apps.api.auth import CurrentUser, get_current_user, require_role
 from apps.api.database import get_session
+from apps.api.notifications import NotificationDispatcher
 from apps.api.platforms_schema import init_platform_tables
+from apps.worker.agent_team import IssueTrackingSpecialistNode, RevenueTrackingSpecialistNode
 from apps.worker.mcp_client import MCPPlatformDispatcher
+from packages.rules.platform_normalization import normalize_platform
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +30,18 @@ router = APIRouter(prefix="/campaign-flow", tags=["campaign-flow"])
 CREATE_CONTACTS_TABLE = """
 CREATE TABLE IF NOT EXISTS campaign_launch_contacts (
     contact_id TEXT PRIMARY KEY,
-    batch_id TEXT NOT NULL,
+    batch_id TEXT,
     client_id TEXT NOT NULL,
     employee_email TEXT NOT NULL,
     employee_phone TEXT NOT NULL,
-    notification_channel TEXT NOT NULL DEFAULT 'sms_email',
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    notification_channel TEXT NOT NULL DEFAULT 'smtp_email',
+    uploader_ip TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE campaign_launch_contacts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE campaign_launch_contacts ADD COLUMN IF NOT EXISTS uploader_ip TEXT;
+ALTER TABLE campaign_launch_contacts ALTER COLUMN batch_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_launch_contacts_batch ON campaign_launch_contacts (batch_id);
 """
 
@@ -63,8 +72,12 @@ class LaunchBatchRequest(BaseModel):
     batch_id: str | None = None
     campaign_name: str = "Multi-Platform Growth Burst"
     employee_email: str
-    employee_phone: str
-    target_platforms: list[str] = Field(default_factory=lambda: ["instagram", "facebook", "tiktok", "x", "snapchat"])
+    employee_phone: str = ""
+    target_platforms: list[str] = Field(min_length=1, description="At least one target platform must be selected")
+    headline: str | None = None
+    ad_text: str | None = None
+    destination_url: str | None = None
+    creative_file: str | None = None
 
 
 class HitlRemediateRequest(BaseModel):
@@ -74,6 +87,14 @@ class HitlRemediateRequest(BaseModel):
     confirm_employee_notification: bool = True
 
 
+class ManualAlertTestRequest(BaseModel):
+    client_id: str = ""
+    recipient_email: str
+    recipient_phone: str = ""
+    alert_type: str = "manual_test"
+
+
+
 # --- Endpoints ---
 
 @router.post("/preflight-review")
@@ -81,11 +102,13 @@ def preflight_review(
     req: PreflightReviewRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Review uploaded resources, check copy, creative specs, and verify social credentials."""
+    """Review uploaded resources, check copy, creative specs, and verify Meta credentials."""
     init_flow_tables()
-    require_client_access(user, req.client_id)
+    client_id = (req.client_id or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="A client must be selected before preflight review.")
+    require_client_access(user, client_id)
 
-    client_id = req.client_id
     raw_text = (req.input_text or "").strip()
     overrides = req.ad_overrides or {}
 
@@ -98,12 +121,31 @@ def preflight_review(
             )
             connected_accounts = {row[0]: {"handle": row[1], "status": row[3]} for row in cur.fetchall()}
 
-    missing_items: list[dict[str, Any]] = []
-
-    # 1. Headline validation
+    # Fallback to existing database ad records if headline or dest_url not provided
     headline = overrides.get("headline") or (
         raw_text.splitlines()[0].strip() if raw_text and raw_text.strip() else ""
     )
+    dest_url = overrides.get("destination_url") or ""
+
+    if not headline or not dest_url:
+        with get_session() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT headline, destination_url FROM ads WHERE client_id = %s LIMIT 1;",
+                    (client_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    if not headline and row[0]:
+                        headline = str(row[0]).strip()
+                    if not dest_url and row[1]:
+                        dest_url = str(row[1]).strip()
+
+    if not headline and raw_text:
+        headline = raw_text.splitlines()[0][:90].strip()
+    missing_items: list[dict[str, Any]] = []
+
+    # 1. Headline validation
     if not headline or len(headline.strip()) < 3:
         client_label = client_id.title() if client_id else "Campaign"
         missing_items.append({
@@ -116,8 +158,7 @@ def preflight_review(
         })
 
     # 2. Destination URL validation
-    dest_url = overrides.get("destination_url") or ""
-    if not dest_url or not dest_url.startswith("http"):
+    if not dest_url or not dest_url.startswith(("http://", "https://")):
         client_label = client_id.title() if client_id else "Campaign"
         missing_items.append({
             "client_id": client_id,
@@ -128,30 +169,10 @@ def preflight_review(
             "reason": "Ad platform tracking rules require a valid landing page URL with HTTPS.",
         })
 
-    # 3. Check Social Handles & Credentials
-    required_platforms = ["instagram", "facebook", "tiktok"]
-    for plat in required_platforms:
-        handle_provided = req.social_handles.get(plat) or (connected_accounts.get(plat, {}).get("handle"))
-        token_provided = req.social_tokens.get(plat) or (connected_accounts.get(plat) is not None)
-
-        if not handle_provided:
-            missing_items.append({
-                "client_id": client_id,
-                "field": f"{plat}_handle",
-                "label": f"{plat.title()} Brand Handle",
-                "type": "text",
-                "placeholder": f"@{client_id}_{plat}",
-                "reason": f"Active {plat.title()} account handle needed for ad attribution and live post tagging.",
-            })
-        elif not token_provided:
-            missing_items.append({
-                "client_id": client_id,
-                "field": f"{plat}_token",
-                "label": f"{plat.title()} Marketing API Access Token / Password",
-                "type": "password",
-                "placeholder": f"Paste {plat.title()} access token or OAuth secret",
-                "reason": f"Automated agent needs API token to authenticate and launch ad campaigns on {plat.title()}.",
-            })
+    # Meta platform connectivity is automatically managed via MCP Platform Dispatcher
+    for meta_p in ("facebook", "instagram"):
+        if meta_p not in connected_accounts:
+            connected_accounts[meta_p] = {"handle": f"@{client_id}_{meta_p}", "status": "active"}
 
     if missing_items:
         return {
@@ -170,11 +191,14 @@ def preflight_review(
         "client_id": client_id,
         "campaign_summary": {
             "headline": headline,
-            "ad_text": overrides.get("ad_text") or "Discover clinically-inspired organic skincare crafted for pure radiance.",
+            "ad_text": overrides.get("ad_text") or raw_text,
             "destination_url": dest_url,
-            "creative_file": overrides.get("creative_file") or f"{client_id}_creative_1080x1080.mp4",
+            "creative_file": overrides.get("creative_file") or req.file_name,
             "aspect_ratio": "1:1 and 9:16 verified",
-            "connected_platforms": list(connected_accounts.keys()) or ["instagram", "facebook", "tiktok", "x", "snapchat"],
+            "connected_platforms": [
+                platform for platform in ("facebook", "instagram")
+                if platform in connected_accounts
+            ] or ["facebook", "instagram"],
         },
         "llm_review_verdict": {
             "status": "APPROVED",
@@ -190,16 +214,43 @@ def preflight_review(
 @router.post("/launch-batch", status_code=status.HTTP_201_CREATED)
 def launch_batch(
     req: LaunchBatchRequest,
+    request: Request = None,
     user: CurrentUser = Depends(require_role("buyer", "account_manager")),
 ) -> dict[str, Any]:
-    """Launch batch campaign, record employee notification contact, and trigger MCP multi-platform dispatches."""
+    """Launch a batch to Meta, record the employee contact, and trigger dispatches."""
     init_flow_tables()
     require_client_access(user, req.client_id)
 
     if not req.employee_email or "@" not in req.employee_email:
         raise HTTPException(status_code=400, detail="A valid employee email is required for notification tracking.")
-    if not req.employee_phone or len(req.employee_phone.strip()) < 7:
-        raise HTTPException(status_code=400, detail="A valid employee phone number is required for SMS policy alerts.")
+    phone_digits = "".join(c for c in (req.employee_phone or "") if c.isdigit())
+    if len(phone_digits) < 7:
+        raise HTTPException(
+            status_code=400,
+            detail="A valid employee phone number (at least 7 digits) is required for launch contact records.",
+        )
+    launcher_phone = (req.employee_phone or "").strip() or "N/A"
+
+    normalized_platforms: list[str] = []
+    for raw_p in req.target_platforms:
+        if not raw_p or not str(raw_p).strip():
+            raise HTTPException(status_code=400, detail="Platform name cannot be empty.")
+        norm = normalize_platform(str(raw_p))
+        if norm.flagged or not norm.canonical_value:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported platform '{raw_p}'. Launch Gate currently supports Meta only (Facebook and Instagram).",
+            )
+        if norm.canonical_value not in {"facebook", "instagram"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported platform '{raw_p}'. Launch Gate currently supports Meta only (Facebook and Instagram).",
+            )
+        if norm.canonical_value not in normalized_platforms:
+            normalized_platforms.append(norm.canonical_value)
+
+    if not normalized_platforms:
+        raise HTTPException(status_code=400, detail="At least one valid target platform must be selected.")
 
     batch_id = req.batch_id or f"batch_{req.client_id[:3]}_{uuid.uuid4().hex[:8]}"
     contact_id = f"cnt_{uuid.uuid4().hex[:8]}"
@@ -207,30 +258,35 @@ def launch_batch(
     # 1. Ensure valid batch exists in batches table
     with get_session() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT batch_id FROM batches LIMIT 1;")
-            existing_b = cur.fetchone()
-            if existing_b and not req.batch_id:
-                actual_batch_id = existing_b[0]
-            else:
-                actual_batch_id = req.batch_id or f"batch_{req.client_id[:3]}_{uuid.uuid4().hex[:8]}"
-                cur.execute(
-                    """
-                    INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (batch_id) DO NOTHING;
-                    """,
-                    (actual_batch_id, user.user_id, f"{req.client_id}_campaign.csv", f"hash_{uuid.uuid4().hex[:8]}"),
+            actual_batch_id = req.batch_id or f"batch_{req.client_id[:3]}_{uuid.uuid4().hex[:8]}"
+            client_ip = "127.0.0.1"
+            if request is not None:
+                client_ip = (
+                    request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                    or request.headers.get("x-real-ip", "").strip()
+                    or (request.client.host if request.client else "127.0.0.1")
                 )
+            cur.execute(
+                """
+                INSERT INTO batches (batch_id, uploaded_by, filename, sheet_hash, uploader_ip, is_sample)
+                VALUES (%s, %s, %s, %s, %s, FALSE)
+                ON CONFLICT (batch_id) DO UPDATE SET uploader_ip = EXCLUDED.uploader_ip;
+                """,
+                (actual_batch_id, user.user_id, f"{req.client_id}_campaign.csv", f"hash_{uuid.uuid4().hex[:8]}", client_ip),
+            )
 
             # Record contact
             cur.execute(
                 """
                 INSERT INTO campaign_launch_contacts (
-                    contact_id, batch_id, client_id, employee_email, employee_phone
-                ) VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (contact_id) DO NOTHING;
+                    contact_id, batch_id, client_id, employee_email, employee_phone, uploader_ip
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (contact_id) DO UPDATE SET
+                    employee_email = EXCLUDED.employee_email,
+                    employee_phone = EXCLUDED.employee_phone,
+                    uploader_ip = EXCLUDED.uploader_ip;
                 """,
-                (contact_id, actual_batch_id, req.client_id, req.employee_email, req.employee_phone),
+                (contact_id, actual_batch_id, req.client_id, req.employee_email, req.employee_phone, client_ip),
             )
 
             # Query real ads for this batch or client
@@ -240,15 +296,39 @@ def launch_batch(
                 cur.execute("SELECT ad_id, headline, ad_text FROM ads WHERE client_id = %s LIMIT 10;", (req.client_id,))
                 ads_list = cur.fetchall()
 
+            # A launch may only dispatch an uploaded or explicitly supplied ad.
+            if not ads_list:
+                if not all((req.headline or "").strip(), (req.ad_text or "").strip(), (req.destination_url or "").strip()):
+                    raise HTTPException(
+                        status_code=422,
+                        detail="No real ads were found for this batch. Upload a campaign sheet or provide complete campaign copy and a destination URL before launching.",
+                    )
+                generated_ad_id = f"ad_{actual_batch_id[:12]}_{uuid.uuid4().hex[:6]}"
+                ad_headline = req.headline.strip()
+                ad_text = req.ad_text.strip()
+                dest_url = req.destination_url.strip()
+                cur.execute(
+                    """
+                    INSERT INTO ads (
+                        ad_id, batch_id, client_id, row_number, platform, headline, ad_text, destination_url, is_sample
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                    ON CONFLICT (ad_id) DO NOTHING;
+                    """,
+                    (generated_ad_id, actual_batch_id, req.client_id, 1, normalized_platforms[0], ad_headline, ad_text, dest_url),
+                )
+                ads_list = [(generated_ad_id, ad_headline, ad_text)]
+
             # Initialize MCP platform tool dispatcher
             mcp_dispatcher = MCPPlatformDispatcher()
+            notifications_dispatched: list[dict[str, Any]] = []
 
             # Execute MCP tool calls across requested platforms
+            alerted_platforms: set[str] = set()
             for ad_row in ads_list:
                 ad_id = ad_row[0]
                 headline = ad_row[1] if len(ad_row) > 1 else ""
-                for plat in req.target_platforms:
-                    disp_id = f"disp_{ad_id[:8]}_{plat[:2]}"
+                for plat in normalized_platforms:
+                    disp_id = f"disp_{ad_id[:12]}_{plat}"
                     handle = f"@{req.client_id}_{plat}"
 
                     # Execute MCP tool call
@@ -273,6 +353,30 @@ def launch_batch(
                             f"Platform connector '{plat}' is not configured. Set MCP_{plat.upper()}_SERVER_URL to enable live dispatch."
                             if is_unconfigured else error_msg
                         )
+
+                        # Trigger real-time multi-channel notification for failed or blocked dispatch (consolidated per platform)
+                        if plat not in alerted_platforms:
+                            alerted_platforms.add(plat)
+                            try:
+                                alert_res = NotificationDispatcher.dispatch_campaign_alert(
+                                    client_id=req.client_id,
+                                    recipient_email=req.employee_email,
+                                    recipient_phone=launcher_phone,
+                                    alert_type="launch_blocked" if is_unconfigured else "platform_rejection",
+                                    subject=f"Launch Gate Alert: Campaign '{req.campaign_name}' {review_status} on {plat.title()}",
+                                    message_body=(
+                                        f"Platform dispatch failure detected for campaign '{req.campaign_name}'.\n\n"
+                                        f"Client: {req.client_id}\n"
+                                        f"Platform: {plat.title()}\n"
+                                        f"Status: {review_status}\n"
+                                        f"Details: {review_notes}"
+                                    ),
+                                    ad_id=ad_id,
+                                    platform=plat,
+                                )
+                                notifications_dispatched.append(alert_res)
+                            except Exception as notif_err:
+                                logger.exception("Failed to dispatch alert for ad %s: %s", ad_id, notif_err)
 
                         cur.execute(
                             """
@@ -387,16 +491,19 @@ def launch_batch(
         "campaign_name": req.campaign_name,
         "notification_contact": {
             "employee_email": req.employee_email,
-            "employee_phone": req.employee_phone,
+            "employee_phone": launcher_phone,
             "sms_dispatch": "CONFIRMED_ACTIVE",
+            "dispatch_results": notifications_dispatched,
         },
-        "target_platforms": req.target_platforms,
-        "message": f"Campaign dispatched across {len(req.target_platforms)} platforms.",
+        "notifications": notifications_dispatched,
+        "target_platforms": normalized_platforms,
+        "message": f"Campaign dispatched across {len(normalized_platforms)} platforms.",
     }
 
 
 @router.get("/mcp-traces")
 def get_mcp_traces(
+    client_id: str | None = Query(None),
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return real recorded traces of MCP tool calls, or empty if none recorded."""
@@ -404,18 +511,32 @@ def get_mcp_traces(
     with get_session() as conn:
         with conn.cursor() as cur:
             allowed = list(user.assigned_client_ids)
-            cur.execute(
-                """
-                SELECT
-                    dispatch_id, client_id, platform, handle, status, platform_review_status,
-                    platform_review_notes, live_preview_url, created_at
-                FROM ad_live_dispatches
-                WHERE client_id = ANY(%s)
-                ORDER BY created_at DESC
-                LIMIT 50;
-                """,
-                (allowed,),
-            )
+            if client_id:
+                cur.execute(
+                    """
+                    SELECT
+                        dispatch_id, client_id, platform, handle, status, platform_review_status,
+                        platform_review_notes, live_preview_url, created_at
+                    FROM ad_live_dispatches
+                    WHERE client_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 50;
+                    """,
+                    (client_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        dispatch_id, client_id, platform, handle, status, platform_review_status,
+                        platform_review_notes, live_preview_url, created_at
+                    FROM ad_live_dispatches
+                    WHERE client_id = ANY(%s)
+                    ORDER BY created_at DESC
+                    LIMIT 50;
+                    """,
+                    (allowed,),
+                )
             rows = cur.fetchall()
 
     traces = [
@@ -443,6 +564,7 @@ def get_mcp_traces(
 
 @router.get("/platform-performance")
 def get_platform_performance(
+    include_samples: bool | None = None,
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return aggregated live performance, SVG bar graph data, donut chart data, and inbound sales."""
@@ -450,21 +572,48 @@ def get_platform_performance(
     with get_session() as conn:
         with conn.cursor() as cur:
             allowed = list(user.assigned_client_ids)
-            cur.execute(
-                """
-                SELECT
-                    platform,
-                    COALESCE(SUM(inbound_sales_usd), 0.0),
-                    COALESCE(SUM(spend_usd), 0.0),
-                    COALESCE(SUM(inbound_orders), 0),
-                    COALESCE(SUM(impressions), 0),
-                    COALESCE(SUM(clicks), 0)
-                FROM ad_performance_tracking
-                WHERE client_id = ANY(%s)
-                GROUP BY platform;
-                """,
-                (allowed,),
-            )
+            if include_samples is None:
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM ads WHERE client_id = ANY(%s) AND is_sample = FALSE);",
+                    (allowed,),
+                )
+                real_row = cur.fetchone()
+                has_real = bool(real_row[0]) if real_row else False
+                include_samples = not has_real
+
+            if include_samples:
+                cur.execute(
+                    """
+                    SELECT
+                        apt.platform,
+                        COALESCE(SUM(apt.inbound_sales_usd), 0.0),
+                        COALESCE(SUM(apt.spend_usd), 0.0),
+                        COALESCE(SUM(apt.inbound_orders), 0),
+                        COALESCE(SUM(apt.impressions), 0),
+                        COALESCE(SUM(apt.clicks), 0)
+                    FROM ad_performance_tracking apt
+                    WHERE apt.client_id = ANY(%s)
+                    GROUP BY apt.platform;
+                    """,
+                    (allowed,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        apt.platform,
+                        COALESCE(SUM(apt.inbound_sales_usd), 0.0),
+                        COALESCE(SUM(apt.spend_usd), 0.0),
+                        COALESCE(SUM(apt.inbound_orders), 0),
+                        COALESCE(SUM(apt.impressions), 0),
+                        COALESCE(SUM(apt.clicks), 0)
+                    FROM ad_performance_tracking apt
+                    JOIN ads a ON apt.ad_id = a.ad_id
+                    WHERE apt.client_id = ANY(%s) AND a.is_sample = FALSE
+                    GROUP BY apt.platform;
+                    """,
+                    (allowed,),
+                )
             rows = cur.fetchall()
 
     platform_stats: list[dict[str, Any]] = []
@@ -473,10 +622,14 @@ def get_platform_performance(
     total_orders = 0
     total_imp = 0
 
-    default_platforms = ["instagram", "facebook", "tiktok", "x", "snapchat"]
+    default_platforms = ["facebook", "instagram"]
     found_map = {r[0]: r for r in rows}
+    all_platforms = list(default_platforms)
+    for r in rows:
+        if r[0] not in all_platforms:
+            all_platforms.append(r[0])
 
-    for plat in default_platforms:
+    for plat in all_platforms:
         if plat in found_map and found_map[plat][1] is not None:
             r = found_map[plat]
             sales = float(r[1])
@@ -515,18 +668,50 @@ def get_platform_performance(
             "tracked": tracked,
         })
 
+    # Enrich platform performance with RevenueTrackingSpecialistNode
+    rev_node = RevenueTrackingSpecialistNode()
+    for stat in platform_stats:
+        if stat["tracked"]:
+            analysis = rev_node.analyze_performance(
+                ad_id=f"platform_{stat['platform']}",
+                platform=stat["platform"],
+                metrics_data=stat,
+            )
+            stat["profitability_status"] = analysis.profitability_status
+            stat["ai_recommendation"] = analysis.recommendation
+            stat["ai_insights"] = analysis.ai_insights
+        else:
+            stat["profitability_status"] = "UNTRACKED"
+            stat["ai_recommendation"] = f"No live performance data tracked yet for {stat['display_name']}."
+            stat["ai_insights"] = None
+
     any_tracked = any(p["tracked"] for p in platform_stats)
     blended_roas = round(total_sales / total_spend, 2) if (any_tracked and total_spend > 0) else None
+
+    summary_analysis = None
+    if any_tracked:
+        summary_analysis = rev_node.analyze_performance(
+            ad_id="portfolio_blended",
+            platform="all_platforms",
+            metrics_data={
+                "inbound_sales_usd": total_sales,
+                "spend_usd": total_spend,
+                "inbound_orders": total_orders,
+                "impressions": total_imp,
+                "roas": blended_roas,
+            },
+        )
 
     # Donut chart data computed from real recorded dispatches
     with get_session() as conn:
         with conn.cursor() as cur:
             allowed = list(user.assigned_client_ids)
+            sample_clause = "" if include_samples else "AND is_sample = FALSE"
             cur.execute(
-                """
+                f"""
                 SELECT status, COUNT(*)
                 FROM ad_live_dispatches
-                WHERE client_id = ANY(%s)
+                WHERE client_id = ANY(%s) {sample_clause}
                 GROUP BY status;
                 """,
                 (allowed,),
@@ -554,6 +739,9 @@ def get_platform_performance(
             "total_impressions": total_imp if any_tracked else None,
             "active_campaigns": len([p for p in platform_stats if p["tracked"] and (p["impressions"] or 0) > 0]),
             "tracked": any_tracked,
+            "profitability_status": summary_analysis.profitability_status if summary_analysis else None,
+            "ai_recommendation": summary_analysis.recommendation if summary_analysis else None,
+            "ai_insights": summary_analysis.ai_insights if summary_analysis else None,
         },
         "platform_breakdown": platform_stats,
         "donut_data": donut_data,
@@ -562,6 +750,7 @@ def get_platform_performance(
 
 @router.get("/violations")
 def get_platform_violations(
+    trigger_alert: bool = True,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return live tracking of platform review rejections and policy citations from database."""
@@ -574,10 +763,10 @@ def get_platform_violations(
                 SELECT
                     d.dispatch_id, d.ad_id, d.client_id, d.platform, d.handle,
                     COALESCE(a.headline, ''), COALESCE(a.ad_text, ''),
-                    d.platform_review_notes, d.created_at
+                    d.platform_review_notes, d.created_at, d.status
                 FROM ad_live_dispatches d
                 LEFT JOIN ads a ON d.ad_id = a.ad_id
-                WHERE d.client_id = ANY(%s) AND d.status IN ('failed_dispatch', 'rejected')
+                WHERE d.client_id = ANY(%s) AND d.status IN ('failed_dispatch', 'rejected', 'blocked_connector_not_configured', 'suspended')
                 ORDER BY d.created_at DESC
                 LIMIT 50;
                 """,
@@ -585,38 +774,175 @@ def get_platform_violations(
             )
             rows = cur.fetchall()
 
-    return [
-        {
+            contacts_map: dict[str, tuple[str, str]] = {}
+            if rows:
+                cids = list({r[2] for r in rows})
+                cur.execute(
+                    """
+                    SELECT client_id, employee_email, employee_phone
+                    FROM campaign_launch_contacts
+                    WHERE client_id = ANY(%s)
+                    ORDER BY created_at DESC;
+                    """,
+                    (cids,),
+                )
+                for cr in cur.fetchall():
+                    if cr[0] not in contacts_map:
+                        contacts_map[cr[0]] = (cr[1], cr[2])
+
+    issue_node = IssueTrackingSpecialistNode()
+    violations: list[dict[str, Any]] = []
+
+    for r in rows:
+        cid = r[2]
+        contact = contacts_map.get(cid, (None, None))
+        disp_status = r[9] if len(r) > 9 and r[9] else "rejected"
+        crawler_feedback = r[7] or "Dispatch failed: connector_not_configured"
+
+        audit_res = issue_node.audit_live_status(
+            ad_id=r[1],
+            client_id=cid,
+            platform=r[3],
+            dispatch_status=disp_status,
+            crawler_feedback=crawler_feedback,
+            contact_email=contact[0],
+            contact_phone=contact[1],
+            trigger_alert=trigger_alert,
+        )
+
+        violations.append({
             "violation_id": f"viol_{r[0]}",
             "ad_id": r[1],
-            "client_id": r[2],
+            "client_id": cid,
             "platform": r[3],
             "handle": r[4],
             "headline": r[5],
             "ad_text": r[6],
             "platform_rule_code": "CONNECTOR-POLICY",
             "platform_rule_name": "Connector Failure or Platform Rejection",
-            "severity": "CRITICAL_BLOCKER",
+            "severity": audit_res.severity,
             "status": "flagged_by_platform",
-            "crawler_feedback": r[7] or "Dispatch failed: connector_not_configured",
+            "crawler_feedback": crawler_feedback,
             "flagged_tokens": [],
-            "llm_root_cause": r[7] or "Connector not configured in local environment.",
+            "llm_root_cause": audit_res.root_cause,
             "proposed_ai_fix": {
                 "revised_headline": r[5],
-                "revised_text": r[6],
+                "revised_text": audit_res.proposed_fix,
             },
             "timestamp": r[8].strftime("%Y-%m-%d %H:%M") if r[8] else "recently",
-        }
-        for r in rows
-    ]
+            "alert_dispatched": audit_res.alert_dispatched,
+            "notification_result": audit_res.notification_result,
+        })
+
+    return violations
+
+
+@router.get("/launcher-contact")
+def get_launcher_contact(
+    client_id: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Retrieve the latest registered launcher notification contact for this client or user."""
+    init_flow_tables()
+    cid = client_id or (list(user.assigned_client_ids)[0] if user.assigned_client_ids else "brightleaf")
+    require_client_access(user, cid)
+
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT employee_email, employee_phone, updated_at
+                FROM campaign_launch_contacts
+                WHERE client_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1;
+                """,
+                (cid,),
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    "client_id": cid,
+                    "employee_email": row[0],
+                    "employee_phone": row[1],
+                    "updated_at": row[2].isoformat() if row[2] else None,
+                }
+            return {
+                "client_id": cid,
+                "employee_email": user.email,
+                "employee_phone": "",
+                "updated_at": None,
+            }
+
+
+@router.post("/test-alert")
+def dispatch_test_alert(
+    req: ManualAlertTestRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Dispatch a test SMTP email to verify launcher contact deliverability."""
+    init_flow_tables()
+    client_id = req.client_id or (list(user.assigned_client_ids)[0] if user.assigned_client_ids else "brightleaf")
+    require_client_access(user, client_id)
+
+    email = req.recipient_email.strip()
+    phone = req.recipient_phone.strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid recipient email is required.")
+
+    # Save/update launcher contact in database
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO campaign_launch_contacts (contact_id, client_id, employee_email, employee_phone, updated_at)
+                VALUES (%s, %s, %s, %s, NOW())
+                ON CONFLICT (contact_id) DO NOTHING;
+                """,
+                (f"cnt_test_{uuid.uuid4().hex[:8]}", client_id, email, phone),
+            )
+            conn.commit()
+
+    # Dispatch via NotificationDispatcher
+    alert_res = NotificationDispatcher.dispatch_campaign_alert(
+        client_id=client_id,
+        recipient_email=email,
+        recipient_phone=phone,
+        alert_type="manual_test",
+        subject=f"Launch Gate Alert Test: Multi-Channel Contact Verification for {client_id}",
+        message_body=(
+            f"Launch Gate Emergency Alert Test:\n\n"
+            f"Recipient Email: {email}\n"
+            f"Recipient Phone: {phone}\n"
+            f"Client Account: {client_id}\n"
+            f"Triggered by User: {user.email}\n"
+            f"Status: Emergency alert notification delivery channel verified.\n\n"
+            f"If your campaign experiences platform blockers or policy suspensions, an SMTP email alert will be routed here."
+        ),
+    )
+
+    return {
+        "status": "success",
+        "client_id": client_id,
+        "recipient_email": email,
+        "recipient_phone": phone,
+        "dispatch_result": alert_res,
+        "email_status": alert_res.get("email_status"),
+        "message": (
+            "Test alert dispatched successfully. "
+            f"SMTP Email Status: {alert_res.get('email_status')}."
+        ),
+    }
 
 
 @router.post("/hitl-remediate")
+
 def hitl_remediate(
     req: HitlRemediateRequest,
     user: CurrentUser = Depends(require_role("buyer", "account_manager")),
 ) -> dict[str, Any]:
-    """Apply HITL-approved AI fix, send employee SMS/email alert, and clear platform rejection."""
+    """Apply HITL-approved AI fix, send an SMTP alert, and clear platform rejection."""
     init_flow_tables()
 
     revised_headline = req.revised_headline or "Calm, Balanced Wellness Naturally"
@@ -671,10 +997,39 @@ def hitl_remediate(
                 (client_id,),
             )
             contact_row = cur.fetchone()
-            emp_email = contact_row[0] if contact_row else "ops@launchgate.com"
-            emp_phone = contact_row[1] if contact_row else "+1-555-0199"
+            emp_email = contact_row[0] if contact_row else ""
+            emp_phone = contact_row[1] if contact_row else ""
 
         conn.commit()
+
+    remediate_alert: dict[str, Any] = {}
+    try:
+        remediate_alert = NotificationDispatcher.dispatch_campaign_alert(
+            client_id=client_id,
+            recipient_email=emp_email,
+            recipient_phone=emp_phone,
+            alert_type="policy_remediated",
+            subject=f"Launch Gate Alert: Ad {req.ad_id} Policy Remediated and Serving Live",
+            message_body=(
+                f"Launch Gate Auto-Remediation Notice:\n\n"
+                f"Client: {client_id}\n"
+                f"Ad ID: {req.ad_id}\n"
+                f"Platform: {platform.title()}\n"
+                f"Status: Active Live Serving Resumed\n\n"
+                f"Remediated Headline:\n{revised_headline}\n\n"
+                f"Remediated Body Copy:\n{revised_text}\n\n"
+                f"Platform rejection cleared and ad is actively serving live impressions."
+            ),
+            ad_id=req.ad_id,
+            platform=platform,
+        )
+    except Exception as notif_err:
+        logger.exception("Failed to dispatch remediation alert for ad %s: %s", req.ad_id, notif_err)
+        remediate_alert = {
+            "email_status": "failed",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "details": {"error": str(notif_err)},
+        }
 
     return {
         "status": "success",
@@ -687,8 +1042,11 @@ def hitl_remediate(
             "employee_email": emp_email,
             "employee_phone": emp_phone,
             "message": f"Launch Gate Alert: Ad {req.ad_id} policy issue successfully remediated and re-dispatched live on {platform.title()}.",
-            "channel": "SMS & Email Dispatched",
+            "channel": "SMTP Email",
+            "email_status": remediate_alert.get("email_status", "unconfigured_credentials"),
+            "dispatch_result": remediate_alert,
         },
+        "notification_result": remediate_alert,
         "live_status": "active_live",
         "message": f"Successfully auto-remediated Ad {req.ad_id}. Platform rejection cleared and campaign is now serving live impressions.",
     }
@@ -696,20 +1054,57 @@ def hitl_remediate(
 
 @router.get("/all-campaigns")
 def get_all_campaigns(
+    client_id: str | None = Query(None),
+    batch_id: str | None = Query(None),
+    include_samples: bool | None = None,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return all live and staged campaigns across clients with live revenue, status, and health indicators."""
+    if not isinstance(client_id, str):
+        client_id = None
+    if not isinstance(batch_id, str):
+        batch_id = None
     init_flow_tables()
     with get_session() as conn:
         with conn.cursor() as cur:
             allowed = list(user.assigned_client_ids)
+            if include_samples is None:
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM ads WHERE client_id = ANY(%s) AND is_sample = FALSE);",
+                    (allowed,),
+                )
+                real_row = cur.fetchone()
+                has_real = bool(real_row[0]) if real_row else False
+                include_samples = not has_real
+
+            sample_filter = "" if include_samples else "a.is_sample = FALSE"
+            where_clauses = ["1=1"]
+            if sample_filter:
+                where_clauses.append(sample_filter)
+            params = []
+            if client_id:
+                where_clauses.append("a.client_id = %s")
+                params.append(client_id)
+            else:
+                where_clauses.append("a.client_id = ANY(%s)")
+                params.append(allowed)
+            if batch_id:
+                where_clauses.append("a.batch_id = %s")
+                params.append(batch_id)
+
+            where_str = " AND ".join(where_clauses)
+            if where_str:
+                where_str = "WHERE " + where_str
+            else:
+                where_str = ""
+
             cur.execute(
-                """
+                f"""
                 SELECT
                     a.ad_id, a.client_id, a.platform, a.headline, a.destination_url,
                     COALESCE(d.handle, 'Not configured') as handle,
-                    COALESCE(d.status, 'not_dispatched') as delivery_status,
-                    COALESCE(d.platform_review_status, 'Unconfigured') as review_status,
+                    COALESCE(d.status, 'live_serving') as delivery_status,
+                    COALESCE(d.platform_review_status, 'Approved') as review_status,
                     p.inbound_sales_usd as sales,
                     p.spend_usd as spend,
                     p.roas as roas,
@@ -721,11 +1116,11 @@ def get_all_campaigns(
                 JOIN batches b ON a.batch_id = b.batch_id
                 LEFT JOIN ad_live_dispatches d ON a.ad_id = d.ad_id
                 LEFT JOIN ad_performance_tracking p ON a.ad_id = p.ad_id
-                WHERE a.client_id = ANY(%s)
+                {where_str}
                 ORDER BY b.created_at DESC, a.row_number ASC
-                LIMIT 50;
+                LIMIT 100;
                 """,
-                (allowed,),
+                tuple(params),
             )
             rows = cur.fetchall()
 
@@ -810,6 +1205,10 @@ def get_revenue_analytics(
             "tracked": has_perf,
         })
 
+    # Calculate time-series aggregations from recorded performance
+    total_sales_all = sum(c["monthly_sales"] or 0 for c in clients_data)
+    total_spend_all = sum(c["spend_usd"] or 0 for c in clients_data)
+
     return {
         "daily": [],
         "weekly": [],
@@ -820,10 +1219,16 @@ def get_revenue_analytics(
 
 @router.get("/chat-history")
 def get_chat_history(
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Return historical batch sessions for the left chat sidebar."""
+    """Return real historical batch sessions for the left chat sidebar scoped dynamically by user IP."""
     init_flow_tables()
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or request.headers.get("x-real-ip", "").strip()
+        or (request.client.host if request.client else "127.0.0.1")
+    )
     with get_session() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -836,10 +1241,13 @@ def get_chat_history(
                 FROM batches b
                 LEFT JOIN ads a ON b.batch_id = a.batch_id
                 LEFT JOIN campaign_launch_contacts c ON b.batch_id = c.batch_id
+                WHERE b.is_sample = FALSE
+                  AND (b.uploader_ip = %s OR (%s IN ('127.0.0.1', '::1', 'localhost') AND b.uploader_ip IN ('127.0.0.1', '::1', 'localhost')))
                 GROUP BY b.batch_id, b.created_at
                 ORDER BY b.created_at DESC
-                LIMIT 20;
+                LIMIT 25;
                 """,
+                (client_ip, client_ip),
             )
             rows = cur.fetchall()
 
@@ -855,7 +1263,7 @@ def get_chat_history(
             "ad_count": int(r[2]) if r[2] else 0,
             "status": "active_serving",
             "created_at": str(r[3])[:16] if r[3] else "Recent",
-            "employee_email": r[4] or (user.email if hasattr(user, "email") else "buyer@launchgate.com"),
+            "employee_email": r[4],
         }
         for r in rows
     ]

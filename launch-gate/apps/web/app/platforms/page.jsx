@@ -512,9 +512,6 @@ export default function PlatformsPage() {
               >
                 <option value="instagram">Instagram Feed / Story</option>
                 <option value="facebook">Meta / Facebook Ads</option>
-                <option value="tiktok">TikTok Spark Ads</option>
-                <option value="snapchat">Snapchat Commercials</option>
-                <option value="x">X / Twitter Sponsored</option>
               </select>
 
               <button
@@ -711,9 +708,6 @@ export default function PlatformsPage() {
                   >
                     <option value="instagram">Instagram</option>
                     <option value="facebook">Meta / Facebook</option>
-                    <option value="tiktok">TikTok</option>
-                    <option value="snapchat">Snapchat</option>
-                    <option value="x">X (Twitter)</option>
                   </select>
                 </div>
 
