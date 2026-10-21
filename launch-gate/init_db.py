@@ -1,15 +1,10 @@
 import os
-from dotenv import load_file
+from dotenv import load_dotenv
 import psycopg
 from pgvector.psycopg import register_vector
 
 # Load environment variables from your .env file
-if os.path.exists(".env"):
-    with open(".env") as f:
-        for line in f:
-            if line.strip() and not line.startswith("#"):
-                key, value = line.strip().split("=", 1)
-                os.environ[key] = value.strip('"').strip("'")
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:mysecretpassword@localhost:5432/launch_gate_test")
 

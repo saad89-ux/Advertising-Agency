@@ -100,6 +100,7 @@ def get_global_dead_letter_ads(
     client_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    batch_id: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve global dead-letter ads across batches visible to assigned clients."""
     target_clients = [client_id] if client_id else allowed_clients
@@ -108,11 +109,11 @@ def get_global_dead_letter_ads(
     SELECT COUNT(*)
     FROM ads a
     JOIN ad_approvals ap ON a.ad_id = ap.ad_id
-    WHERE a.client_id = ANY(%s) AND ap.state = 'dead_letter';
+    WHERE a.client_id = ANY(%s) AND (%s::text IS NULL OR a.batch_id = %s) AND ap.state = 'dead_letter';
     """
     total = 0
     try:
-        cur_count = connection.execute(count_sql, (target_clients,))
+        cur_count = connection.execute(count_sql, (target_clients, batch_id, batch_id))
         row_c = cur_count.fetchone()
         if row_c:
             total = int(row_c[0])
@@ -126,12 +127,12 @@ def get_global_dead_letter_ads(
            ap.rejection_reason, ap.updated_at
     FROM ads a
     JOIN ad_approvals ap ON a.ad_id = ap.ad_id
-    WHERE a.client_id = ANY(%s) AND ap.state = 'dead_letter'
+    WHERE a.client_id = ANY(%s) AND (%s::text IS NULL OR a.batch_id = %s) AND ap.state = 'dead_letter'
     ORDER BY ap.updated_at DESC
     LIMIT %s OFFSET %s;
     """
     try:
-        cur = connection.execute(sql, (target_clients, limit, offset))
+        cur = connection.execute(sql, (target_clients, batch_id, batch_id, limit, offset))
         rows = cur.fetchall()
     except Exception:
         rows = []
@@ -347,6 +348,7 @@ def get_batch_dead_letter_endpoint(
 
 @router.get("/dead-letter", status_code=status.HTTP_200_OK)
 def get_global_dead_letter_endpoint(
+    batch_id: str | None = None,
     client_id: str | None = Query(default=None, description="Filter by client ID"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -364,6 +366,7 @@ def get_global_dead_letter_endpoint(
             client_id=client_id,
             limit=limit,
             offset=offset,
+            batch_id=batch_id,
         )
 
 

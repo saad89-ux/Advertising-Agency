@@ -1,4 +1,5 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";

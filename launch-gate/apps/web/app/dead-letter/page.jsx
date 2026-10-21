@@ -1,4 +1,6 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
+import { readError } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -20,8 +22,7 @@ export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" })
     fetch(`${apiBaseUrl}/dead-letter`, { headers })
       .then(async (res) => {
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `HTTP ${res.status}`);
+          throw new Error(await readError(res));
         }
         return res.json();
       })
@@ -58,7 +59,7 @@ export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" })
         setToast({ message: `Ad ${adId} returned to review cockpit.`, type: "success" });
         fetchDeadLetterAds();
       } else {
-        setToast({ message: "Failed to return ad to review. Check permissions.", type: "error" });
+        setToast({ message: await readError(res), type: "error" });
       }
     } catch {
       setToast({ message: "Network error contacting API to return ad to review.", type: "error" });
@@ -83,7 +84,7 @@ export default function DeadLetterPage({ apiBaseUrl = "http://localhost:8000" })
         setToast({ message: `Dispatch retry initiated for ad ${adId}.`, type: "success" });
         fetchDeadLetterAds();
       } else {
-        setToast({ message: "Failed to retry ad dispatch.", type: "error" });
+        setToast({ message: await readError(res), type: "error" });
       }
     } catch {
       setToast({ message: "Network error contacting API to retry dispatch.", type: "error" });

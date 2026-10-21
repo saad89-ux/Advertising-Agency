@@ -1,8 +1,11 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 from apps.api.alerts import router as alerts_router
 from apps.api.approvals import router as approvals_router
@@ -13,7 +16,6 @@ from apps.api.edits import router as edits_router
 from apps.api.evidence import router as evidence_router
 from apps.api.findings import router as findings_router
 from apps.api.metrics import router as metrics_router
-from apps.api.mock_data import router as mock_data_router, seed_demo_data
 from apps.api.schema import init_schema
 from apps.api.sends import router as sends_router
 from apps.api.sse import router as sse_router
@@ -24,8 +26,9 @@ from apps.api.attribution import router as attribution_router
 from apps.api.pipeline import router as pipeline_router
 from apps.api.campaign_flow import router as campaign_flow_router
 from apps.api.middleware_pii import PIISanitizationMiddleware
-from apps.api.platforms_schema import seed_platform_demo_data
 from apps.api.uploads import UploadBodyLimitMiddleware, router as upload_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -35,13 +38,6 @@ async def lifespan(_app: FastAPI):
         init_schema()
     except Exception as exc:
         print(f"[WARN] Database schema initialization warning: {exc}")
-    seed_opt_in = os.getenv("SEED_DEMO_DATA", "false").lower() in ("true", "1", "yes")
-    if seed_opt_in:
-        try:
-            seed_demo_data(force=False)
-            seed_platform_demo_data()
-        except Exception as exc:
-            print(f"[WARN] Failed to auto-seed demo data in lifespan: {exc}")
     yield
 
 
@@ -52,12 +48,10 @@ app = FastAPI(
 
 All operational endpoints (except `/health` and `/auth/login`) require a Bearer token.
 
-### Quick Start Demo Credentials:
-- **Media Buyer:** `buyer@launchgate.com` / `password123`
-- **Account Manager:** `manager@launchgate.com` / `password123`
+Create a real user with `python -m scripts.create_user` before signing in.
 
 To test authenticated endpoints in this Swagger interface:
-1. Call `POST /auth/login` with the credentials above.
+1. Call `POST /auth/login` with your account credentials.
 2. Copy the returned `access_token`.
 3. Click the green **Authorize 🔓** button at the top right of this page and enter `Bearer <your_token>`.
 4. Test any endpoint!
@@ -66,15 +60,22 @@ To test authenticated endpoints in this Swagger interface:
     lifespan=lifespan,
 )
 
+app.add_middleware(UploadBodyLimitMiddleware)
+app.add_middleware(PIISanitizationMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://.*",
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv(
+            "FRONTEND_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(UploadBodyLimitMiddleware)
-app.add_middleware(PIISanitizationMiddleware)
 
 app.include_router(auth_router)
 app.include_router(upload_router)
@@ -94,7 +95,29 @@ app.include_router(platforms_router)
 app.include_router(attribution_router)
 app.include_router(pipeline_router)
 app.include_router(campaign_flow_router)
-app.include_router(mock_data_router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s", request.url.path, exc_info=exc)
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. See server logs."},
+    )
+    origin = request.headers.get("origin")
+    if origin in {value.strip() for value in os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")}:
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
+        response.headers["vary"] = "Origin"
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": "; ".join(
+        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+        for error in exc.errors()
+    )})
 
 
 @app.get("/health")

@@ -26,13 +26,14 @@ def find_demo_records(conn: Any) -> dict[str, list[Any]]:
     records["ads"] = conn.execute(
         """SELECT ad_id, batch_id, client_id, headline 
            FROM ads 
-           WHERE is_sample = TRUE OR ad_id LIKE 'demo-%' OR batch_id LIKE 'demo-%'"""
+           WHERE is_sample = TRUE OR ad_id LIKE 'demo-%%' OR batch_id LIKE 'demo-%%'
+              OR batch_id = ANY(%s)""", (demo_batch_ids,)
     ).fetchall()
     demo_ad_ids = [a[0] for a in records["ads"]]
 
     # Demo platform accounts
     records["platform_accounts"] = conn.execute(
-        "SELECT account_id, client_id, platform, handle FROM platform_accounts WHERE is_sample = TRUE OR account_id LIKE 'acc_%'"
+        "SELECT account_id, client_id, platform, handle FROM platform_accounts WHERE is_sample = TRUE"
     ).fetchall()
     demo_account_ids = [p[0] for p in records["platform_accounts"]]
 
@@ -132,9 +133,9 @@ def purge_demo_data(confirm: bool = False) -> None:
 
         if demo_ad_ids:
             conn.execute("DELETE FROM findings WHERE ad_id = ANY(%s)", (demo_ad_ids,))
-            conn.execute("DELETE FROM ad_approvals WHERE ad_id = ANY(%s)", (demo_ad_ids,))
             conn.execute("DELETE FROM approval_history WHERE ad_id = ANY(%s)", (demo_ad_ids,))
             conn.execute("DELETE FROM approval_evidence WHERE ad_id = ANY(%s)", (demo_ad_ids,))
+            conn.execute("DELETE FROM ad_approvals WHERE ad_id = ANY(%s)", (demo_ad_ids,))
             conn.execute("DELETE FROM ad_edits WHERE ad_id = ANY(%s)", (demo_ad_ids,))
             conn.execute("DELETE FROM send_alerts WHERE ad_id = ANY(%s)", (demo_ad_ids,))
             conn.execute("DELETE FROM ad_sends WHERE ad_id = ANY(%s)", (demo_ad_ids,))
@@ -155,8 +156,12 @@ def purge_demo_data(confirm: bool = False) -> None:
             conn.execute("DELETE FROM batches WHERE batch_id = ANY(%s)", (demo_batch_ids,))
 
         if demo_account_ids:
-            conn.execute("DELETE FROM ad_live_dispatches WHERE account_id = ANY(%s)", (demo_account_ids,))
             conn.execute("DELETE FROM platform_accounts WHERE account_id = ANY(%s)", (demo_account_ids,))
+
+        # Include every sample-flagged table, even sample dispatches attached to real ads.
+        from psycopg import sql
+        for (table,) in conn.execute("SELECT table_name FROM information_schema.columns WHERE table_schema = current_schema() AND column_name = 'is_sample'").fetchall():
+            conn.execute(sql.SQL("DELETE FROM {} WHERE is_sample = TRUE").format(sql.Identifier(table)))
 
         print("[SUCCESS] All identified demo rows successfully purged.\n")
 

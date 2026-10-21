@@ -118,6 +118,7 @@ def get_global_alerts(
     severity: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    batch_id: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve paginated global alerts visible to assigned clients."""
     target_clients = [client_id] if client_id else allowed_clients
@@ -129,6 +130,9 @@ def get_global_alerts(
     WHERE al.client_id = ANY(%s)
     """
     params_count: list[Any] = [target_clients]
+    if batch_id:
+        count_sql += " AND al.batch_id = %s"
+        params_count.append(batch_id)
     if resolved is not None:
         count_sql += " AND al.resolved = %s"
         params_count.append(resolved)
@@ -158,6 +162,9 @@ def get_global_alerts(
     WHERE al.client_id = ANY(%s)
     """
     params_list: list[Any] = [target_clients]
+    if batch_id:
+        sql += " AND al.batch_id = %s"
+        params_list.append(batch_id)
     if resolved is not None:
         sql += " AND al.resolved = %s"
         params_list.append(resolved)
@@ -464,6 +471,7 @@ def get_batch_alerts_endpoint(
 
 @router.get("/alerts", status_code=status.HTTP_200_OK)
 def get_global_alerts_endpoint(
+    batch_id: str | None = None,
     client_id: str | None = Query(default=None, description="Filter by client ID"),
     resolved: bool | None = Query(default=None, description="Filter by resolution status"),
     alert_type: str | None = Query(default=None, description="Filter by alert type"),
@@ -487,6 +495,7 @@ def get_global_alerts_endpoint(
             severity=severity,
             limit=limit,
             offset=offset,
+            batch_id=batch_id,
         )
 
 

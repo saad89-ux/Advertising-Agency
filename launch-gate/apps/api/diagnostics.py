@@ -65,6 +65,13 @@ def get_ai_and_tracing_status() -> dict[str, Any]:
         pass
 
     return {
+        "meta": {
+            "is_configured": all(os.getenv(key, "").strip() for key in ("MCP_META_SERVER_URL", "META_MCP_ACCESS_TOKEN", "META_AD_ACCOUNT_ID"))
+            and all(os.getenv(key, "false").lower() in {"true", "1", "yes"} for key in ("META_MCP_ENABLE_LIVE", "META_MCP_ALLOW_WRITES")),
+        },
+        "email_alerts": {
+            "is_configured": all(os.getenv(key, "").strip() for key in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "NOTIFICATION_FROM_EMAIL")),
+        },
         "gemini_api": {
             "is_configured": gemini_active,
             "status": "active" if gemini_active else "heuristic_fallback",

@@ -116,7 +116,9 @@ class MCPPlatformDispatcher:
         live_mcp_enabled = os.environ.get("META_MCP_ENABLE_LIVE", "false").strip().lower() in {
             "1", "true", "yes"
         }
-        if live_mcp_enabled and self.meta_mcp_url and os.environ.get("META_MCP_ACCESS_TOKEN", "").strip():
+        writes_allowed = os.environ.get("META_MCP_ALLOW_WRITES", "false").strip().lower() in {"1", "true", "yes"}
+        dispatch_configured = not tool_name.endswith("_dispatch_ad") or (writes_allowed and bool(os.environ.get("META_AD_ACCOUNT_ID", "").strip()))
+        if live_mcp_enabled and dispatch_configured and self.meta_mcp_url and os.environ.get("META_MCP_ACCESS_TOKEN", "").strip():
             try:
                 from apps.worker.meta_mcp_client import MetaMCPClient
 

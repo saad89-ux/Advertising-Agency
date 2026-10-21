@@ -19,6 +19,7 @@ from apps.api.auth import CurrentUser, get_current_user, require_role
 from apps.worker.file_storage import get_file_store
 from apps.api.client_inference import infer_client_id, load_domain_map
 from apps.api.database import get_session
+from apps.api.client_ip import get_client_ip
 from apps.api.ingest import (
     MAX_REJECTED_CELL_CHARACTERS,
     ParsedCsvUpload,
@@ -234,6 +235,8 @@ def _persist_upload(
                 connection, batch_id, rejected
             )
             accepted_count = len(rows_to_save)
+            if accepted_count == 0:
+                connection.execute("DELETE FROM batches WHERE batch_id = %s;", (batch_id,))
     except _DuplicateUpload as duplicate:
         _dispatch_pending_jobs()
         return UploadResult(
@@ -273,7 +276,7 @@ def _persist_upload(
 @router.post("/uploads")
 async def upload_batch(
     request: Request,
-    user: CurrentUser = Depends(require_role("buyer")),
+    user: CurrentUser = Depends(require_role("buyer", "account_manager")),
 ):
     content_type = request.headers.get("content-type", "").split(";", 1)[0].casefold()
     if content_type != "multipart/form-data":
@@ -337,11 +340,7 @@ async def upload_batch(
             raise HTTPException(status_code=415, detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
         raise HTTPException(status_code=422, detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
 
-    uploader_ip = (
-        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        or request.headers.get("x-real-ip", "").strip()
-        or (request.client.host if request.client else "127.0.0.1")
-    )
+    uploader_ip = get_client_ip(request)
     result = _persist_upload(
         parsed=parsed,
         user=user,
@@ -458,8 +457,9 @@ async def upload_creative(
             },
         )
 
-    if client_id and user.role == "buyer":
-        require_client_access(user, client_id)
+    if not client_id:
+        raise HTTPException(status_code=422, detail="client_id is required for a creative upload.")
+    require_client_access(user, client_id)
 
     upload_limit = max_upload_bytes() * 10
     content = await file.read(upload_limit + 1)

@@ -1,4 +1,5 @@
 "use client";
+import { readError } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import SocialFeedModal from "../../components/SocialFeedModal";
@@ -127,8 +128,7 @@ export default function PlatformsPage() {
         });
         fetchAccounts();
       } else {
-        const err = await res.json();
-        setErrorMsg(err.detail || "Failed to connect platform account.");
+        setErrorMsg(await readError(res));
       }
     } catch (err) {
       setErrorMsg("Network error connecting account.");

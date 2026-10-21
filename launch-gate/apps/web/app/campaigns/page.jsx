@@ -1,4 +1,5 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -14,7 +15,10 @@ export default function CampaignsPage({ apiBaseUrl = "http://localhost:8000" }) 
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`${apiBaseUrl}/campaign-flow/all-campaigns`, { headers });
+      const scope = new URLSearchParams(window.location.search);
+      const query = new URLSearchParams();
+      for (const key of ["batch_id", "client_id"]) if (scope.get(key)) query.set(key, scope.get(key));
+      const res = await fetch(`${apiBaseUrl}/campaign-flow/all-campaigns?${query}`, { headers });
       if (res.ok) {
         const data = await res.json();
         setCampaigns(data);

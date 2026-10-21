@@ -27,13 +27,17 @@ class SimulateSaleRequest(BaseModel):
 
 @router.get("/summary")
 def get_attribution_summary(
+    batch_id: str | None = None,
+    client_id: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get aggregated inbound sales, orders, ROAS, and platform performance breakdown."""
     init_platform_tables()
     with get_session() as conn:
         with conn.cursor() as cur:
-            allowed = list(user.assigned_client_ids)
+            if client_id:
+                require_client_access(user, client_id)
+            allowed = [client_id] if client_id else list(user.assigned_client_ids)
             cur.execute(
                 """
                 SELECT
@@ -45,9 +49,9 @@ def get_attribution_summary(
                     COALESCE(COUNT(*), 0),
                     COALESCE(COUNT(*) FILTER (WHERE has_rule_violation = TRUE), 0)
                 FROM ad_performance_tracking
-                WHERE client_id = ANY(%s);
+                WHERE client_id = ANY(%s) AND (%s::text IS NULL OR batch_id = %s);
                 """,
-                (allowed,),
+                (allowed, batch_id, batch_id),
             )
             row = cur.fetchone()
             sales = float(row[0])
@@ -70,11 +74,11 @@ def get_attribution_summary(
                        COALESCE(SUM(spend_usd), 0.0),
                        COUNT(*)
                 FROM ad_performance_tracking
-                WHERE client_id = ANY(%s)
+                WHERE client_id = ANY(%s) AND (%s::text IS NULL OR batch_id = %s)
                 GROUP BY platform
                 ORDER BY SUM(inbound_sales_usd) DESC;
                 """,
-                (allowed,),
+                (allowed, batch_id, batch_id),
             )
             plat_rows = cur.fetchall()
             platforms_breakdown = [
@@ -107,6 +111,7 @@ def get_attribution_summary(
 @router.get("/ads")
 def list_ads_attribution(
     client_id: str | None = None,
+    batch_id: str | None = None,
     platform: str | None = None,
     sort_by: str = "sales",
     user: CurrentUser = Depends(get_current_user),
@@ -134,6 +139,10 @@ def list_ads_attribution(
                 require_client_access(user, client_id)
                 query += " AND p.client_id = %s"
                 params.append(client_id)
+
+            if batch_id:
+                query += " AND p.batch_id = %s"
+                params.append(batch_id)
 
             if platform:
                 query += " AND LOWER(p.platform) = LOWER(%s)"
@@ -182,24 +191,28 @@ def list_ads_attribution(
 
 @router.get("/live-events")
 def get_live_events_stream(
+    batch_id: str | None = None,
+    client_id: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return simulated live inbound conversion events and platform review checks."""
     init_platform_tables()
     with get_session() as conn:
         with conn.cursor() as cur:
-            allowed = list(user.assigned_client_ids)
+            if client_id:
+                require_client_access(user, client_id)
+            allowed = [client_id] if client_id else list(user.assigned_client_ids)
             cur.execute(
                 """
                 SELECT p.ad_id, p.client_id, p.platform, p.handle, p.inbound_sales_usd,
                        p.last_event, p.has_rule_violation, a.headline
                 FROM ad_performance_tracking p
                 JOIN ads a ON p.ad_id = a.ad_id
-                WHERE p.client_id = ANY(%s)
+                WHERE p.client_id = ANY(%s) AND (%s::text IS NULL OR p.batch_id = %s)
                 ORDER BY p.updated_at DESC
                 LIMIT 15;
                 """,
-                (allowed,),
+                (allowed, batch_id, batch_id),
             )
             rows = cur.fetchall()
 

@@ -1,8 +1,10 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import GlassToast from "../../components/GlassToast";
+import { readError, notificationLabel } from "../../lib/api";
 
 export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }) {
   const [violations, setViolations] = useState([]);
@@ -15,22 +17,17 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
   const [editFields, setEditFields] = useState({});
   const [launcherEmail, setLauncherEmail] = useState("");
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setLauncherEmail(localStorage.getItem("launcher_email") || "saadkamran485@gmail.com");
-    }
-  }, []);
-
   const fetchIssues = async () => {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(`${apiBaseUrl}/campaign-flow/violations`, { headers });
+      if (!res.ok) throw new Error(await readError(res));
       if (res.ok) {
         const data = await res.json();
         setViolations(data);
 
-        // Pre-fill edit fields with AI proposed fixes
+        // Show the recorded suggestions for human editing.
         const initialEdits = {};
         data.forEach((v) => {
           initialEdits[v.ad_id] = {
@@ -42,6 +39,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
       }
     } catch (err) {
       console.error(err);
+      setToast({message: err.message, type: "error"});
     } finally {
       setLoading(false);
     }
@@ -67,6 +65,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
         revised_headline: editFields[adId]?.headline,
         revised_text: editFields[adId]?.text,
         confirm_employee_notification: true,
+        notification_email: launcherEmail || violations.find(v => v.ad_id === adId)?.notification_contact?.employee_email || undefined,
       };
 
       const res = await fetch(`${apiBaseUrl}/campaign-flow/hitl-remediate`, {
@@ -86,14 +85,15 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
         // Remove from list
         setViolations((prev) => prev.filter((v) => v.ad_id !== adId));
         setToast({
-          message: data.message || `Ad ${adId} auto-remediated and re-dispatched.`,
-          type: "success",
+          message: data.message || `Ad ${adId} saved for checks and human approval.`,
+          type: data.notification_result?.email_status === "sent" ? "success" : "warning",
         });
       } else {
-        setToast({ message: "Failed to auto-remediate ad. Server rejected request.", type: "error" });
+        setToast({ message: await readError(res), type: "error" });
       }
     } catch (err) {
       console.error(err);
+      setToast({message: err.message, type: "error"});
       setToast({ message: "Network error occurred while applying remediation.", type: "error" });
     } finally {
       setRemediatingId(null);
@@ -144,7 +144,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
           }}>
             <span>📧</span>
             <span>
-              Notification Dispatch Active: <strong>{launcherEmail || "saadkamran485@gmail.com"}</strong>
+              Notification contact: <input type="email" placeholder="Enter the launch contact email" value={launcherEmail} onChange={e => setLauncherEmail(e.target.value)} />
             </span>
           </div>
         </div>
@@ -166,7 +166,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
                 ✓ {successNotif.message}
               </div>
               <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                Instant SMTP email alert sent to <strong>{successNotif.notif.employee_email}</strong> (phone retained in the campaign contact record) before re-dispatch.
+                {notificationLabel(successNotif.notif.dispatch_result)} (phone retained in the campaign contact record).
               </div>
             </div>
             <Link
@@ -181,7 +181,7 @@ export default function RemediationPage({ apiBaseUrl = "http://localhost:8000" }
                 textDecoration: "none",
               }}
             >
-              View Live Serving in Dispatches ➔
+              View Dispatch Records ➔
             </Link>
           </div>
         )}

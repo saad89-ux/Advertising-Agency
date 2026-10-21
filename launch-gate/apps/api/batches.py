@@ -450,12 +450,12 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
                 )
                 for pr in cur_p.fetchall():
                     perf_map[str(pr[0])] = {
-                        "inbound_sales_usd": float(pr[1]) if pr[1] is not None else 0.0,
-                        "spend_usd": float(pr[2]) if pr[2] is not None else 0.0,
-                        "roas": float(pr[3]) if pr[3] is not None else 0.0,
-                        "inbound_orders": int(pr[4]) if pr[4] is not None else 0,
-                        "impressions": int(pr[5]) if pr[5] is not None else 0,
-                        "ctr_percent": float(pr[6]) if pr[6] is not None else 0.0,
+                        "inbound_sales_usd": float(pr[1]) if pr[1] is not None else None,
+                        "spend_usd": float(pr[2]) if pr[2] is not None else None,
+                        "roas": float(pr[3]) if pr[3] is not None else None,
+                        "inbound_orders": int(pr[4]) if pr[4] is not None else None,
+                        "impressions": int(pr[5]) if pr[5] is not None else None,
+                        "ctr_percent": float(pr[6]) if pr[6] is not None else None,
                     }
             except Exception:
                 pass
@@ -486,21 +486,21 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
         for ad in visible_ads:
             aid = ad["ad_id"]
             p = perf_map.get(aid, {})
-            ad["inbound_sales_usd"] = p.get("inbound_sales_usd", 0.0)
-            ad["spend_usd"] = p.get("spend_usd", 0.0)
-            ad["roas"] = p.get("roas", 0.0)
-            ad["inbound_orders"] = p.get("inbound_orders", 0)
-            ad["impressions"] = p.get("impressions", 0)
-            ad["ctr_percent"] = p.get("ctr_percent", 0.0)
+            ad["inbound_sales_usd"] = p.get("inbound_sales_usd")
+            ad["spend_usd"] = p.get("spend_usd")
+            ad["roas"] = p.get("roas")
+            ad["inbound_orders"] = p.get("inbound_orders")
+            ad["impressions"] = p.get("impressions")
+            ad["ctr_percent"] = p.get("ctr_percent")
 
-            total_spend += ad["spend_usd"]
-            total_sales += ad["inbound_sales_usd"]
-            total_orders += ad["inbound_orders"]
-            total_impressions += ad["impressions"]
+            total_spend += ad["spend_usd"] or 0
+            total_sales += ad["inbound_sales_usd"] or 0
+            total_orders += ad["inbound_orders"] or 0
+            total_impressions += ad["impressions"] or 0
 
             d = disp_map.get(aid, {})
-            ad["delivery_status"] = d.get("delivery_status", "active_live" if ad.get("approval_state") == "approved" else "pending_review")
-            ad["platform_review_status"] = d.get("platform_review_status", "Approved by Platform Review" if ad.get("approval_state") == "approved" else "Under Review")
+            ad["delivery_status"] = d.get("delivery_status", "pending_review")
+            ad["platform_review_status"] = d.get("platform_review_status", "Not submitted")
             ad["live_preview_url"] = d.get("live_preview_url")
             ad["handle"] = d.get("handle") or f"@{ad.get('client_id', 'brand')}_{ad.get('platform', 'meta')}"
 
@@ -512,7 +512,7 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
                 SELECT employee_email, employee_phone
                 FROM campaign_launch_contacts
                 WHERE batch_id = %s
-                ORDER BY created_at DESC LIMIT 1;
+                ORDER BY updated_at DESC LIMIT 1;
                 """,
                 (batch_id,),
             )
@@ -541,11 +541,11 @@ def get_batch_detail(batch_id: str, user: CurrentUser, connection: Any = None) -
                 "total_findings": total_findings,
                 "false_alarms_count": false_alarms_count,
                 "client_ids": client_ids,
-                "total_spend_usd": round(total_spend, 2),
-                "total_sales_usd": round(total_sales, 2),
-                "blended_roas": blended_roas,
-                "total_orders": total_orders,
-                "total_impressions": total_impressions,
+                "total_spend_usd": round(total_spend, 2) if any(value.get("spend_usd") is not None for value in perf_map.values()) else None,
+                "total_sales_usd": round(total_sales, 2) if any(value.get("inbound_sales_usd") is not None for value in perf_map.values()) else None,
+                "blended_roas": blended_roas if any(value.get("roas") is not None for value in perf_map.values()) else None,
+                "total_orders": total_orders if any(value.get("inbound_orders") is not None for value in perf_map.values()) else None,
+                "total_impressions": total_impressions if any(value.get("impressions") is not None for value in perf_map.values()) else None,
                 "notification_contact": contact_info,
             },
             "ads": visible_ads,
@@ -629,8 +629,11 @@ def list_user_batches(user: CurrentUser, connection: Any = None) -> list[dict[st
 # --- Router Endpoints ---
 
 @router.get("/batches")
-def list_batches_endpoint(user: CurrentUser = Depends(get_current_user)) -> list[dict[str, Any]]:
+def list_batches_endpoint(batch_id: str | None = None, client_id: str | None = None, user: CurrentUser = Depends(get_current_user)) -> list[dict[str, Any]]:
     """List batches visible to the authenticated user."""
+    if batch_id:
+        detail = get_batch_detail(batch_id, user)
+        return [item for item in list_user_batches(user) if item["batch_id"] == batch_id]
     return list_user_batches(user)
 
 

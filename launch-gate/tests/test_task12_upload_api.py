@@ -334,8 +334,20 @@ def test_upload_with_only_unassigned_rows_returns_rejections(monkeypatch, api_se
     assert {row[3] for row in api_setup.state["rejected"]} == {"client_not_assigned"}
 
 
-def test_wrong_role_is_forbidden(monkeypatch, api_setup):
+def test_account_manager_can_upload_for_assigned_client(monkeypatch, api_setup):
     headers = auth_headers(monkeypatch, role="account_manager")
+    with TestClient(app) as client:
+        response = client.post(
+            "/uploads",
+            files=multipart_csv("Row,Platform,Headline,URL\n1,Meta,one,https://brightleaf.example/"),
+            headers=headers,
+        )
+    assert response.status_code == 201
+    assert response.json()["accepted_count"] == 1
+
+
+def test_account_manager_cannot_upload_for_unassigned_client(monkeypatch, api_setup):
+    headers = auth_headers(monkeypatch, role="account_manager", assigned=("calmleaf",))
     with TestClient(app) as client:
         response = client.post(
             "/uploads",

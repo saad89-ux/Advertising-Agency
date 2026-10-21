@@ -335,3 +335,7 @@ D53: Complete Local Run Instructions & Production README (Task 55, PRD §1, §4,
   - **No ANN Index Needed for Tens of Rules**: For typical agency clients having $\le 40$ rules (and even up to a few thousand rules), approximate nearest neighbor (ANN) indexes like HNSW or IVFFlat are completely unnecessary and introduce index maintenance overhead. Exact $k$-NN search (`SELECT ... ORDER BY embedding <=> query_vector LIMIT k`) executes in $< 1\text{ms}$ on PostgreSQL and has zero dimension restrictions.
 - **Hosting Decision**:
   - pgvector hosting decision (local Docker container, native Windows Postgres, or hosted Neon/Supabase) is explicitly **deferred** to Task 7. No vector retrieval or embeddings implementation is to be introduced before Task 7.
+
+## 2026-10-21 — Campaign upload role consistency
+
+The unified campaign workflow permits both buyers and account managers to upload campaign sheets, matching the launch endpoint. This supersedes the buyer-only portion of D33. Authentication and assigned-client checks remain required. An account manager cannot upload a sheet for an unassigned client.

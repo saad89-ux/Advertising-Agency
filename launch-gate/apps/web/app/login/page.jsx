@@ -1,4 +1,5 @@
 "use client";
+import { readError } from "../../lib/api";
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -23,8 +24,7 @@ export default function LoginPage({ apiBaseUrl = "http://localhost:8000" }) {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || "Invalid email or password");
+        throw new Error(await readError(res));
       }
 
       const data = await res.json();

@@ -1,4 +1,6 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
+import { readError } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -22,8 +24,7 @@ export default function AlertsPage({ apiBaseUrl = "http://localhost:8000" }) {
     fetch(`${apiBaseUrl}/alerts`, { headers })
       .then(async (res) => {
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `HTTP ${res.status}`);
+          throw new Error(await readError(res));
         }
         return res.json();
       })
@@ -61,7 +62,7 @@ export default function AlertsPage({ apiBaseUrl = "http://localhost:8000" }) {
         setToast({ message: `Alert ${alertId} marked as resolved.`, type: "success" });
         fetchAlerts();
       } else {
-        setToast({ message: "Failed to resolve alert. Please check your credentials.", type: "error" });
+        setToast({ message: await readError(res), type: "error" });
       }
     } catch {
       setToast({ message: "Network error contacting API to resolve alert.", type: "error" });

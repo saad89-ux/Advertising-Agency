@@ -1,4 +1,6 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
+import { readError } from "../../lib/api";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -27,8 +29,7 @@ export default function ReviewIndexPage({ apiBaseUrl = "http://localhost:8000" }
       .then(async (res) => {
         if (!isMounted) return;
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || `Failed to fetch batches: ${res.status}`);
+          throw new Error(await readError(res));
         }
         return res.json();
       })

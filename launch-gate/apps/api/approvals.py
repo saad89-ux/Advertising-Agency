@@ -41,6 +41,10 @@ class ApprovalState(str, Enum):
 
 # Allowed state transitions per Dataflow Architecture §3
 ALLOWED_TRANSITIONS: frozenset[tuple[str, str]] = frozenset({
+    ('approved', 'blocked_connector_not_configured'),
+    ('approved', 'dead_letter'),
+    ('blocked_connector_not_configured', 'approved'),
+    ('blocked_connector_not_configured', 'pending_review'),
     (ApprovalState.PENDING_REVIEW.value, ApprovalState.APPROVED.value),
     (ApprovalState.PENDING_REVIEW.value, ApprovalState.REJECTED.value),
     (ApprovalState.APPROVED.value, ApprovalState.SENDING.value),

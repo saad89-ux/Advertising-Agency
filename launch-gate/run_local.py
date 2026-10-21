@@ -1,7 +1,7 @@
 """Unified local runner for Launch Gate.
 
 Launches all services concurrently:
-1. Database schema initialization & demo user seeding
+1. Database schema initialization
 2. Mock Storefront Server (port 8099)
 3. Stand-in Ad Platform (port 8100)
 4. Launch Gate FastAPI Backend (port 8000)
@@ -42,56 +42,21 @@ if local_node.exists() and str(local_node) not in os.environ.get("PATH", ""):
 
 
 def init_environment():
-    """Verify database and seed initial demo accounts."""
+    """Verify the database schema."""
     try:
         from dotenv import load_dotenv
 
         load_dotenv(REPO_ROOT / ".env")
         if not os.environ.get("JWT_SECRET") or "placeholder" in os.environ.get("JWT_SECRET", "").lower():
             os.environ["JWT_SECRET"] = "launch_gate_secure_secret_key_development_2026_x87"
-        from apps.api.auth import hash_password
-        from apps.api.database import get_session
         from apps.api.schema import init_schema
-        from apps.api.users import assign_user_to_client, create_user, create_users_table
 
         try:
             init_schema()
-            create_users_table()
         except Exception as schema_err:
             print(f"[WARN] Database schema initialization warning (PostgreSQL may be offline or initializing): {schema_err}")
 
-        seed_demo = os.environ.get("SEED_DEMO_DATA", "false").strip().lower() in ("true", "1", "yes")
-        if seed_demo:
-            try:
-                pwd = hash_password("password123")
-                create_user(
-                    user_id="demo_buyer",
-                    email="buyer@launchgate.com",
-                    display_name="Demo Buyer",
-                    password_hash=pwd,
-                    role="buyer",
-                )
-                for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
-                    assign_user_to_client(user_id="demo_buyer", client_id=client_id)
-
-                create_user(
-                    user_id="demo_manager",
-                    email="manager@launchgate.com",
-                    display_name="Demo Manager",
-                    password_hash=pwd,
-                    role="account_manager",
-                )
-                for client_id in ["brightleaf", "calmleaf", "oakandhome"]:
-                    assign_user_to_client(user_id="demo_manager", client_id=client_id)
-
-                from apps.api.mock_data import seed_demo_data
-
-                seed_demo_data(force=False)
-                print("[OK] Database schema initialized and demo users/batches seeded.")
-            except Exception as seed_err:
-                print(f"[WARN] Demo seeding notice: {seed_err}")
-        else:
-            print("[OK] Launch Gate initialized in production-ready mode.")
+        print("[OK] Schema initialized. Create accounts with python -m scripts.create_user.")
     except Exception as exc:
         print(f"[WARN] Database initialization notice: {exc}")
 
@@ -210,10 +175,6 @@ def print_banner():
   >> Interactive API Docs:       http://127.0.0.1:8000/docs
   >> Dry-run Ad Platform:        http://127.0.0.1:8100/admin/stats
   >> Storefront Mock Pages:      http://127.0.0.1:8099/
-
-  Demo Credentials:
-    * Buyer:           buyer@launchgate.com   / password123
-    * Account Manager: manager@launchgate.com / password123
 
   Press CTRL+C anytime to stop all servers.
 ======================================================================

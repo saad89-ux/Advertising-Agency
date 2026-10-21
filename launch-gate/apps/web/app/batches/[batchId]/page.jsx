@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import SocialFeedModal from "../../../components/SocialFeedModal";
 import GlassToast from "../../../components/GlassToast";
+import { readError, notificationLabel } from "../../../lib/api";
 
 /**
  * Next.js Dynamic Route Page: /batches/[batchId]
@@ -23,6 +24,7 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
   const [toast, setToast] = useState(null);
   const [copiedId, setCopiedId] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [notificationEmail, setNotificationEmail] = useState("");
 
   // Edit Modal State
   const [editingAd, setEditingAd] = useState(null);
@@ -40,12 +42,12 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
 
       const res = await fetch(`${apiBaseUrl}/batches/${batchId}`, { headers });
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Failed to fetch batch (HTTP ${res.status})`);
+        throw new Error(await readError(res));
       }
 
       const data = await res.json();
       setBatch(data);
+      setNotificationEmail(data.summary?.notification_contact?.employee_email || "");
     } catch (err) {
       console.error(err);
       setError(err.message || "Failed to load batch details.");
@@ -108,13 +110,17 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
 
-      const clientId = batch?.summary?.client_ids?.[0] || "oakandhome";
+      const clientId = batch?.summary?.client_ids?.[0];
+      const contact = {employee_email: notificationEmail};
+      if (!clientId || !contact?.employee_email?.includes("@")) {
+        setToast({ message: "Enter the batch notification email before dispatching.", type: "error" });
+        return;
+      }
       const payload = {
         client_id: clientId,
         batch_id: batchId,
         campaign_name: `${clientId.toUpperCase()} Growth Burst`,
-        employee_email: batch?.summary?.notification_contact?.employee_email || "saadkamran485@gmail.com",
-        employee_phone: "",
+        employee_email: contact.employee_email,
         target_platforms: ["facebook", "instagram"],
       };
 
@@ -125,14 +131,14 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
       });
 
       if (res.ok) {
-        setToast({ message: "Batch successfully dispatched across Meta platforms (Instagram & Facebook)!", type: "success" });
+        const result = await res.json();
+        setToast({ message: (result.status === "blocked" ? "Meta connector not configured — nothing was sent." : `Batch dispatch: ${result.status}.`) + " " + (result.notifications || []).map(notificationLabel).join(" "), type: result.status === "launched" ? "success" : result.status === "blocked" ? "warning" : "error" });
         fetchBatch();
       } else {
-        const err = await res.json().catch(() => ({}));
-        setToast({ message: err.detail || "Dispatch failed.", type: "error" });
+        setToast({ message: await readError(res), type: "error" });
       }
     } catch (err) {
-      setToast({ message: "Network error executing batch dispatch.", type: "error" });
+      setToast({ message: err?.message || "Batch dispatch could not be completed.", type: "error" });
     } finally {
       setIsLaunching(false);
     }
@@ -280,12 +286,12 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
   const summary = batch.summary || {};
   const totalAds = summary.total_ads || batch.ads?.length || 0;
   const clientName = (summary.client_ids?.[0] || "Campaign").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  const totalSpend = summary.total_spend_usd ?? 0.0;
-  const totalSales = summary.total_sales_usd ?? 0.0;
-  const blendedRoas = summary.blended_roas ?? (totalSpend > 0 ? round(totalSales / totalSpend, 2) : 0.0);
-  const totalOrders = summary.total_orders ?? 0;
-  const totalImpressions = summary.total_impressions ?? 0;
-  const contactEmail = summary.notification_contact?.employee_email || "saadkamran485@gmail.com";
+  const totalSpend = summary.total_spend_usd;
+  const totalSales = summary.total_sales_usd;
+  const blendedRoas = summary.blended_roas;
+  const totalOrders = summary.total_orders;
+  const totalImpressions = summary.total_impressions;
+  const contactEmail = summary.notification_contact?.employee_email || "";
 
   return (
     <div style={{
@@ -536,14 +542,14 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
             borderRadius: "16px",
             padding: "20px",
           }}>
-            <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "600" }}>Active Placements</div>
+            <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "600" }}>Target Placements</div>
             <div style={{ fontSize: "20px", fontWeight: "800", color: "#38bdf8", marginTop: "6px", display: "flex", gap: "8px", alignItems: "center" }}>
               <span>📷 Instagram</span>
               <span style={{ color: "#64748b" }}>•</span>
               <span>👥 Facebook</span>
             </div>
             <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "10px" }}>
-              Meta Ads Graph API Connected
+              Delivery status is recorded per ad below.
             </div>
           </div>
 
@@ -556,10 +562,10 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
           }}>
             <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "600" }}>Attributed Revenue</div>
             <div style={{ fontSize: "28px", fontWeight: "800", color: "#10b981", marginTop: "6px" }}>
-              ${totalSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {totalSales != null ? `$${Number(totalSales).toFixed(2)}` : "Not tracked"}
             </div>
             <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
-              {totalOrders > 0 ? `${totalOrders} orders completed` : "Awaiting first conversions"}
+              {totalOrders > 0 ? `${totalOrders} orders completed` : totalOrders != null ? "No recorded orders" : "Not tracked"}
             </div>
           </div>
 
@@ -572,10 +578,10 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
           }}>
             <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "600" }}>Media Spend & ROAS</div>
             <div style={{ fontSize: "28px", fontWeight: "800", color: "#818cf8", marginTop: "6px" }}>
-              ${totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {totalSpend != null ? `$${Number(totalSpend).toFixed(2)}` : "Not tracked"}
             </div>
             <div style={{ fontSize: "12px", color: blendedRoas >= 3 ? "#34d399" : "#fbbf24", marginTop: "6px", fontWeight: "600" }}>
-              ⚡ Blended ROAS: {blendedRoas}x
+              ⚡ Blended ROAS: {blendedRoas != null ? `${blendedRoas}x` : "Not tracked"}
             </div>
           </div>
 
@@ -588,10 +594,10 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
           }}>
             <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "600" }}>Total Reach</div>
             <div style={{ fontSize: "28px", fontWeight: "800", color: "#f8fafc", marginTop: "6px" }}>
-              {totalImpressions.toLocaleString()}
+              {totalImpressions != null ? totalImpressions.toLocaleString() : "Not tracked"}
             </div>
             <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
-              Verified Platform Impressions
+              Reported platform impressions
             </div>
           </div>
         </div>
@@ -862,25 +868,25 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
                       <div>
                         <div style={{ fontSize: "10px", color: "#64748b", textTransform: "uppercase" }}>Spend</div>
                         <div style={{ fontSize: "13px", fontWeight: "700", color: "#f8fafc", marginTop: "2px" }}>
-                          ${(ad.spend_usd || 0).toFixed(2)}
+                          {ad.spend_usd != null ? `$${Number(ad.spend_usd).toFixed(2)}` : "Not tracked"}
                         </div>
                       </div>
                       <div>
                         <div style={{ fontSize: "10px", color: "#64748b", textTransform: "uppercase" }}>Sales</div>
                         <div style={{ fontSize: "13px", fontWeight: "700", color: "#10b981", marginTop: "2px" }}>
-                          ${(ad.inbound_sales_usd || 0).toFixed(2)}
+                          {ad.inbound_sales_usd != null ? `$${Number(ad.inbound_sales_usd).toFixed(2)}` : "Not tracked"}
                         </div>
                       </div>
                       <div>
                         <div style={{ fontSize: "10px", color: "#64748b", textTransform: "uppercase" }}>ROAS</div>
                         <div style={{ fontSize: "13px", fontWeight: "700", color: "#818cf8", marginTop: "2px" }}>
-                          {ad.roas || 0}x
+                          {ad.roas != null ? `${ad.roas}x` : "Not tracked"}
                         </div>
                       </div>
                       <div>
                         <div style={{ fontSize: "10px", color: "#64748b", textTransform: "uppercase" }}>Orders</div>
                         <div style={{ fontSize: "13px", fontWeight: "700", color: "#f8fafc", marginTop: "2px" }}>
-                          {ad.inbound_orders || 0}
+                          {ad.inbound_orders != null ? ad.inbound_orders : "Not tracked"}
                         </div>
                       </div>
                     </div>
@@ -1103,6 +1109,10 @@ function BatchReviewScreen({ params, apiBaseUrl = "http://localhost:8000" }) {
       )}
 
       {/* Toast Notification */}
+      <div style={{padding: 16}}>
+        <label>Notification email <input placeholder="Enter the launch contact email" value={notificationEmail} onChange={e => setNotificationEmail(e.target.value)} /></label>
+        <p>Used only to send you launch and policy alerts. </p>
+      </div>
       <GlassToast
         message={toast?.message}
         type={toast?.type}

@@ -345,8 +345,9 @@ class TestCampaignFlowSpecialistsIntegration:
             "Policy Violation: Prohibited disease cure claims",
             None,
             "rejected",
+            "batch_aurora",
         )
-        fake_contact = ("aurora", "buyer@agency.com", "+1-800-555-0199")
+        fake_contact = ("batch_aurora", "buyer@agency.com", "+1-800-555-0199")
 
         cursor = SmartCursor(
             violation_data=[fake_violation],
@@ -362,7 +363,7 @@ class TestCampaignFlowSpecialistsIntegration:
                  return_value={"sms_status": "sent", "email_status": "sent"},
              ) as mock_dispatch:
 
-            violations = get_platform_violations(user=FakeUser())
+            violations = get_platform_violations(user=FakeUser(), trigger_alert=True)
 
             assert len(violations) == 1
             viol = violations[0]

@@ -2,7 +2,7 @@
 
 Covers:
 1. Validation of target_platforms (empty or missing raises 422).
-2. Validation of employee notification credentials (invalid email or phone < 7 digits raises 400).
+2. Validation of notification email; phone is optional and is no longer collected.
 3. Platform alias normalization (e.g. 'fb', 'meta', 'ig', 'tt' normalize to canonical platform identifiers).
 4. Unsupported platform names raise 400.
 5. Strict platform dispatch scoping: launching with selected platforms dispatches ONLY to those platforms.
@@ -96,7 +96,7 @@ def test_launch_batch_empty_target_platforms_returns_422(mock_buyer_user):
             )
             assert resp.status_code == 422
             errors = resp.json().get("detail", [])
-            assert any("target_platforms" in str(err) for err in errors)
+            assert isinstance(errors, str) and "target_platforms" in errors
     finally:
         app.dependency_overrides.clear()
 
@@ -142,25 +142,10 @@ def test_launch_batch_invalid_employee_email_returns_400(mock_buyer_user):
         app.dependency_overrides.clear()
 
 
-def test_launch_batch_invalid_employee_phone_returns_400(mock_buyer_user):
-    """Employee phone with fewer than 7 digits must return 400 Bad Request."""
-    app.dependency_overrides[get_current_user] = lambda: mock_buyer_user
-    try:
-        with TestClient(app) as client:
-            resp = client.post(
-                "/campaign-flow/launch-batch",
-                json={
-                    "client_id": "glow_skin",
-                    "campaign_name": "Test Burst",
-                    "employee_email": "sarah.ops@launchgate.com",
-                    "employee_phone": "12345",  # Only 5 digits
-                    "target_platforms": ["instagram"],
-                },
-            )
-            assert resp.status_code == 400
-            assert "valid employee phone number" in resp.json()["detail"].lower()
-    finally:
-        app.dependency_overrides.clear()
+def test_launch_batch_phone_is_optional(mock_buyer_user):
+    """Notification email is required; phone collection is no longer part of launch."""
+    req = LaunchBatchRequest(client_id="glow_skin", employee_email="alerts@example.com", target_platforms=["facebook"])
+    assert req.employee_phone == ""
 
 
 def test_launch_batch_unsupported_platform_returns_400(mock_buyer_user):
@@ -249,10 +234,18 @@ def test_launch_batch_strict_platform_isolation(mock_buyer_user):
 
 def test_launch_batch_normalizes_aliases(mock_buyer_user):
     """Verify that Meta aliases are deduplicated and normalized."""
-    cursor = MockCursor(
-        fetchone_val=("batch_existing_123",),
-        fetchall_val=[("ad_001", "Glow Offer", "Buy now")],
-    )
+    from apps.api.ingest import hash_normalized_row
+    canonical = {"platform": "facebook", "headline": "Glow Offer", "ad_text": "Buy now", "destination_url": "https://example.com/offer", "creative_file": ""}
+    row_hash = hash_normalized_row(canonical)
+    cursor = MockCursor(fetchall_val=[("ad_001", "Glow Offer", "Buy now", canonical["destination_url"], row_hash, None, "facebook")])
+    def fetchone():
+        query = cursor.queries[-1][0]
+        if "SELECT uploaded_by" in query:
+            return (mock_buyer_user.user_id,)
+        if "SELECT state, content_hash" in query:
+            return ("approved", row_hash)
+        return None
+    cursor.fetchone = fetchone
     mock_conn = MockConnection(cursor)
 
     req = LaunchBatchRequest(
@@ -266,7 +259,8 @@ def test_launch_batch_normalizes_aliases(mock_buyer_user):
     with patch("apps.api.campaign_flow.get_session", return_value=mock_conn), \
          patch("apps.api.campaign_flow.init_flow_tables"), \
          patch("apps.api.campaign_flow.MCPPlatformDispatcher") as MockMCPClass, \
-         patch("apps.api.campaign_flow.NotificationDispatcher.dispatch_campaign_alert"):
+         patch("apps.api.campaign_flow.NotificationDispatcher.dispatch_campaign_alert", return_value={"email_status": "unconfigured_credentials"}), \
+         patch("apps.api.uploads._dispatch_pending_jobs"):
 
         mock_mcp = MockMCPClass.return_value
         mock_resp = MagicMock()

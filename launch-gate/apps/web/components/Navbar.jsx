@@ -1,11 +1,21 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { campaignHref, campaignScope, selectCampaign } from "../lib/campaign-scope";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
   const pathname = usePathname();
+  const [scope, setScope] = useState({});
+  useEffect(() => {
+    const sync = () => setScope(campaignScope());
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("batch_id")) selectCampaign(query.get("batch_id"), query.get("client_id") || "");
+    sync();
+    window.addEventListener("campaign-changed", sync);
+    return () => window.removeEventListener("campaign-changed", sync);
+  }, [pathname]);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [backendOnline, setBackendOnline] = useState(true);
@@ -21,10 +31,10 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
           try {
             setUser(JSON.parse(savedUser));
           } catch {
-            setUser({ email: "buyer@launchgate.com", role: "buyer" });
+            setUser(null);
           }
         } else {
-          setUser({ email: "buyer@launchgate.com", role: "buyer" });
+          setUser(null);
         }
       } else {
         setToken(null);
@@ -35,6 +45,7 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
 
   const handleLogout = () => {
     if (typeof window !== "undefined") {
+      selectCampaign("", "");
       localStorage.removeItem("launch_gate_token");
       localStorage.removeItem("launch_gate_user");
       setToken(null);
@@ -147,7 +158,7 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
             return (
               <Link
                 key={link.href}
-                href={link.href}
+                href={campaignHref(link.href, scope)}
                 style={{
                   textDecoration: "none",
                   fontSize: "13px",
@@ -184,11 +195,11 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
               width: "7px",
               height: "7px",
               borderRadius: "50%",
-              background: "#10b981",
+              background: backendOnline ? "#10b981" : "#f59e0b",
               boxShadow: "0 0 8px rgba(16, 185, 129, 0.6)",
             }} />
             <span style={{ fontSize: "12px", fontWeight: "600", color: "#e2e8f0", letterSpacing: "0.02em" }}>
-              Live Engine Active
+              {backendOnline ? "API online" : "API offline"}
             </span>
           </div>
 
@@ -207,6 +218,8 @@ export default function Navbar({ apiBaseUrl = "http://localhost:8000" }) {
             <span>⚡</span>
             <span>Meta Campaign Launcher</span>
           </div>
+          {token ? <button onClick={handleLogout} style={{color: "#cbd5e1", background: "transparent", border: "1px solid #475569", borderRadius: 8, padding: "6px 12px"}}>Sign out{user?.email ? ` (${user.email})` : ""}</button>
+            : <Link href="/login" style={{color: "#a5b4fc", fontSize: 13}}>Sign in</Link>}
         </div>
       </div>
     </header>

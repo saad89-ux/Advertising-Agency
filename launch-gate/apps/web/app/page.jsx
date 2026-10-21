@@ -3,7 +3,9 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { selectCampaign } from "../lib/campaign-scope";
 import GlassToast from "../components/GlassToast";
+import { readError, notificationLabel } from "../lib/api";
 
 const AVAILABLE_PLATFORMS = [
   { id: "facebook", label: "Facebook", icon: "📘" },
@@ -26,50 +28,26 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   const [promptText, setPromptText] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
-  const [selectedClient, setSelectedClient] = useState("");
-  const [availableClients, setAvailableClients] = useState([]);
-  const [isCustomClient, setIsCustomClient] = useState(false);
-  const [customClientName, setCustomClientName] = useState("");
 
   // Preflight & LLM Review state
-  const [isReviewing, setIsReviewing] = useState(false);
   const [reviewResult, setReviewResult] = useState(null);
   const [missingForm, setMissingForm] = useState({});
 
   // HITL Launch Modal & Notification Contact Settings
   const [showLaunchModal, setShowLaunchModal] = useState(false);
   const [employeeEmail, setEmployeeEmail] = useState("");
-  const [employeePhone, setEmployeePhone] = useState("");
   const [selectedPlatforms, setSelectedPlatforms] = useState(["facebook", "instagram"]);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [launchStage, setLaunchStage] = useState("");
+  const [uploadedSheet, setUploadedSheet] = useState(null);
+  const [creativeRef, setCreativeRef] = useState(null);
+  const [formError, setFormError] = useState("");
+  const [needsSignIn, setNeedsSignIn] = useState(false);
 
   // Sync launcher contact with localStorage
   const updateLauncherEmail = (val) => {
     setEmployeeEmail(val);
     if (typeof window !== "undefined") localStorage.setItem("launcher_email", val);
-  };
-
-  const updateLauncherPhone = (val) => {
-    setEmployeePhone(val);
-    if (typeof window !== "undefined") localStorage.setItem("launcher_phone", val);
-  };
-
-  // Fetch available clients from DB
-  const fetchClients = async () => {
-    try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`${apiBaseUrl}/campaign-flow/clients`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableClients(data);
-        if (data.length > 0 && !selectedClient) {
-          setSelectedClient(data[0].client_id);
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to fetch clients:", err);
-    }
   };
 
   // Fetch batch chat history
@@ -81,9 +59,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       if (res.ok) {
         const data = await res.json();
         setChatHistory(data);
-        if (data.length > 0 && !activeBatchId) {
-          setActiveBatchId(data[0].batch_id);
-        }
+
       }
     } catch (err) {
       console.warn("Failed to fetch chat history:", err);
@@ -94,92 +70,38 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedEmail = localStorage.getItem("launcher_email");
-      const savedPhone = localStorage.getItem("launcher_phone");
-      const storedUser = localStorage.getItem("launch_gate_user");
 
       if (savedEmail) {
         setEmployeeEmail(savedEmail);
-      } else if (storedUser) {
-        try {
-          const parsed = JSON.parse(storedUser);
-          if (parsed?.email) {
-            setEmployeeEmail(parsed.email);
-            localStorage.setItem("launcher_email", parsed.email);
-          }
-        } catch (_) {}
       }
 
-      if (savedPhone) {
-        setEmployeePhone(savedPhone);
-      }
     }
   }, []);
 
   useEffect(() => {
     fetchChatHistory();
-    fetchClients();
   }, [apiBaseUrl]);
 
-  // Preflight Review LLM Call
-  const handleReviewAndCheck = async (e) => {
+  // Open the shared form first; requirements are checked after contact entry.
+  const handleReviewAndCheck = (e) => {
     if (e) e.preventDefault();
-    setIsReviewing(true);
-
-    try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
-      const headers = {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
-
-      const payload = {
-        client_id: selectedClient,
-        input_text: promptText,
-        file_name: selectedFile?.name || (selectedImage ? "creative_asset.png" : null),
-        file_type: selectedFile?.type || (selectedImage ? "image/png" : "text/plain"),
-        ad_overrides: {
-          ...missingForm,
-        },
-        social_handles: {},
-        social_tokens: {},
-      };
-
-      const res = await fetch(`${apiBaseUrl}/campaign-flow/preflight-review`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setReviewResult(data);
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        const detail = typeof errorData.detail === "string"
-          ? errorData.detail
-          : errorData.message || "The preflight review could not be completed.";
-        setToast({ message: detail, type: "error" });
-      }
-    } catch (err) {
-      console.error(err);
-      setToast({ message: "Network error reviewing campaign resources. Please retry.", type: "error" });
-    } finally {
-      setIsReviewing(false);
-    }
+    setFormError("");
+    setNeedsSignIn(false);
+    setShowLaunchModal(true);
   };
 
   // Launch Campaign & Capture Employee Contact
-  const handleConfirmLaunch = async () => {
+  const submitCampaign = async () => {
     if (!employeeEmail || !employeeEmail.includes("@")) {
       setToast({ message: "Please enter a valid launcher email address.", type: "error" });
       return;
     }
-    if ((employeePhone || "").replace(/\D/g, "").length < 7) {
-      setToast({ message: "Please enter a valid phone number with at least 7 digits.", type: "error" });
-      return;
-    }
 
+    setFormError("");
+    setNeedsSignIn(false);
+    if (isLaunching) return;
     setIsLaunching(true);
+    setLaunchStage("Preparing campaign...");
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
       const headers = {
@@ -187,12 +109,17 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
 
-      const clientId = selectedClient || "brightleaf";
+      let clientId = "";
+      if (!selectedPlatforms.length) throw new Error("Select at least one platform.");
       const metaPlatforms = selectedPlatforms.length > 0 ? selectedPlatforms : ["facebook", "instagram"];
-      let currentBatchId = activeBatchId || `batch_${clientId}_${Date.now()}`;
+      let currentBatchId = activeBatchId || `batch_${Date.now()}`;
+      let uploadedCreativeRef = creativeRef;
 
       // 1. If user uploaded a campaign sheet (Method 2: CSV/XLSX), persist it to batch table
-      if (selectedFile) {
+      if (inputTab === "file" && !selectedFile) throw new Error("Attach a campaign sheet for this new campaign.");
+      if (inputTab === "file" && selectedFile && uploadedSheet?.file === selectedFile) currentBatchId = uploadedSheet.batchId;
+      if (inputTab === "file" && selectedFile && uploadedSheet?.file !== selectedFile) {
+        setLaunchStage("Uploading campaign sheet...");
         try {
           const fileFormData = new FormData();
           fileFormData.append("file", selectedFile);
@@ -204,21 +131,42 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
           });
           if (uploadRes.ok) {
             const uploadData = await uploadRes.json();
+            if (uploadData.accepted_count === 0 && !uploadData.duplicate_sheet) {
+              const reasons = (uploadData.rejected_rows || [])
+                .map((row) => row.reason || row.reason_code)
+                .filter(Boolean)
+                .join("; ");
+              throw new Error(reasons || "No valid ads were accepted from the uploaded sheet.");
+            }
             if (uploadData.batch_id) {
               currentBatchId = uploadData.batch_id;
               setActiveBatchId(currentBatchId);
+              setUploadedSheet({file: selectedFile, batchId: currentBatchId});
             }
           } else {
-            const uploadError = await uploadRes.json().catch(() => ({}));
-            throw new Error(typeof uploadError.detail === "string" ? uploadError.detail : "Campaign sheet upload failed.");
+            throw new Error(await readError(uploadRes));
           }
         } catch (uploadErr) {
           throw uploadErr;
         }
       }
 
+      const clientResponse = await fetch(`${apiBaseUrl}/campaign-flow/resolve-client`, {
+        method: "POST", headers, body: JSON.stringify({
+          batch_id: inputTab === "file" ? currentBatchId : null,
+          input_text: promptText,
+          ad_overrides: {destination_url: missingForm.destination_url || ""}
+        })
+      });
+      if (clientResponse.status === 401) {
+        setNeedsSignIn(true);
+        throw new Error("Please sign in to continue. Your notification email has been kept.");
+      }
+      if (!clientResponse.ok) throw new Error(await readError(clientResponse));
+      clientId = (await clientResponse.json()).client_id;
+
       // 2. If user attached a creative asset (Method 3: Image/Video), persist to Cloud creative storage
-      if (selectedImage) {
+      if (inputTab === "media" && selectedImage && !uploadedCreativeRef) {
         try {
           const creativeFormData = new FormData();
           creativeFormData.append("file", selectedImage);
@@ -228,9 +176,9 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
             body: creativeFormData,
           });
+          if (creativeRes.ok) { uploadedCreativeRef = (await creativeRes.json()).file_ref; setCreativeRef(uploadedCreativeRef); }
           if (!creativeRes.ok) {
-            const creativeError = await creativeRes.json().catch(() => ({}));
-            throw new Error(typeof creativeError.detail === "string" ? creativeError.detail : "Creative upload failed.");
+            throw new Error(await readError(creativeRes));
           }
         } catch (creativeErr) {
           throw creativeErr;
@@ -240,21 +188,39 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       // 3. Dispatch to Meta Platforms (Instagram & Facebook)
       const campaignTitle = promptText && promptText.trim().length > 0
         ? (promptText.trim().split("\n")[0].slice(0, 60))
-        : `${clientId.toUpperCase()} Meta Growth Burst`;
+        : (selectedFile?.name?.replace(/\.[^.]+$/, "") || `${clientId} Campaign`);
 
       const launchPayload = {
         client_id: clientId,
         batch_id: currentBatchId,
         campaign_name: campaignTitle,
         employee_email: employeeEmail,
-        employee_phone: employeePhone,
         target_platforms: metaPlatforms,
-        headline: reviewResult?.campaign_summary?.headline || promptText.trim().split("\n")[0] || null,
-        ad_text: reviewResult?.campaign_summary?.ad_text || promptText || null,
-        destination_url: reviewResult?.campaign_summary?.destination_url || missingForm.destination_url || null,
-        creative_file: selectedImage?.name || selectedFile?.name || null,
+        headline: missingForm.headline || reviewResult?.campaign_summary?.headline || promptText.trim().split("\n")[0] || null,
+        ad_text: missingForm.ad_text || reviewResult?.campaign_summary?.ad_text || promptText || null,
+        destination_url: missingForm.destination_url || reviewResult?.campaign_summary?.destination_url || null,
+        creative_file: uploadedCreativeRef || null,
       };
 
+      setLaunchStage("Reviewing campaign ads...");
+      const reviewRequest = {client_id: clientId,
+        batch_id: inputTab === "file" ? currentBatchId : null,
+        input_text: promptText, ad_overrides: {...launchPayload, target_platforms: metaPlatforms}};
+      let checked;
+      for (;;) {
+      const preflightRes = await fetch(`${apiBaseUrl}/campaign-flow/preflight-review?background=true`, {
+        method: "POST", headers, body: JSON.stringify(reviewRequest)
+      });
+      if (!preflightRes.ok) throw new Error(await readError(preflightRes));
+      checked = await preflightRes.json();
+      if (checked.status !== "reviewing") break;
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      setReviewResult(checked);
+      if (checked.status !== "ready_for_review") {
+        throw new Error("Review the campaign requirements and checks below before launch.");
+      }
+      setLaunchStage("Dispatching through Meta MCP...");
       const launchRes = await fetch(`${apiBaseUrl}/campaign-flow/launch-batch`, {
         method: "POST",
         headers,
@@ -262,41 +228,50 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
       });
 
       if (launchRes.ok) {
+        const launchData = await launchRes.json();
         setShowLaunchModal(false);
+        setActiveBatchId(launchData.batch_id);
         setToast({
-          message: "Campaign reviewed & dispatched to Meta platforms (Instagram & Facebook) successfully!",
-          type: "success",
+          message: (launchData.status === "blocked"
+            ? "Meta connector not configured — nothing was sent."
+            : launchData.status === "partial"
+            ? "Campaign partially dispatched. Review the failed Meta destinations."
+            : launchData.status === "launched"
+            ? "Campaign dispatched to the configured Meta destinations."
+            : "Meta launch failed. Review the recorded dispatch results.") + " " + (launchData.notifications || []).map(notificationLabel).join(" "),
+          type: launchData.status === "launched" ? "success" : launchData.status === "blocked" ? "warning" : "error",
         });
         // Refresh IP-scoped sidebar batches
         fetchChatHistory();
-        router.push("/dispatches");
-      } else {
-        const err = await launchRes.json().catch(() => ({}));
-        let errMsg = "Failed to launch campaign. Please check inputs.";
-        if (typeof err.detail === "string") {
-          errMsg = err.detail;
-        } else if (Array.isArray(err.detail) && err.detail.length > 0) {
-          errMsg = err.detail.map((d) => (typeof d === "string" ? d : d.msg || JSON.stringify(d))).join(", ");
-        } else if (err.message) {
-          errMsg = err.message;
+        selectCampaign(launchData.batch_id, clientId);
+        setSelectedFile(null);
+        setUploadedSheet(null);
+        setSelectedImage(null);
+        setCreativeRef(null);
+        {
+          router.push(`/dispatches?batch_id=${encodeURIComponent(launchData.batch_id)}&client_id=${encodeURIComponent(clientId)}`);
         }
-        setToast({ message: errMsg, type: "error" });
+      } else {
+        throw new Error(await readError(launchRes));
       }
     } catch (err) {
-      console.error(err);
-      setToast({ message: err?.message || "Meta launch could not be completed. The server did not confirm the operation.", type: "error" });
+      console.warn(err);
+      setFormError(err?.message || "The server could not confirm the campaign. Please try again.");
     } finally {
       setIsLaunching(false);
     }
   };
 
   const handleStartNewBatch = () => {
-    const newId = `batch_${selectedClient}_${Date.now().toString(36)}`;
+    const newId = `batch_${Date.now().toString(36)}`;
     setActiveBatchId(newId);
+    selectCampaign("", "");
+    setUploadedSheet(null);
     setReviewResult(null);
     setPromptText("");
     setSelectedFile(null);
     setSelectedImage(null);
+    setCreativeRef(null);
     setMissingForm({});
   };
 
@@ -341,7 +316,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 borderRadius: "999px",
                 fontWeight: "600",
               }}>
-                1 Batch Active
+                {chatHistory.length} Saved Batches
               </span>
             </div>
           )}
@@ -416,7 +391,8 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       localStorage.setItem("launch_gate_active_client", item.client_id || "");
                       localStorage.setItem("launch_gate_active_batch", item.batch_id || "");
                     }
-                    router.push(`/batches/${item.batch_id}`);
+                    selectCampaign(item.batch_id, item.client_id);
+                    router.push(`/dispatches?batch_id=${encodeURIComponent(item.batch_id)}&client_id=${encodeURIComponent(item.client_id || "")}`);
                   }}
                   style={{
                     padding: sidebarOpen ? "12px 14px" : "10px",
@@ -500,91 +476,6 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             </p>
           </div>
 
-          {/* Client Selection Strip */}
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            marginBottom: "16px",
-            background: "rgba(15, 23, 42, 0.6)",
-            padding: "8px 16px",
-            borderRadius: "12px",
-            border: "1px solid rgba(255, 255, 255, 0.06)",
-          }}>
-            <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", textTransform: "uppercase" }}>Brand / Client:</span>
-            {availableClients.length > 0 ? (
-              availableClients.map((c) => (
-                <button
-                  key={c.client_id}
-                  onClick={() => {
-                    setSelectedClient(c.client_id);
-                    setIsCustomClient(false);
-                  }}
-                  style={{
-                    padding: "4px 12px",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    background: !isCustomClient && selectedClient === c.client_id ? "rgba(99, 102, 241, 0.2)" : "transparent",
-                    color: !isCustomClient && selectedClient === c.client_id ? "#818cf8" : "#94a3b8",
-                    border: !isCustomClient && selectedClient === c.client_id ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid transparent",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  {c.name || c.client_id}
-                </button>
-              ))
-            ) : (
-              <span style={{ fontSize: "12px", color: "#64748b" }}>No registered clients</span>
-            )}
-
-            <button
-              onClick={() => {
-                setIsCustomClient(!isCustomClient);
-                if (!isCustomClient && customClientName) {
-                  setSelectedClient(customClientName.toLowerCase().replace(/[^a-z0-9_]/g, "") || "custom_client");
-                }
-              }}
-              style={{
-                padding: "4px 12px",
-                borderRadius: "6px",
-                fontSize: "12px",
-                fontWeight: "600",
-                background: isCustomClient ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.04)",
-                color: isCustomClient ? "#10b981" : "#94a3b8",
-                border: isCustomClient ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(255, 255, 255, 0.1)",
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-              }}
-            >
-              + Real Brand / Client
-            </button>
-
-            {isCustomClient && (
-              <input
-                type="text"
-                placeholder="Enter client brand name or domain..."
-                value={customClientName}
-                onChange={(e) => {
-                  setCustomClientName(e.target.value);
-                  const clean = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "");
-                  setSelectedClient(clean || "custom_client");
-                }}
-                style={{
-                  background: "rgba(0, 0, 0, 0.4)",
-                  border: "1px solid rgba(16, 185, 129, 0.5)",
-                  borderRadius: "6px",
-                  padding: "4px 10px",
-                  color: "#ffffff",
-                  fontSize: "12px",
-                  outline: "none",
-                  width: "220px",
-                }}
-              />
-            )}
-          </div>
-
           {/* Central Input Box */}
           <div style={{
             background: "rgba(15, 23, 42, 0.75)",
@@ -599,7 +490,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
               {[
                 { id: "prompt", label: "Direct Prompt & Copy", icon: "💬" },
-                { id: "file", label: "Campaign Sheet (CSV, XLSX, JSON)", icon: "📄" },
+                { id: "file", label: "Campaign Sheet (CSV, XLSX)", icon: "📄" },
                 { id: "media", label: "Creative Asset / Screenshot", icon: "🖼️" },
               ].map((tab) => (
                 <button
@@ -656,7 +547,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                 <input
                   type="file"
                   id="sheet-upload"
-                  accept=".csv,.xlsx,.json,.txt"
+                  accept=".csv,.xlsx"
                   onChange={(e) => setSelectedFile(e.target.files[0])}
                   style={{ display: "none" }}
                 />
@@ -685,7 +576,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   type="file"
                   id="media-upload"
                   accept="image/*,video/*"
-                  onChange={(e) => setSelectedImage(e.target.files[0])}
+                  onChange={(e) => {setSelectedImage(e.target.files[0]); setCreativeRef(null); setReviewResult(null);}}
                   style={{ display: "none" }}
                 />
                 <label htmlFor="media-upload" style={{ cursor: "pointer" }}>
@@ -694,7 +585,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                     {selectedImage ? selectedImage.name : "Attach creative visual, video asset, or ad screenshot"}
                   </div>
                   <div style={{ fontSize: "12px", color: "#64748b" }}>
-                    Automated agents verify 1:1 and 9:16 aspect ratios, visual brand safety, and platform guidelines
+                    Uploaded image dimensions are checked when available. Unsupported creative checks are marked not checked.
                   </div>
                 </label>
               </div>
@@ -703,8 +594,8 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             {/* Action Bar */}
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "18px" }}>
               <button
-                onClick={() => setShowLaunchModal(true)}
-                disabled={isReviewing}
+                onClick={handleReviewAndCheck}
+                disabled={isLaunching}
                 style={{
                   padding: "12px 28px",
                   background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
@@ -713,17 +604,17 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   color: "#ffffff",
                   fontSize: "14px",
                   fontWeight: "700",
-                  cursor: isReviewing ? "not-allowed" : "pointer",
+                  cursor: isLaunching ? "not-allowed" : "pointer",
                   display: "flex",
                   alignItems: "center",
                   gap: "8px",
                   boxShadow: "0 6px 20px rgba(99, 102, 241, 0.35)",
                 }}
               >
-                {isReviewing ? (
+                {isLaunching ? (
                   <>
                     <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⏳</span>
-                    AI Analyzing Campaign & Social Handles...
+                    Checking campaign requirements...
                   </>
                 ) : (
                   <>
@@ -733,75 +624,6 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               </button>
             </div>
           </div>
-
-          {/* 3. DYNAMIC PREFLIGHT & MISSING REQUIREMENTS FORM */}
-          {reviewResult && reviewResult.status === "missing_requirements" && (
-            <div style={{
-              background: "rgba(239, 68, 68, 0.08)",
-              border: "1px solid rgba(239, 68, 68, 0.3)",
-              borderRadius: "16px",
-              padding: "24px",
-              marginBottom: "24px",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
-                <span style={{ fontSize: "20px" }}>⚠️</span>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#fca5a5" }}>
-                  Missing Campaign Requirements Detected ({reviewResult.missing_count})
-                </h3>
-              </div>
-              <p style={{ fontSize: "13px", color: "#cbd5e1", margin: "0 0 18px 0" }}>
-                {reviewResult.message}
-              </p>
-
-              {/* Dynamic Input Fields */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "14px" }}>
-                {reviewResult.missing_items.map((item, idx) => (
-                  <div key={idx} style={{ background: "rgba(15, 23, 42, 0.6)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                      <label style={{ fontSize: "13px", fontWeight: "600", color: "#f8fafc" }}>{item.label}</label>
-                      <span style={{ fontSize: "11px", color: "#94a3b8" }}>{item.reason}</span>
-                    </div>
-                    <input
-                      type={item.type || "text"}
-                      placeholder={item.placeholder}
-                      value={missingForm[item.field] || ""}
-                      onChange={(e) => setMissingForm({ ...missingForm, [item.field]: e.target.value })}
-                      style={{
-                        width: "100%",
-                        padding: "10px 14px",
-                        background: "rgba(8, 12, 20, 0.8)",
-                        border: "1px solid rgba(255, 255, 255, 0.15)",
-                        borderRadius: "8px",
-                        color: "#ffffff",
-                        fontSize: "13px",
-                        outline: "none",
-                        boxSizing: "border-box",
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
-                <button
-                  onClick={handleReviewAndCheck}
-                  disabled={isReviewing}
-                  style={{
-                    padding: "10px 22px",
-                    background: "#10b981",
-                    border: "none",
-                    borderRadius: "8px",
-                    color: "#ffffff",
-                    fontSize: "13px",
-                    fontWeight: "700",
-                    cursor: "pointer",
-                  }}
-                >
-                  ✓ Update Requirements & Re-Check
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* 4. VERIFIED HITL REVIEW PAUSE (Ready to Launch) */}
           {reviewResult && reviewResult.status === "ready_for_review" && (
@@ -817,10 +639,10 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   <span style={{ fontSize: "20px" }}>✅</span>
                   <div>
                     <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#6ee7b7" }}>
-                      Pre-Flight Passed — Paused for Human Review
+                      Preflight Results — Awaiting Human Approval
                     </h3>
                     <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                      Meta preflight passed • Paused for human approval
+                      Review unavailable checks before authorizing
                     </div>
                   </div>
                 </div>
@@ -863,11 +685,11 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   <span style={{ color: "#818cf8", fontWeight: "600" }}>{reviewResult.campaign_summary.destination_url}</span>
                 </div>
                 <div style={{ gridColumn: "1 / -1" }}>
-                  <span style={{ color: "#64748b", display: "block", marginBottom: "2px" }}>Platforms Ready:</span>
+                  <span style={{ color: "#64748b", display: "block", marginBottom: "2px" }}>Target Platforms:</span>
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                     {["Instagram", "Facebook"].map((p) => (
                       <span key={p} style={{ padding: "3px 8px", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
-                        ✓ {p}
+                        {p}
                       </span>
                     ))}
                   </div>
@@ -896,7 +718,9 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
             borderRadius: "20px",
             padding: "32px",
             width: "100%",
-            maxWidth: "520px",
+            maxWidth: "620px",
+            maxHeight: "90vh",
+            overflowY: "auto",
             boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
           }}>
             <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: "800", color: "#f8fafc" }}>
@@ -906,6 +730,9 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
               Enter the responsible media buyer email address before launch. Launch Gate dispatches rejection, blocker, and suspension alerts directly to this address via SMTP email.
             </p>
 
+            {formError && <div role="alert" style={{color: "#fcd34d", marginBottom: 16}}>
+              {formError} {needsSignIn && <Link href="/login" style={{color: "#a5b4fc"}}>Sign in</Link>}
+            </div>}
             {/* Target Platforms Checkboxes */}
             <div style={{ marginBottom: "18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
@@ -988,6 +815,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
 
             <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "24px" }}>
               <div>
+                <p style={{color: "#94a3b8", fontSize: 12}}>Used only to send you launch and policy alerts.</p>
                 <label style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", display: "block", marginBottom: "6px" }}>
                   Employee Email Address:
                 </label>
@@ -1014,34 +842,27 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   </p>
                 )}
               </div>
-              <div>
-                <label style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", display: "block", marginBottom: "6px" }}>
-                  Alert Phone Number:
-                </label>
-                <input
-                  type="tel"
-                  value={employeePhone}
-                  onChange={(e) => updateLauncherPhone(e.target.value)}
-                  placeholder="e.g. +1 555 123 4567"
-                  style={{
-                    width: "100%",
-                    padding: "10px 14px",
-                    background: "rgba(8, 12, 20, 0.8)",
-                    border: `1px solid ${employeePhone.replace(/\D/g, "").length < 7 ? "rgba(244, 63, 94, 0.4)" : "rgba(255, 255, 255, 0.15)"}`,
-                    borderRadius: "8px",
-                    color: "#ffffff",
-                    fontSize: "13px",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-                {employeePhone.replace(/\D/g, "").length < 7 && (
-                  <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#f43f5e" }}>
-                    ⚠️ A phone number with at least 7 digits is required.
-                  </p>
-                )}
-              </div>
+
             </div>
+
+            {inputTab !== "file" && <div style={{display: "grid", gap: 12, marginBottom: 20}}>
+              <p style={{margin: 0, fontSize: 13, color: "#cbd5e1"}}>Confirm the campaign details before authorization.</p>
+              {[{key: "headline", label: "Headline"}, {key: "ad_text", label: "Ad copy"}, {key: "destination_url", label: "Landing page URL"}].map(({key, label}) => <label key={key}>
+                {label}
+                <input type={key === "destination_url" ? "url" : "text"}
+                  value={missingForm[key] ?? (key === "headline" ? promptText.trim().split("\n")[0] || "" : key === "ad_text" ? promptText : "")}
+                  onChange={e => {setMissingForm({...missingForm, [key]: e.target.value}); setReviewResult(null);}}
+                  style={{display: "block", width: "100%", boxSizing: "border-box", padding: 10, background: "#111827", color: "white", border: "1px solid #475569", borderRadius: 8}} />
+              </label>)}
+            </div>}
+            {reviewResult?.missing_items?.length > 0 && <div role="alert" style={{color: "#fcd34d", marginBottom: 16}}>
+              {reviewResult.missing_items.map(item => <p key={item.field}>{item.label}: {item.reason}</p>)}
+            </div>}
+            {reviewResult?.checks && <div style={{marginBottom: 16}}>
+              {reviewResult.checks.map((check, i) => <p key={i} style={{color: check.status === "fail" ? "#fca5a5" : check.status === "not_checked" ? "#fcd34d" : "#6ee7b7"}}>
+                {check.platform}: {check.name} — {check.status} {(check.findings || []).join(" ")}
+              </p>)}
+            </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               <button
@@ -1064,11 +885,10 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                   isLaunching ||
                   selectedPlatforms.length === 0 ||
                   !employeeEmail ||
-                  !employeeEmail.includes("@") ||
-                  employeePhone.replace(/\D/g, "").length < 7;
+                  !employeeEmail.includes("@");
                 return (
                   <button
-                    onClick={handleConfirmLaunch}
+                    onClick={submitCampaign}
                     disabled={isLaunchDisabled}
                     style={{
                       padding: "10px 24px",
@@ -1085,7 +905,7 @@ export default function HomePage({ apiBaseUrl = "http://localhost:8000" }) {
                       transition: "all 0.2s ease",
                     }}
                   >
-                    {isLaunching ? "Connecting MCP Servers..." : "Authorize & Launch via MCP Agents 🚀"}
+                    {isLaunching ? launchStage : "Authorize & Launch via MCP Agents 🚀"}
                   </button>
                 );
               })()}

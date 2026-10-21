@@ -1,4 +1,6 @@
 "use client";
+import { scopedFetch as fetch } from "../../lib/campaign-scope";
+import { readError } from "../../lib/api";
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
@@ -16,6 +18,7 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
   const [selectedClientId, setSelectedClientId] = useState(searchParams?.get("client_id") || "");
   const [selectedBatchId, setSelectedBatchId] = useState(searchParams?.get("batch_id") || "");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [previewAd, setPreviewAd] = useState(null);
 
   // Sync with URL search params if they change
@@ -50,6 +53,8 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
         fetch(`${apiBaseUrl}/campaign-flow/clients`, { headers }),
       ]);
 
+      for (const response of [tracesRes, campaignsRes, clientsRes]) if (!response.ok) throw new Error(await readError(response));
+      setLoadError("");
       if (tracesRes.ok) {
         const tData = await tracesRes.json();
         setTracesData(tData);
@@ -100,6 +105,9 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
         setGroupedClients(Object.values(map));
       }
     } catch (err) {
+      setLoadError(err.message || "Unable to load this campaign.");
+      setAllAds([]);
+      setGroupedClients([]);
       console.error("Dispatches fetch error:", err);
     } finally {
       setLoading(false);
@@ -111,9 +119,10 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
   }, [apiBaseUrl, selectedClientId, selectedBatchId]);
 
   const activeTraces = tracesData?.traces || [];
-  const activeListenersCount = tracesData?.mcp_active_servers ?? (activeTraces.length > 0 ? 1 : 0);
+  const activeListenersCount = tracesData?.mcp_active_servers ?? 0;
 
   const handleSelectClientFilter = (cid) => {
+    if (selectedBatchId) return;
     setSelectedClientId(cid);
     setSelectedBatchId("");
     if (typeof window !== "undefined") {
@@ -144,7 +153,8 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
     }}>
       <div style={{ maxWidth: "1280px", margin: "0 auto" }}>
         
-        {/* Header Strip */}
+        {loadError && <p role="alert">{loadError}</p>}
+      {/* Header Strip */}
         <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "16px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
@@ -559,7 +569,9 @@ function DispatchesContent({ apiBaseUrl = "http://localhost:8000" }) {
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: "12px" }}>
                           <div style={{ fontSize: "12px" }}>
                             <span style={{ color: "#64748b" }}>Spend: </span>
-                            <span style={{ color: "#f8fafc", fontWeight: "600" }}>${Number(camp.spend).toFixed(2)}</span>
+                            <span style={{ color: "#f8fafc", fontWeight: "600" }}>
+                              {camp.spend != null ? `$${Number(camp.spend).toFixed(2)}` : "Not tracked"}
+                            </span>
                             <span style={{ color: "#64748b", marginLeft: "10px" }}>Orders: </span>
                             <span style={{ color: "#34d399", fontWeight: "600" }}>{camp.orders}</span>
                           </div>

@@ -1,6 +1,5 @@
 """Application database schema initialization."""
 
-from apps.api.users import ensure_default_users
 from apps.api import (
     ads,
     approvals,
@@ -19,7 +18,6 @@ from apps.worker.tracing import create_trace_tables
 
 def init_schema() -> None:
     """Create the API's tables and constraints in dependency order."""
-    ensure_default_users()
     clients.create_client_tables()
     batches.create_batches_table()
     ads.create_ads_table()

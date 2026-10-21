@@ -336,6 +336,7 @@ class TestCreativeAssetUploadEndpoint:
             res = client.post(
                 "/uploads/creative",
                 files={"file": ("skincare_ad.mp4", mp4_content, "video/mp4")},
+                data={"client_id": "aurora"},
                 headers=auth_headers,
             )
 
@@ -355,6 +356,7 @@ class TestCreativeAssetUploadEndpoint:
             res = client.post(
                 "/uploads/creative",
                 files={"file": ("brand_guidelines.pdf", pdf_content, "application/pdf")},
+                data={"client_id": "aurora"},
                 headers=auth_headers,
             )
 
@@ -376,6 +378,7 @@ class TestCreativeAssetUploadEndpoint:
             res = client.post(
                 "/uploads/creative",
                 files={"file": ("aurora_ad.webp", webp_content, "image/webp")},
+                data={"client_id": "aurora"},
                 headers=auth_headers,
             )
 
