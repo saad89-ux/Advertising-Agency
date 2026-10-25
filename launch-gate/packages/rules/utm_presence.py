@@ -47,6 +47,8 @@ def check_utm_presence(
                 message=f"Required UTM parameter '{parameter}' is missing or empty.",
                 field=parameter,
                 proposed_fix=f"Add a non-empty {parameter} query parameter.",
+                actual_value="" if values else "<missing>",
+                expected_format="a non-empty value",
             )
         )
     return findings

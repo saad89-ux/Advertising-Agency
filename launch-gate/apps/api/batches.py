@@ -612,6 +612,8 @@ def list_user_batches(user: CurrentUser, connection: Any = None) -> list[dict[st
             f_ref = str(row[5]) if len(row) > 5 and row[5] is not None else None
             results.append({
                 "batch_id": bid,
+                "scope": "guest" if user.guest_session_id else "authenticated",
+                "workspace_type": "guest" if user.guest_session_id else "authenticated_workspace",
                 "filename": str(row[1]),
                 "uploaded_by": str(row[2]) if row[2] is not None else None,
                 "created_at": str(row[3]),

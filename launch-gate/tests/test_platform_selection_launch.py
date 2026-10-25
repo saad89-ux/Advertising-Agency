@@ -234,8 +234,8 @@ def test_launch_batch_strict_platform_isolation(mock_buyer_user):
 
 def test_launch_batch_normalizes_aliases(mock_buyer_user, monkeypatch):
     """Verify that Meta aliases are deduplicated and normalized."""
-    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "false")
-    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "false")
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
     from apps.api.ingest import hash_normalized_row
     canonical = {"platform": "facebook", "headline": "Glow Offer", "ad_text": "Buy now", "destination_url": "https://example.com/offer", "creative_file": ""}
     row_hash = hash_normalized_row(canonical)
@@ -261,6 +261,10 @@ def test_launch_batch_normalizes_aliases(mock_buyer_user, monkeypatch):
     with patch("apps.api.campaign_flow.get_session", return_value=mock_conn), \
          patch("apps.api.campaign_flow.init_flow_tables"), \
          patch("apps.api.campaign_flow.MCPPlatformDispatcher") as MockMCPClass, \
+         patch("apps.worker.sender.send_ad_to_stand_in", return_value={
+             "status": "sent",
+             "platform_ad_id": "stand-in-receipt",
+         }) as stand_in_send, \
          patch("apps.api.campaign_flow.NotificationDispatcher.dispatch_campaign_alert", return_value={"email_status": "unconfigured_credentials"}), \
          patch("apps.api.uploads._dispatch_pending_jobs"):
 
@@ -275,7 +279,8 @@ def test_launch_batch_normalizes_aliases(mock_buyer_user, monkeypatch):
     # fb and meta both normalize to facebook; ig -> instagram.
     assert res["target_platforms"] == ["facebook", "instagram"]
     assert len(res["target_platforms"]) == 2
-    assert [call.kwargs["platform"] for call in mock_mcp.dispatch_paused_ad.call_args_list] == ["facebook", "instagram"]
+    assert stand_in_send.call_count == 1
+    mock_mcp.dispatch_paused_ad.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

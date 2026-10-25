@@ -17,6 +17,7 @@ import subprocess
 import sys
 
 REPO_ROOT = Path(__file__).resolve().parent
+LOCAL_HOST = "127.0.0.1"
 
 # Check if running within .venv. If not, auto-switch to the project's virtual environment.
 _venv_python = (
@@ -30,6 +31,7 @@ if _venv_python.exists() and Path(sys.prefix).resolve() != _venv_root.resolve():
     sys.exit(subprocess.call([str(_venv_python), str(Path(__file__).resolve())] + sys.argv[1:]))
 
 import http.server
+import logging
 import json
 import socket
 import socketserver
@@ -50,8 +52,6 @@ def init_environment():
         from dotenv import load_dotenv
 
         load_dotenv(REPO_ROOT / ".env")
-        if not os.environ.get("JWT_SECRET") or "placeholder" in os.environ.get("JWT_SECRET", "").lower():
-            os.environ["JWT_SECRET"] = "launch_gate_secure_secret_key_development_2026_x87"
         from apps.api.schema import init_schema
 
         try:
@@ -81,7 +81,7 @@ def run_storefront_server():
             pass  # Suppress noisy HTTP logs
 
     try:
-        with socketserver.TCPServer(("0.0.0.0", 8099), Handler) as httpd:
+        with socketserver.TCPServer((LOCAL_HOST, 8099), Handler) as httpd:
             httpd.serve_forever()
     except Exception:
         pass
@@ -100,7 +100,7 @@ def run_stand_in_platform():
 
         uvicorn.run(
             "data.stand_in_platform.app:app",
-            host="0.0.0.0",
+            host=LOCAL_HOST,
             port=8100,
             log_level="warning",
             access_log=False,
@@ -110,20 +110,29 @@ def run_stand_in_platform():
 
 
 def run_worker_loop():
-    """Continuously process durable notification and ad jobs."""
+    """Continuously process durable notification, Meta sync, and ad jobs."""
     try:
         from apps.worker.job_runner import run_once
         from apps.api.notifications import process_pending_notifications
+        from apps.api.queue import recover_meta_sync_jobs
+        from apps.api.outbox import dispatch_pending_meta_sync_jobs
+        from apps.worker.meta_sync import run_meta_sync_once
     except Exception as exc:
         print(f"[WARN] Background worker loop notice: {exc}")
         return
 
+    recovered_meta_jobs = False
     while True:
         try:
+            if not recovered_meta_jobs:
+                recover_meta_sync_jobs()
+                recovered_meta_jobs = True
             process_pending_notifications(batch_size=10)
+            dispatch_pending_meta_sync_jobs()
+            run_meta_sync_once()
             run_once(run_wording_checks=True)
         except Exception:
-            pass
+            logging.exception("Background worker iteration failed")
         time.sleep(1.0)
 
 
@@ -160,7 +169,7 @@ def run_frontend():
     try:
         npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
         proc = subprocess.Popen(
-            [npm_cmd, "run", "dev", "--", "--port", "3000"],
+            [npm_cmd, "run", "dev", "--", "--port", "3000", "--hostname", LOCAL_HOST],
             cwd=str(web_dir),
             shell=True,
         )
@@ -184,7 +193,7 @@ def run_backend_api():
 
         uvicorn.run(
             "apps.api.main:app",
-            host="0.0.0.0",
+            host=LOCAL_HOST,
             port=8000,
             log_level="info",
             reload=False,
@@ -219,6 +228,13 @@ def print_banner():
 def main():
     print("Starting Launch Gate services...")
     init_environment()
+    try:
+        from apps.api.auth import get_jwt_secret
+
+        get_jwt_secret()
+    except RuntimeError as exc:
+        print(f"[ERROR] Cannot start Launch Gate: {exc}")
+        return
 
     if "--check" in sys.argv or "--dry-run" in sys.argv:
         print("[OK] Pre-flight check succeeded. Virtual environment and all dependencies verified.")

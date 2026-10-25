@@ -10,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from apps.api.auth import hash_password, require_role
-from apps.api.clients import list_clients
+from apps.api.clients import list_clients, normalize_meta_account_id
+from apps.api.database import get_session
+from apps.api.auth import CurrentUser
 from apps.api.users import (
     assign_user_to_client,
     create_user,
@@ -36,6 +38,11 @@ class CreateUserRequest(BaseModel):
     )
 
 
+class MetaAccountMappingRequest(BaseModel):
+    client_id: str
+    meta_ad_account_id: str
+
+
 class UserResponse(BaseModel):
     user_id: str
     email: str
@@ -51,6 +58,49 @@ def get_available_clients(
 ) -> list[dict[str, str]]:
     """Return all system clients available for account assignments."""
     return list_clients()
+
+
+@router.post("/clients/meta-account", summary="Configure a client's Meta ad account")
+def configure_client_meta_account(
+    req: MetaAccountMappingRequest,
+    current_user: CurrentUser = Depends(require_role("account_manager")),
+) -> dict[str, str]:
+    """Set the Meta ad account mapped to an assigned internal client workspace."""
+    if req.client_id not in set(current_user.assigned_client_ids):
+        raise HTTPException(status_code=403, detail="Client is not assigned to this account manager.")
+    try:
+        normalized_account = normalize_meta_account_id(req.meta_ad_account_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    with get_session() as connection:
+        updated = connection.execute(
+            "UPDATE clients SET meta_ad_account_id=%s WHERE client_id=%s RETURNING client_id",
+            (normalized_account, req.client_id),
+        ).fetchone()
+        if updated:
+            connection.execute(
+                """INSERT INTO meta_workspace_connections
+                   (workspace_id, ad_account_id, connection_type, status, updated_at)
+                   VALUES (%s,%s,'AGENCY','active',NOW())
+                   ON CONFLICT (workspace_id) DO UPDATE SET
+                   ad_account_id=EXCLUDED.ad_account_id,
+                   connection_type='AGENCY', status='active', updated_at=NOW()""",
+                (req.client_id, normalized_account),
+            )
+            connection.execute(
+                """INSERT INTO workspace_meta_connections
+                   (workspace_id, meta_ad_account_id, token_type, connection_health, updated_at)
+                   VALUES (%s,%s,'AGENCY_SYSTEM_USER','UNKNOWN',NOW())
+                   ON CONFLICT (workspace_id) DO UPDATE SET
+                   meta_ad_account_id=EXCLUDED.meta_ad_account_id,
+                   token_type='AGENCY_SYSTEM_USER', connection_health='UNKNOWN',
+                   verified_scopes=ARRAY[]::TEXT[], last_verified_at=NULL,
+                   error_message=NULL, updated_at=NOW()""",
+                (req.client_id, normalized_account),
+            )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client workspace was not found.")
+    return {"client_id": req.client_id, "meta_ad_account_id": normalized_account}
 
 
 @router.get("/users", summary="List all team members and media buyers")

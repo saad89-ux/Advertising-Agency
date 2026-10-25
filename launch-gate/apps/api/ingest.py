@@ -73,8 +73,9 @@ def _hash_payload(value: object) -> str:
 
 
 def hash_normalized_row(row: dict[str, str]) -> str:
-    """Hash only the canonical ad fields; source metadata and extras are ignored."""
-    return _hash_payload(_canonical_hash_fields(row))
+    """Hash canonical ad content for approval checks; hierarchy is bound by the sheet hash."""
+    canonical = _canonical_hash_fields(row)
+    return _hash_payload({key: canonical[key] for key in ("platform", "text", "headline", "link", "creative")})
 
 
 def hash_normalized_sheet(rows: list[dict[str, str]]) -> str:
@@ -86,13 +87,23 @@ def hash_normalized_sheet(rows: list[dict[str, str]]) -> str:
 def _canonical_hash_fields(row: dict[str, str]) -> dict[str, str]:
     raw_platform = row.get("platform", "")
     normalized_platform = normalize_platform(raw_platform)
-    return {
+    canonical = {
         "platform": normalized_platform.canonical_value or raw_platform,
-        "text": row.get("ad_text", ""),
+        "text": row.get("ad_text", "") or row.get("body_copy", ""),
         "headline": row.get("headline", ""),
         "link": row.get("destination_url", ""),
-        "creative": row.get("creative_file", ""),
+        "creative": row.get("creative_file", "") or row.get("creative_url", ""),
     }
+    hierarchy_fields = (
+        "campaign_key", "ad_set_key", "ad_key", "campaign_name", "campaign_objective",
+        "campaign_budget_amount", "campaign_special_category", "campaign_budget_strategy",
+        "ad_set_name", "targeting_spec", "optimization_goal", "billing_event",
+        "ad_set_budget_amount", "ad_name", "page_id", "instagram_actor_id", "placements", "schedule",
+    )
+    hierarchy = {key: row[key] for key in hierarchy_fields if key in row and row[key] != ""}
+    if hierarchy:
+        canonical["hierarchy"] = hierarchy
+    return canonical
 
 
 def _normalize_header(header: str) -> str:

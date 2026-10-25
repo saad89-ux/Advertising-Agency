@@ -15,7 +15,15 @@ def _canonical_platform(value: str) -> str | None:
     return normalize_platform(value).canonical_value
 
 
-def _finding(ad: AdContract, *, issue: str, message: str, proposed_fix: str) -> FindingContract:
+def _finding(
+    ad: AdContract,
+    *,
+    issue: str,
+    message: str,
+    proposed_fix: str,
+    actual_value: str | None = None,
+    expected_format: str | None = None,
+) -> FindingContract:
     return FindingContract(
         finding_id=f"{ad.ad_id}:creative:{issue}",
         ad_id=ad.ad_id,
@@ -24,6 +32,8 @@ def _finding(ad: AdContract, *, issue: str, message: str, proposed_fix: str) -> 
         message=message,
         field="creative_file",
         proposed_fix=proposed_fix,
+        actual_value=actual_value,
+        expected_format=expected_format,
     )
 
 
@@ -112,14 +122,17 @@ def check_creative_size_ratio(
 
     actual_text = f"{width}:{height} ({actual_ratio:.3f}:1)"
     allowed_text = "/".join(name for name, _ in allowed)
+    expected_text = f"{allowed_text} (2% ratio tolerance)"
     return [
         _finding(
             ad,
             issue="ratio",
             message=(
                 f"Creative '{filename}' is {actual_text}; {platform} allows "
-                f"{allowed_text} (2% ratio tolerance)."
+                f"{expected_text}."
             ),
             proposed_fix=f"Use a creative with ratio {allowed_text}.",
+            actual_value=f"{width}x{height} pixels ({actual_text})",
+            expected_format=expected_text,
         )
     ]

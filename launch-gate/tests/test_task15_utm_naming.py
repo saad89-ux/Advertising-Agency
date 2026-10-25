@@ -31,6 +31,10 @@ def test_recognized_source_and_medium_aliases_are_suggested_without_mutation():
         "Use 'facebook' for utm_source on facebook ads.",
         "Use 'paid_social' for utm_medium on facebook ads.",
     }
+    assert {(finding.actual_value, finding.expected_format) for finding in findings} == {
+        ("FB", "facebook"),
+        ("Paid Social", "paid_social"),
+    }
     assert ad.destination_url.endswith("utm_campaign=launch_oct")
 
 
@@ -67,6 +71,8 @@ def test_campaign_case_and_spacing_suggest_normalized_value():
 
     campaign = next(finding for finding in findings if finding.field == "utm_campaign")
     assert campaign.proposed_fix == "Use 'glow_sale_oct' for utm_campaign."
+    assert campaign.actual_value == "Glow Sale Oct"
+    assert campaign.expected_format == "^[a-z0-9]+(_[a-z0-9]+)*_(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$"
 
 
 def test_misspelled_key_and_wrong_parameter_order_are_reported():

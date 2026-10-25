@@ -32,8 +32,24 @@ def clean_database():
     patch.setenv("JWT_SECRET", "test-only-secret-long-enough-for-hmac-acceptance")
     from apps.api.schema import init_schema
     from apps.api.campaign_flow import init_flow_tables
+
+    class AcceptedStandInAdapter:
+        def send_ad(self, payload, idempotency_key, timeout=None):
+            return SimpleNamespace(
+                status_code=201,
+                headers={},
+                json=lambda: {
+                    "status": "accepted",
+                    "platform_ad_id": f"dry-run-{payload['ad_id']}",
+                },
+            )
+
     # Acceptance schemas must never leak temporary ad IDs into the user's real Redis queue.
     patch.setattr("apps.api.uploads._dispatch_pending_jobs", lambda: None)
+    patch.setattr(
+        "apps.worker.sender.get_platform_adapter",
+        lambda *args, **kwargs: AcceptedStandInAdapter(),
+    )
     try:
         init_schema()
         init_flow_tables()
@@ -68,10 +84,9 @@ def test_prompt_launch_and_repeat_history(client):
     response = client.post("/campaign-flow/launch-batch", json=payload(), headers={"Origin": "http://localhost:3000"})
     assert response.status_code == 201, response.text
     data = response.json()
-    assert data["status"] == "blocked"
-    assert len(data["results"]) == 2
-    assert data["notifications"][0]["email_status"] == "queued"
-    assert data["notifications"][0]["status"] == "pending"
+    assert data["status"] == "launched"
+    assert len(data["results"]) == 1
+    assert data["notifications"] == []
     assert "sms_dispatch" not in data["notification_contact"]
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     batch = data["batch_id"]
@@ -84,7 +99,8 @@ def test_prompt_launch_and_repeat_history(client):
         row = conn.execute("SELECT a.row_hash,a.sheet_hash,p.content_hash,p.approved_by FROM ads a JOIN ad_approvals p USING (ad_id) WHERE a.batch_id=%s", (batch,)).fetchone()
         assert row[0] and row[1] and row[0] == row[2] and row[3] == "brief-user"
         assert conn.execute("SELECT COUNT(*) FROM campaign_launch_contacts WHERE batch_id=%s", (batch,)).fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM send_alerts WHERE batch_id=%s", (batch,)).fetchone()[0] > 0
+        assert conn.execute("SELECT COUNT(*) FROM send_alerts WHERE batch_id=%s", (batch,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM ad_sends WHERE batch_id=%s AND is_dry_run=TRUE", (batch,)).fetchone()[0] == 1
     assert client.get(f"/batches/{batch}").status_code == 200
 
 
@@ -103,7 +119,7 @@ def test_email_only_launch_resolves_account_client_and_stores_contact(client):
     response = client.post("/campaign-flow/launch-batch", json=campaign)
     assert response.status_code == 201, response.text
     result = response.json()
-    assert result["status"] == "blocked"
+    assert result["status"] == "launched"
     assert result["notification_contact"]["employee_email"] == "alerts@example.com"
     assert result["notification_contact"]["employee_phone"] == ""
     with get_session() as conn:
@@ -115,6 +131,19 @@ def test_notification_delivery_status_is_scoped_and_redacts_recipient(client):
     response = client.post("/campaign-flow/launch-batch", json=payload())
     assert response.status_code == 201
     batch_id = response.json()["batch_id"]
+    assert response.json()["notifications"] == []
+    from apps.api.notifications import record_notification_delivery
+    with get_session() as conn:
+        record_notification_delivery(
+            conn,
+            client_id="real-client",
+            recipient="alerts@example.com",
+            subject="Test delivery status",
+            message_body="Sensitive body must not be returned.",
+            event_type="test_delivery_status",
+            batch_id=batch_id,
+            dedup_key=f"test-delivery-status:{batch_id}",
+        )
     status = client.get(f"/notifications/delivery-status?client_id=real-client&batch_id={batch_id}")
     assert status.status_code == 200, status.text
     data = status.json()
@@ -137,9 +166,10 @@ def test_real_jwt_authentication_email_only_pipeline(client):
     resolved = client.post("/campaign-flow/resolve-client", json={"input_text": campaign["ad_text"]}, headers=headers)
     assert resolved.status_code == 200 and resolved.json()["client_id"] == "real-client"
     review = client.post("/campaign-flow/preflight-review", json={"ad_overrides": {**campaign, "target_platforms": ["facebook"]}}, headers=headers)
-    assert review.status_code == 200 and review.json()["status"] == "ready_for_review", review.text
+    assert review.status_code == 200 and review.json()["status"] == "needs_review", review.text
+    assert review.json()["review_required_checks"]
     launched = client.post("/campaign-flow/launch-batch", json=campaign, headers=headers)
-    assert launched.status_code == 201 and launched.json()["status"] == "blocked", launched.text
+    assert launched.status_code == 201 and launched.json()["status"] == "launched", launched.text
     batch_id = launched.json()["batch_id"]
     detail = client.get(f"/batches/{batch_id}", headers=headers)
     assert detail.status_code == 200
@@ -187,10 +217,17 @@ def test_meta_preflight_reports_required_launch_details(client):
 
 
 def test_live_launch_rejects_missing_meta_setup_details(client, monkeypatch):
+    from apps.api.campaign_flow import LaunchBatchRequest, build_launch_hierarchy
+
     monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
     monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
-    monkeypatch.setenv("META_AD_ACCOUNT_ID", "123456")
-    response = client.post("/campaign-flow/launch-batch", json=payload())
+    monkeypatch.setenv("MCP_META_SERVER_URL", "https://mcp.example.test/ads")
+    monkeypatch.setenv("META_SYSTEM_USER_TOKEN", "test-token")
+    meta_payload = payload(meta_launch=True)
+    meta_payload["hierarchy_preview_hash"] = build_launch_hierarchy(
+        LaunchBatchRequest(**meta_payload)
+    )["hierarchy_hash"]
+    response = client.post("/campaign-flow/launch-batch", json=meta_payload)
 
     assert response.status_code == 422
     assert "Page ID" in response.json()["detail"]
@@ -213,9 +250,13 @@ def test_account_manager_real_jwt_sheet_to_launch_pipeline(client, monkeypatch, 
     resolved = client.post("/campaign-flow/resolve-client", json={"batch_id": batch_id}, headers=headers)
     assert resolved.status_code == 200 and resolved.json()["client_id"] == "real-client", resolved.text
     review = client.post("/campaign-flow/preflight-review", json={"batch_id": batch_id}, headers=headers)
-    assert review.status_code == 200 and review.json()["status"] == "ready_for_review", review.text
+    assert review.status_code == 200
+    assert review.json()["status"] == "needs_review", review.text
+    unresolved_reasons = {item["reason"] for item in review.json()["review_required_check_details"]}
+    assert unresolved_reasons == {"creative_missing", "model_credentials_unavailable"}
     launch = client.post("/campaign-flow/launch-batch", json={"batch_id": batch_id, "employee_email": "alerts@example.com", "target_platforms": ["facebook"]}, headers=headers)
-    assert launch.status_code == 201 and launch.json()["status"] == "blocked", launch.text
+    assert launch.status_code == 409, launch.text
+    assert "approved in review" in launch.json()["detail"]
     assert client.get(f"/batches/{batch_id}", headers=headers).status_code == 200
     # Upload access is still scoped to the account manager's assigned clients.
     denied = client.post("/uploads", files={"file": ("unassigned.csv", csv.replace(b'real-client.example', b'other.example'), "text/csv")}, headers=headers)
@@ -299,12 +340,30 @@ def test_real_preflight_reports_missing_and_failed(client):
     data = response.json()
     assert data["status"] == "checks_failed"
     assert any(c["name"] == "utm_presence" and c["status"] == "fail" for c in data["checks"])
-    assert any(c["name"] == "wording" and c["status"] == "not_checked" for c in data["checks"])
+    wording_check = next(c for c in data["checks"] if c["name"] == "wording")
+    assert wording_check["status"] == "not_checked"
+    assert wording_check["reason"] == "model_credentials_unavailable"
 
 
 @pytest.mark.parametrize("outcomes,expected", [((True, True), "launched"), ((True, False), "partial"), ((False, False), "failed")])
 def test_launch_status_matches_connector_results(client, monkeypatch, outcomes, expected):
     from apps.worker.mcp_client import MCPPlatformDispatcher
+    from apps.api.campaign_flow import LaunchBatchRequest, build_launch_hierarchy
+
+    meta_payload = payload(
+        meta_launch=True,
+        campaign_name="Spring campaign",
+        creative_file="https://cdn.example.com/creative.jpg",
+        creative_mime_type="image/jpeg",
+        meta_page_id="page-1",
+        instagram_user_id="instagram-1",
+        targeting_country="US",
+        daily_budget_minor_units=10000,
+        special_ad_category="NONE",
+    )
+    meta_payload["hierarchy_preview_hash"] = build_launch_hierarchy(
+        LaunchBatchRequest(**meta_payload)
+    )["hierarchy_hash"]
 
     def dispatch(self, *, platform, ad_id, **arguments):
         if platform == "instagram":
@@ -315,11 +374,17 @@ def test_launch_status_matches_connector_results(client, monkeypatch, outcomes, 
         with get_session() as conn:
             approval = conn.execute("SELECT approved_by,content_hash FROM ad_approvals WHERE ad_id=%s", (ad_id,)).fetchone()
             assert approval[0] == "brief-user" and approval[1]
+            audit = conn.execute(
+                """SELECT approved_by,hierarchy_hash FROM meta_launch_approval_audit
+                   WHERE batch_id=(SELECT batch_id FROM ads WHERE ad_id=%s)""",
+                (ad_id,),
+            ).fetchone()
+            assert audit == ("brief-user", meta_payload["hierarchy_preview_hash"])
         return SimpleNamespace(
             success=success,
             result={"platform_ad_id": "receipt-" + platform, "campaign_id": "campaign-" + platform,
                     "ad_set_id": "adset-" + platform, "creative_id": "creative-" + platform,
-                    "status": "active_live"} if success else {},
+                    "status": "paused"} if success else {},
             error=None if success else "Platform rejected the submission",
             rpc_id="test",
         )
@@ -344,13 +409,26 @@ def test_launch_status_matches_connector_results(client, monkeypatch, outcomes, 
     monkeypatch.setattr(MCPPlatformDispatcher, "dispatch_paused_ad", dispatch)
     monkeypatch.setattr(MCPPlatformDispatcher, "call_tool", call)
     monkeypatch.setenv("META_AD_ACCOUNT_CURRENCY", "USD")
-    response = client.post("/campaign-flow/launch-batch", json=payload())
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
+    monkeypatch.setenv("MCP_META_SERVER_URL", "https://mcp.example.test/ads")
+    monkeypatch.setenv("META_SYSTEM_USER_TOKEN", "test-token")
+    monkeypatch.setattr(
+        "apps.api.clients.resolve_client_meta_account",
+        lambda _conn, _client_id: "123456",
+    )
+    response = client.post("/campaign-flow/launch-batch", json=meta_payload)
     assert response.status_code == 201, response.text
     data = response.json()
     assert data["status"] == expected
     assert [result["status"] == "sent" for result in data["results"]] == list(outcomes)
     batch_id = data["batch_id"]
     with get_session() as conn:
+        authorization = conn.execute(
+            "SELECT approved_by,hierarchy_hash FROM meta_launch_approval_audit WHERE batch_id=%s",
+            (batch_id,),
+        ).fetchone()
+        assert authorization == ("brief-user", meta_payload["hierarchy_preview_hash"])
         rows = conn.execute("SELECT platform,inbound_sales_usd,inbound_orders,impressions,clicks,spend_usd FROM ad_performance_tracking WHERE batch_id=%s ORDER BY platform", (batch_id,)).fetchall()
     assert len(rows) == sum(outcomes)
     assert all(row[1:] == (125.0, 3, 1200, 24, 12.5) for row in rows)
@@ -361,7 +439,7 @@ def test_launch_status_matches_connector_results(client, monkeypatch, outcomes, 
         def unexpected(*args, **kwargs):
             raise AssertionError("Duplicate authorization called the platform")
         monkeypatch.setattr(MCPPlatformDispatcher, "call_tool", unexpected)
-        repeated = client.post("/campaign-flow/launch-batch", json=payload(batch_id=batch_id))
+        repeated = client.post("/campaign-flow/launch-batch", json={**meta_payload, "batch_id": batch_id})
         assert repeated.status_code == 201 and repeated.json()["status"] == "launched", repeated.text
     detail = client.get(f"/batches/{batch_id}").json()
     expected_spend = 12.5 * sum(outcomes) if any(outcomes) else None

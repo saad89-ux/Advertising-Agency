@@ -53,6 +53,8 @@ def test_disallowed_ratio_returns_mechanical_finding_and_suggestion():
     assert findings[0].check_type is CheckType.MECHANICAL
     assert findings[0].field == "creative_file"
     assert "1920:1080" in findings[0].message
+    assert findings[0].actual_value == "1920x1080 pixels (1920:1080 (1.778:1))"
+    assert findings[0].expected_format == "1:1/4:5/9:16/1.91:1 (2% ratio tolerance)"
     assert findings[0].proposed_fix == "Use a creative with ratio 1:1/4:5/9:16/1.91:1."
 
 

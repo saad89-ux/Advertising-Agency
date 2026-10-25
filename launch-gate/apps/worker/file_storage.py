@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 _FILE_REF_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
+def is_valid_file_ref(file_ref: str) -> bool:
+    if not isinstance(file_ref, str):
+        return False
+    if _FILE_REF_PATTERN.fullmatch(file_ref):
+        return True
+    from apps.worker.cloud_storage import is_cloudinary_asset_url
+
+    return is_cloudinary_asset_url(file_ref)
+
+
 class LocalFileStore:
     """Store binary outputs under STORAGE_DIR and return relative opaque references."""
 
@@ -122,31 +132,11 @@ class UnifiedFileStore:
     def get(self, file_ref: str, timeout_seconds: float = 15.0) -> bytes:
         """Retrieve content from Cloudinary CDN URL or local storage."""
         if file_ref.startswith(("http://", "https://")):
-            if self.cloud is not None:
-                try:
-                    return self.cloud.get(file_ref, timeout_seconds=timeout_seconds)
-                except Exception as exc:
-                    logger.debug("Cloud store get failed for %s: %s", file_ref, exc)
-            try:
-                import httpx
-                resp = httpx.get(
-                    file_ref,
-                    headers={"User-Agent": "LaunchGate/1.0"},
-                    timeout=timeout_seconds,
-                    follow_redirects=True,
-                )
-                resp.raise_for_status()
-                return resp.content
-            except Exception as exc:
-                logger.debug("httpx get failed for %s (%s), attempting urllib", file_ref, exc)
-                try:
-                    import urllib.request
-                    req = urllib.request.Request(file_ref, headers={"User-Agent": "LaunchGate/1.0"})
-                    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                        return resp.read()
-                except Exception as u_exc:
-                    logger.error("Failed downloading remote file %s via both httpx and urllib: %s", file_ref, u_exc)
-                    raise FileNotFoundError(f"Could not retrieve remote file {file_ref}: {u_exc}") from u_exc
+            from apps.worker.cloud_storage import is_cloudinary_asset_url
+
+            if self.cloud is None or not is_cloudinary_asset_url(file_ref):
+                raise FileNotFoundError("Stored remote file reference is not a configured Cloudinary asset")
+            return self.cloud.get(file_ref, timeout_seconds=timeout_seconds)
         return self.local.get(file_ref)
 
     def delete(self, file_ref: str) -> None:

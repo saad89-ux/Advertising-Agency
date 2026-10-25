@@ -14,6 +14,7 @@ from apps.api import (
     rejected_rows,
 )
 from apps.api import guest_sessions
+from apps.api.platforms_schema import init_platform_tables
 from apps.worker import cost_ledger, sender
 from apps.worker.tracing import create_trace_tables
 
@@ -26,6 +27,7 @@ def init_schema() -> None:
     guest_sessions.init_batch_guest_ownership()
     ads.create_ads_table()
     ads.ensure_platform_raw_column()
+    init_platform_tables()
     outbox.create_ad_job_outbox_table()
     deduplication.create_deduplication_constraints()
     rejected_rows.create_rejected_rows_table()

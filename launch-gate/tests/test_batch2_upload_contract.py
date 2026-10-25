@@ -91,6 +91,27 @@ def test_platform_aliases_have_the_same_canonical_hash():
     assert hash_normalized_sheet([meta]) == hash_normalized_sheet([fb])
 
 
+def test_hierarchy_keys_survive_csv_parse_and_are_included_in_sheet_hash():
+    base = (
+        "platform,headline,destination_url,campaign_key,ad_set_key,ad_key,campaign_name,"
+        "campaign_objective,campaign_budget_amount,campaign_special_category,campaign_budget_strategy,"
+        "ad_set_name,targeting_spec,optimization_goal,billing_event,ad_set_budget_amount,ad_name,"
+        "creative_url,body_copy,page_id,instagram_actor_id,placements,schedule\n"
+        "facebook,Sale,https://shop.example.test,camp-a,set-a,ad-a,Holiday,OUTCOME_SALES,10000,NONE,DAILY,"
+        "Prospecting,{\"geo_locations\":{\"countries\":[\"US\"]}},LINK_CLICKS,IMPRESSIONS,,Ad A,"
+        "https://cdn.example.test/ad.png,Copy,page-1,,facebook,{}\n"
+    ).encode()
+    changed_group = base.replace(b"facebook,Sale,https://shop.example.test,camp-a", b"facebook,Sale,https://shop.example.test,camp-b")
+
+    first = parse_csv_upload("ads.csv", base, max_file_bytes=len(base))
+    second = parse_csv_upload("ads.csv", changed_group, max_file_bytes=len(changed_group))
+
+    assert first.rows[0]["campaign_key"] == "camp-a"
+    assert first.rows[0]["targeting_spec"] == '{"geo_locations":{"countries":["US"]}}'
+    assert hash_normalized_row(first.rows[0]) == hash_normalized_row(second.rows[0])
+    assert first.sheet_hash != second.sheet_hash
+
+
 def test_upload_stores_canonical_and_raw_platforms_and_flags_unknown(monkeypatch):
     content = (
         b"Platform,Headline,URL,Creative file\n"
@@ -143,6 +164,7 @@ def test_init_schema_runs_platform_raw_migration(monkeypatch):
     monkeypatch.setattr(schema.batches, "create_batches_table", lambda: called.append("batches"))
     monkeypatch.setattr(schema.ads, "create_ads_table", lambda: called.append("ads"))
     monkeypatch.setattr(schema.ads, "ensure_platform_raw_column", lambda: called.append("platform_raw"))
+    monkeypatch.setattr(schema, "init_platform_tables", lambda: called.append("platforms"))
     monkeypatch.setattr(schema.outbox, "create_ad_job_outbox_table", lambda: called.append("outbox"))
     monkeypatch.setattr(schema.deduplication, "create_deduplication_constraints", lambda: called.append("dedup"))
     monkeypatch.setattr(schema.rejected_rows, "create_rejected_rows_table", lambda: called.append("rejected"))
@@ -157,6 +179,7 @@ def test_init_schema_runs_platform_raw_migration(monkeypatch):
     schema.init_schema()
 
     assert called.index("platform_raw") == called.index("ads") + 1
+    assert called.index("platforms") == called.index("platform_raw") + 1
 
 
 def test_mechanical_replay_dev_split_scores_perfect_recall():

@@ -38,8 +38,8 @@ def mask_token(token: str | None) -> str:
 def run_diagnostics() -> dict[str, any]:
     """Execute token inspection against Meta Graph API /debug_token."""
     load_dotenv()
-    token = os.environ.get("META_MCP_ACCESS_TOKEN", "").strip()
-    ad_account = os.environ.get("META_AD_ACCOUNT_ID", "").strip()
+    token = os.environ.get("META_SYSTEM_USER_TOKEN", "").strip()
+    ad_account = ""
 
     print("=" * 70)
     print("  LAUNCH GATE: Meta Graph API Token Diagnostics")
@@ -50,7 +50,7 @@ def run_diagnostics() -> dict[str, any]:
     print("-" * 70)
 
     if not token:
-        print("[FAIL] META_MCP_ACCESS_TOKEN is not set in environment or .env.")
+        print("[FAIL] META_SYSTEM_USER_TOKEN is not set in environment or .env.")
         return {"status": "missing_token"}
 
     url = f"https://graph.facebook.com/{CURRENT_GRAPH_API_VERSION}/debug_token"
@@ -60,12 +60,25 @@ def run_diagnostics() -> dict[str, any]:
             params={"input_token": token, "access_token": token},
             timeout=10.0,
         )
+    except httpx.TimeoutException:
+        print("[ERROR] Meta Graph API request timed out.")
+        return {"status": "network_error", "error_kind": "timeout", "setup_checklist": [
+            "Verify MCP_META_SERVER_URL and network access.",
+            "Retry the read-only token diagnostic."
+        ]}
     except Exception as exc:
-        print(f"[ERROR] Network connection failed: {exc}")
-        return {"status": "network_error", "error": str(exc)}
+        print("[ERROR] Network connection failed.")
+        return {"status": "network_error", "error_kind": "transport", "message": type(exc).__name__}
 
     print(f"HTTP Status: {res.status_code}")
-    data = res.json()
+    try:
+        data = res.json()
+    except ValueError:
+        return {
+            "status": "malformed_response",
+            "http_status": res.status_code,
+            "message": "Meta returned a non-JSON response.",
+        }
 
     if res.status_code == 200:
         d = data.get("data", {})
@@ -93,17 +106,34 @@ def run_diagnostics() -> dict[str, any]:
                 print(f"Token Expired At: {exp_utc} UTC ({abs(remaining)} seconds ago)")
                 return {"status": "expired", "is_valid": False, "remaining_seconds": 0}
     else:
-        err = data.get("error", {})
-        err_msg = err.get("message", "Unknown error")
-        err_code = err.get("code")
-        err_subcode = err.get("error_subcode")
-        print(f"[EXPIRED/ERROR] Code {err_code} (Subcode {err_subcode}): {err_msg}")
+        err = data.get("error", {}) if isinstance(data, dict) else {}
+        err_msg = err.get("message", "Meta returned an error") if isinstance(err, dict) else "Meta returned an error"
+        err_code = err.get("code") if isinstance(err, dict) else None
+        err_subcode = err.get("error_subcode") if isinstance(err, dict) else None
+        if res.status_code == 401 or err_code in {190, 102}:
+            diagnostic_status = "invalid_token"
+        elif res.status_code == 403 and err_code in {10, 200, 294}:
+            diagnostic_status = "missing_permission"
+        elif err_code == 100 or "account" in err_msg.lower() and "id" in err_msg.lower():
+            diagnostic_status = "invalid_account_id"
+        elif res.status_code == 403:
+            diagnostic_status = "inaccessible_account"
+        else:
+            diagnostic_status = "error"
+        print(f"[ERROR] Meta response: {diagnostic_status} (HTTP {res.status_code}).")
         return {
-            "status": "error",
+            "status": diagnostic_status,
             "http_status": res.status_code,
             "code": err_code,
             "error_subcode": err_subcode,
-            "message": err_msg,
+            "message": err_msg[:240],
+            "setup_checklist": [
+                "Configure META_SYSTEM_USER_TOKEN as the shared agency System User token.",
+        "Map the numeric ad account ID on the authorized workspace connection.",
+                "Grant the required ads_read and adaccount access permissions.",
+                "Confirm that the account ID is the numeric Meta ad-account ID.",
+                "Use META_MCP_ENABLE_LIVE=true only for an authorized read-only diagnostic.",
+            ],
         }
 
 

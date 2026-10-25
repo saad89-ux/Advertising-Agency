@@ -64,6 +64,9 @@ def classify_finding_severity(finding: FindingContract) -> VerdictStatus:
     message = finding.message.casefold()
     field = (finding.field or "").casefold()
 
+    if finding.rule_id == "page.retrieval_failed":
+        return VerdictStatus.NEEDS_PERSON
+
     # 1. Check for MODEL_UNAVAILABLE severity
     if (
         "model_unavailable" in finding_id

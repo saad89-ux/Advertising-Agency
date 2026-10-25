@@ -30,7 +30,7 @@ from apps.api.approvals import (
 )
 from apps.api.auth import CurrentUser, get_current_user, require_role
 from apps.api.database import get_session
-from apps.worker.file_storage import LocalFileStore, get_file_store
+from apps.worker.file_storage import LocalFileStore, get_file_store, is_valid_file_ref
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +240,9 @@ def attach_evidence_endpoint(
     clean_note = (req.note or req.evidence_note or "").strip() or None
     clean_file = (req.file_ref or req.evidence_file or "").strip() or None
 
+    if clean_file and not is_valid_file_ref(clean_file):
+        raise HTTPException(status_code=422, detail="invalid evidence file reference")
+
     if not clean_note and not clean_file:
         raise HTTPException(
             status_code=422,
@@ -303,92 +306,98 @@ async def upload_evidence_endpoint(
 ) -> dict[str, Any]:
     """Upload a screenshot image or PDF document and attach it as client approval evidence."""
     clean_note = (note or evidence_note or "").strip() or None
-
-    file_ref = None
-    file_name = None
-    file_size = None
-    mime_type = None
-
-    if file is not None and file.filename:
-        file_name = file.filename
-        ext = Path(file_name).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"unsupported file extension '{ext}'; only images (PNG, JPEG, WEBP) and PDF files are allowed",
-            )
-
-        data = await file.read()
-        if len(data) == 0:
-            raise HTTPException(
-                status_code=422,
-                detail="uploaded evidence file is empty",
-            )
-        if len(data) > MAX_EVIDENCE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"evidence file exceeds maximum size of {MAX_EVIDENCE_SIZE_BYTES // (1024 * 1024)} MB",
-            )
-
-        file_size = len(data)
-        mime_type = file.content_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-
-        try:
-            file_ref = save_evidence_file(data, file_name)
-        except Exception as exc:
-            logger.error("Failed storing evidence file: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"failed storing evidence file: {exc}",
-            )
-
-    if not clean_note and not file_ref:
+    if not clean_note and (file is None or not file.filename):
         raise HTTPException(
             status_code=422,
             detail="at least a note or screenshot file must be provided as approval evidence (PRD D3)",
         )
 
-    with get_session() as conn:
-        ad = get_ad_record(conn, ad_id)
-        if ad is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ad not found")
+    file_ref = None
+    file_name = None
+    file_size = None
+    mime_type = None
+    try:
+        with get_session() as conn:
+            ad = get_ad_record(conn, ad_id)
+            if ad is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ad not found")
 
-        require_client_access(user, ad["client_id"])
+            require_client_access(user, ad["client_id"])
 
-        approval = get_or_create_ad_approval(conn, ad_id, ad["client_id"])
-        current_state = approval.get("state")
-        if current_state in (ApprovalState.SENDING.value, ApprovalState.SENT.value):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"cannot attach evidence to ad in '{current_state}' state",
+            approval = get_or_create_ad_approval(conn, ad_id, ad["client_id"])
+            current_state = approval.get("state")
+            if current_state in (ApprovalState.SENDING.value, ApprovalState.SENT.value):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"cannot attach evidence to ad in '{current_state}' state",
+                )
+
+            expected_hash = ad["row_hash"]
+            if content_hash and content_hash != expected_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"content hash mismatch: expected '{expected_hash}', received '{content_hash}'",
+                )
+
+            if file is not None and file.filename:
+                file_name = file.filename
+                ext = Path(file_name).suffix.lower()
+                if ext not in ALLOWED_EXTENSIONS:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"unsupported file extension '{ext}'; only images (PNG, JPEG, WEBP) and PDF files are allowed",
+                    )
+
+                data = await file.read(MAX_EVIDENCE_SIZE_BYTES + 1)
+                await file.close()
+                if len(data) == 0:
+                    raise HTTPException(status_code=422, detail="uploaded evidence file is empty")
+                if len(data) > MAX_EVIDENCE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"evidence file exceeds maximum size of {MAX_EVIDENCE_SIZE_BYTES // (1024 * 1024)} MB",
+                    )
+
+                file_size = len(data)
+                mime_type = file.content_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+                file_ref = save_evidence_file(data, file_name)
+
+            rec = record_approval_evidence(
+                conn,
+                ad_id=ad_id,
+                client_id=ad["client_id"],
+                content_hash=expected_hash,
+                created_by=user.user_id,
+                evidence_note=clean_note,
+                evidence_file=file_ref,
+                file_name=file_name,
+                file_size=file_size,
+                mime_type=mime_type,
             )
+    except HTTPException:
+        if file_ref:
+            try:
+                get_file_store().delete(file_ref)
+            except Exception:
+                logger.exception("Failed cleaning up evidence file after request rejection")
+        raise
+    except Exception as exc:
+        if file_ref:
+            try:
+                get_file_store().delete(file_ref)
+            except Exception:
+                logger.exception("Failed cleaning up evidence file after persistence failure")
+        logger.error("Failed storing approval evidence: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="failed storing approval evidence",
+        ) from exc
 
-        expected_hash = ad["row_hash"]
-        if content_hash and content_hash != expected_hash:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"content hash mismatch: expected '{expected_hash}', received '{content_hash}'",
-            )
-        target_hash = expected_hash
-
-        rec = record_approval_evidence(
-            conn,
-            ad_id=ad_id,
-            client_id=ad["client_id"],
-            content_hash=target_hash,
-            created_by=user.user_id,
-            evidence_note=clean_note,
-            evidence_file=file_ref,
-            file_name=file_name,
-            file_size=file_size,
-            mime_type=mime_type,
-        )
-
-        return {
-            **rec,
-            "content_hash_matches": True,
-            "ad_state": current_state,
-        }
+    return {
+        **rec,
+        "content_hash_matches": True,
+        "ad_state": current_state,
+    }
 
 
 @router.get("/{ad_id}/evidence", status_code=status.HTTP_200_OK)
@@ -461,16 +470,25 @@ def get_ad_evidence_file_endpoint(
 
         require_client_access(user, ad["client_id"])
 
-        target_ref = file_ref
-        if not target_ref:
-            approval = get_or_create_ad_approval(conn, ad_id, ad["client_id"])
-            target_ref = approval.get("evidence_file")
+        approval = get_or_create_ad_approval(conn, ad_id, ad["client_id"])
+        attached_ref = approval.get("evidence_file")
+        target_ref = file_ref or attached_ref
 
         if not target_ref:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no evidence file attached")
+        if not is_valid_file_ref(target_ref):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid evidence file reference")
+
+        evidence_row = conn.execute(
+            "SELECT mime_type FROM approval_evidence WHERE ad_id = %s AND evidence_file = %s LIMIT 1;",
+            (ad_id, target_ref),
+        ).fetchone()
+        if target_ref != attached_ref and evidence_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="evidence file not found for this ad")
+        mime_type = evidence_row[0] if evidence_row else None
 
         # If caller requested redirect for external HTTPS URLs
-        if target_ref.startswith(("https://", "http://")) and redirect:
+        if target_ref.startswith("https://") and redirect:
             from fastapi.responses import RedirectResponse
             return RedirectResponse(url=target_ref, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
@@ -481,20 +499,6 @@ def get_ad_evidence_file_endpoint(
             logger.debug("Failed retrieving evidence file %s: %s", target_ref, exc)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="evidence file not found in storage")
 
-        media_type = "application/octet-stream"
-        try:
-            cur = conn.execute(
-                "SELECT mime_type FROM approval_evidence WHERE ad_id = %s AND evidence_file = %s LIMIT 1;",
-                (ad_id, target_ref),
-            )
-            row = cur.fetchone()
-            if row and row[0]:
-                media_type = row[0]
-            elif target_ref.startswith(("https://", "http://")):
-                guessed = mimetypes.guess_type(target_ref)[0]
-                if guessed:
-                    media_type = guessed
-        except Exception:
-            pass
+        media_type = mime_type or mimetypes.guess_type(target_ref)[0] or "application/octet-stream"
 
         return Response(content=file_bytes, media_type=media_type)

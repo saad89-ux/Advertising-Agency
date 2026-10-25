@@ -4,7 +4,7 @@ Connects to Meta's official remote MCP endpoint (e.g. https://mcp.facebook.com/a
 using the official Python `mcp` SDK over Streamable HTTP transport with Bearer token authentication.
 
 Safety Guarantees:
-- Reads credentials strictly from environment (`MCP_META_SERVER_URL`, `META_MCP_ACCESS_TOKEN`).
+    - Reads the agency System User credential from `META_SYSTEM_USER_TOKEN` unless explicitly injected.
 - Zero token logging or exposure.
 - Real platform mutations remain disabled by Launch Gate v1 policy.
 - Zero fake fallbacks: any failure returns `success=False` with the explicit reason.
@@ -129,7 +129,7 @@ class MetaMCPClient:
         raw_url = server_url or os.environ.get("MCP_META_SERVER_URL", "")
         self.server_url = raw_url.strip()
 
-        raw_token = access_token or os.environ.get("META_MCP_ACCESS_TOKEN", "")
+        raw_token = access_token or os.environ.get("META_SYSTEM_USER_TOKEN", "")
         self.access_token = raw_token.strip()
 
         if allow_writes is not None:
@@ -154,14 +154,14 @@ class MetaMCPClient:
             )
         if not self.access_token:
             raise MetaMCPConfigurationError(
-                "META_MCP_ACCESS_TOKEN is not configured. Set META_MCP_ACCESS_TOKEN in .env with a valid Meta Business access token."
+                "META_SYSTEM_USER_TOKEN is not configured. Set META_SYSTEM_USER_TOKEN in .env with a valid Meta Business System User token."
             )
 
-    def _validate_write_gate(self) -> None:
+    def _validate_write_gate(self, arguments: dict[str, Any]) -> None:
         if not (self.enable_live and self.allow_writes):
             raise MetaMCPWriteRefusedError("Both META_MCP_ENABLE_LIVE and META_MCP_ALLOW_WRITES must be true for Meta writes.")
-        if not os.environ.get("META_AD_ACCOUNT_ID", "").strip():
-            raise MetaMCPConfigurationError("META_AD_ACCOUNT_ID is not configured.")
+        if not str(arguments.get("ad_account_id") or "").strip():
+            raise MetaMCPConfigurationError("ad_account_id is required from the authorized client workspace.")
 
     def _build_http_client(self, on_status: Any = None) -> httpx.AsyncClient:
         """Construct an authenticated httpx.AsyncClient with required headers and status hook."""
@@ -207,7 +207,7 @@ class MetaMCPClient:
         
         # Categorize common HTTP codes
         if status_code == 401 or "401" in msg:
-            return "Authentication failed (HTTP 401): META_MCP_ACCESS_TOKEN is invalid, expired, or lacking required scopes.", 401
+            return "Authentication failed (HTTP 401): META_SYSTEM_USER_TOKEN is invalid, expired, or lacking required scopes.", 401
         if status_code == 403 or "403" in msg:
             return "Access forbidden (HTTP 403): Token lacks permission to access requested ad resources.", 403
         if status_code == 429 or "429" in msg:
@@ -298,7 +298,7 @@ class MetaMCPClient:
 
         if is_write_tool(tool_name, tool_description, tool_annotations):
             try:
-                self._validate_write_gate()
+                self._validate_write_gate(arguments)
             except (MetaMCPWriteRefusedError, MetaMCPConfigurationError) as gate_error:
                 return MetaMCPResult(
                     success=False,

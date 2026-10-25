@@ -66,7 +66,7 @@ def clean_db():
         init_schema()
         init_flow_tables()
         with get_session() as conn:
-            conn.execute("INSERT INTO clients VALUES ('client_alpha', 'Client Alpha') ON CONFLICT DO NOTHING;")
+            conn.execute("INSERT INTO clients (client_id, name, meta_ad_account_id) VALUES ('client_alpha', 'Client Alpha', '123456') ON CONFLICT (client_id) DO UPDATE SET meta_ad_account_id=EXCLUDED.meta_ad_account_id;")
             conn.execute("INSERT INTO clients VALUES ('client_beta', 'Client Beta') ON CONFLICT DO NOTHING;")
             conn.execute(
                 """
@@ -103,8 +103,8 @@ def api_client(clean_db):
 # 1. Event Identity & launch_attempt_id Deduplication
 # ===========================================================================
 
-def test_launch_attempt_id_persistence_and_traceability(api_client, clean_db):
-    """Verify launch_attempt_id is returned by launch_batch and tracked in DB."""
+def test_launch_attempt_id_persistence_for_dry_run_send(api_client, clean_db):
+    """Verify launch_attempt_id is stored without emitting a failure alert on success."""
     attempt_id = f"lnch_custom_{uuid.uuid4().hex[:8]}"
     payload = {
         "client_id": "client_alpha",
@@ -129,10 +129,10 @@ def test_launch_attempt_id_persistence_and_traceability(api_client, clean_db):
         assert row is not None, "Expected ad_live_dispatches row for the batch"
         assert row[0] == attempt_id
 
-        cur.execute("SELECT launch_attempt_id FROM send_alerts WHERE batch_id = %s;", (batch_id,))
-        alert_row = cur.fetchone()
-        assert alert_row is not None, "Expected send_alerts row for the batch"
-        assert alert_row[0] == attempt_id
+        cur.execute("SELECT COUNT(*) FROM send_alerts WHERE batch_id = %s;", (batch_id,))
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT COUNT(*) FROM ad_sends WHERE batch_id = %s AND is_dry_run=TRUE;", (batch_id,))
+        assert cur.fetchone()[0] == 1
 
 
 def test_distinct_launch_attempts_create_separate_alerts(clean_db):
@@ -390,8 +390,7 @@ def test_meta_mcp_fails_closed_when_live_write_gate_is_missing(monkeypatch):
     """Verify write requests require both opt-in flags and never call the real server in tests."""
     monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
     monkeypatch.setenv("META_MCP_ALLOW_WRITES", "false")
-    monkeypatch.setenv("META_MCP_ACCESS_TOKEN", "mock-token")
-    monkeypatch.setenv("META_AD_ACCOUNT_ID", "123456")
+    monkeypatch.setenv("META_SYSTEM_USER_TOKEN", "mock-token")
     monkeypatch.setattr(
         "apps.worker.meta_mcp_client.MetaMCPClient.call_tool_sync",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("external call attempted")),
@@ -412,8 +411,7 @@ def test_meta_mcp_dispatches_discovered_write_when_both_gates_are_enabled(monkey
     for key, value in {
         "META_MCP_ENABLE_LIVE": "true",
         "META_MCP_ALLOW_WRITES": "true",
-        "META_MCP_ACCESS_TOKEN": "mock-token",
-        "META_AD_ACCOUNT_ID": "123456",
+        "META_SYSTEM_USER_TOKEN": "mock-token",
         "MCP_META_SERVER_URL": "https://mcp.example.test/ads",
     }.items():
         monkeypatch.setenv(key, value)
@@ -439,27 +437,50 @@ def test_meta_mcp_dispatches_discovered_write_when_both_gates_are_enabled(monkey
 def test_meta_mcp_refuses_when_any_single_configuration_is_missing(monkeypatch, missing):
     monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
     monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
-    monkeypatch.setenv("META_AD_ACCOUNT_ID", "123456")
     monkeypatch.setenv("MCP_META_SERVER_URL", "https://mcp.example.test/ads")
-    monkeypatch.setenv("META_MCP_ACCESS_TOKEN", "mock-token")
+    monkeypatch.setenv("META_SYSTEM_USER_TOKEN", "mock-token")
     variable = {
         "live_flag": "META_MCP_ENABLE_LIVE",
         "write_flag": "META_MCP_ALLOW_WRITES",
-        "account": "META_AD_ACCOUNT_ID",
         "url": "MCP_META_SERVER_URL",
-        "token": "META_MCP_ACCESS_TOKEN",
-    }[missing]
-    monkeypatch.delenv(variable, raising=False)
+        "token": "META_SYSTEM_USER_TOKEN",
+    }.get(missing)
+    if variable:
+        monkeypatch.delenv(variable, raising=False)
     monkeypatch.setattr(
         "apps.worker.meta_mcp_client.MetaMCPClient.call_tool_sync",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("external MCP call attempted")),
     )
+    arguments = {"campaign_name": "Test", "objective": "OUTCOME_TRAFFIC", "buying_type": "AUCTION"}
+    if missing != "account":
+        arguments["ad_account_id"] = "123456"
+    response = MCPPlatformDispatcher().call_tool("facebook", "ads_create_campaign", arguments)
+
+    assert response.success is False
+
+
+def test_meta_create_tools_reject_status_and_activation_overrides(monkeypatch):
+    monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
+    monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
+    monkeypatch.setattr(
+        "apps.worker.meta_mcp_client.MetaMCPClient.call_tool_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("external MCP call attempted")),
+    )
+
     response = MCPPlatformDispatcher().call_tool(
-        "facebook", "ads_create_campaign",
-        {"ad_account_id": "123456", "campaign_name": "Test", "objective": "OUTCOME_TRAFFIC", "buying_type": "AUCTION"},
+        "facebook",
+        "ads_create_campaign",
+        {
+            "ad_account_id": "123456",
+            "campaign_name": "Reviewed",
+            "objective": "OUTCOME_TRAFFIC",
+            "buying_type": "AUCTION",
+            "status": "ACTIVE",
+        },
     )
 
     assert response.success is False
+    assert response.error == "Meta create tools are paused-only and do not accept status or activation overrides."
 
 
 def test_meta_mcp_gates_catalog_writes_outside_launch_chain(monkeypatch):
@@ -473,7 +494,7 @@ def test_meta_mcp_gates_catalog_writes_outside_launch_chain(monkeypatch):
     assert response.error == "real_platform_calls_disabled"
 
 
-def test_meta_paused_chain_uses_four_create_tools_then_activates(monkeypatch):
+def test_meta_paused_chain_uses_four_create_tools_without_activation(monkeypatch):
     from apps.worker import mcp_client
     from apps.worker.mcp_client import MCPResponse, validate_meta_arguments
 
@@ -512,14 +533,14 @@ def test_meta_paused_chain_uses_four_create_tools_then_activates(monkeypatch):
     assert [name for name, _ in create_calls] == ["ads_create_campaign", "ads_create_ad_set", "ads_create_creative", "ads_create_ad"]
     for name, arguments in create_calls:
         validate_meta_arguments(name, arguments)
+        assert "status" not in arguments
+        assert "publish_as_active" not in arguments
     assert create_calls[0][1]["campaign_daily_budget"] == 500
     assert json.loads(create_calls[1][1]["targeting"])["publisher_platforms"] == ["facebook"]
     activation_calls = [(name, arguments) for name, arguments in calls if name == "ads_activate_entity"]
-    assert [arguments["entity_type"] for _, arguments in activation_calls] == ["campaign", "ad_set", "ad"]
-    assert activation_calls[0][1]["object_ids"] == [ids["campaign"], ids["ad_set"], ids["ad"]]
-    assert all(arguments["publish_as_active"] for _, arguments in activation_calls)
+    assert activation_calls == []
     assert response.success is True
-    assert response.result["status"] == "active_live"
+    assert response.result["status"] == "created_paused"
     assert persisted == ids
 
 
@@ -564,7 +585,72 @@ def test_meta_paused_chain_recovers_created_ad_set_without_duplicate(monkeypatch
     assert adset_create_count == 1
 
 
-@pytest.mark.parametrize("failed_tool", ["ads_create_campaign", "ads_create_ad_set", "ads_create_creative", "ads_create_ad", "ads_activate_entity"])
+def test_meta_paused_chain_reports_parent_lifecycle_transitions(monkeypatch):
+    from apps.worker import mcp_client
+    from apps.worker.mcp_client import MCPResponse
+
+    monkeypatch.setattr(mcp_client, "meta_live_writes_enabled", lambda: True)
+    statuses = []
+
+    def mocked_call(self, platform, tool_name, arguments):
+        if tool_name in {"ads_get_ad_entities", "ads_get_creatives"}:
+            return MCPResponse(True, platform, tool_name, {"data": []})
+        object_key = {
+            "ads_create_campaign": ("campaign_id", "campaign-1"),
+            "ads_create_ad_set": ("ad_set_id", "adset-1"),
+            "ads_create_creative": ("creative_id", "creative-1"),
+            "ads_create_ad": ("ad_id", "ad-1"),
+        }.get(tool_name)
+        if object_key:
+            return MCPResponse(True, platform, tool_name, {object_key[0]: object_key[1]})
+        raise AssertionError(f"unexpected Meta tool {tool_name}")
+
+    monkeypatch.setattr(MCPPlatformDispatcher, "call_tool", mocked_call)
+    response = MCPPlatformDispatcher().dispatch_paused_ad(
+        platform="facebook", ad_id="lifecycle-ad", campaign_name="Lifecycle",
+        headline="Headline", ad_text="Copy", destination_url="https://example.test",
+        ad_account_id="123456", page_id="page-1", instagram_user_id=None,
+        targeting_country="US", daily_budget_minor_units=500, image_url="https://cdn.example.test/ad.jpg",
+        persist_stage_status=lambda stage, state, error=None: statuses.append((stage, state)),
+    )
+
+    assert response.success is True
+    assert ("campaign", "RECONCILING") in statuses
+    assert ("campaign", "CREATING") in statuses
+    assert ("campaign", "CREATED") in statuses
+    assert ("ad_set", "CREATED") in statuses
+
+
+def test_meta_timeout_is_left_for_reconciliation(monkeypatch):
+    from apps.worker import mcp_client
+    from apps.worker.mcp_client import MCPResponse
+
+    monkeypatch.setattr(mcp_client, "meta_live_writes_enabled", lambda: True)
+    statuses = []
+
+    def mocked_call(self, platform, tool_name, arguments):
+        if tool_name in {"ads_get_ad_entities", "ads_get_creatives"}:
+            return MCPResponse(True, platform, tool_name, {"data": []})
+        if tool_name == "ads_create_campaign":
+            return MCPResponse(False, platform, tool_name, {}, "request timed out")
+        raise AssertionError(f"must not create children after parent timeout: {tool_name}")
+
+    monkeypatch.setattr(MCPPlatformDispatcher, "call_tool", mocked_call)
+    response = MCPPlatformDispatcher().dispatch_paused_ad(
+        platform="facebook", ad_id="timeout-ad", campaign_name="Timeout",
+        headline="Headline", ad_text="Copy", destination_url="https://example.test",
+        ad_account_id="123456", page_id="page-1", instagram_user_id=None,
+        targeting_country="US", daily_budget_minor_units=500, image_url="https://cdn.example.test/ad.jpg",
+        persist_stage_status=lambda stage, state, error=None: statuses.append((stage, state)),
+    )
+
+    assert response.success is False
+    assert response.result["lifecycle_status"] == "RECONCILING"
+    assert ("campaign", "RECONCILING") in statuses
+    assert ("campaign", "FAILED") not in statuses
+
+
+@pytest.mark.parametrize("failed_tool", ["ads_create_campaign", "ads_create_ad_set", "ads_create_creative", "ads_create_ad"])
 def test_meta_paused_chain_stops_on_each_create_failure(monkeypatch, failed_tool):
     from apps.worker import mcp_client
     from apps.worker.mcp_client import MCPResponse
@@ -598,8 +684,6 @@ def test_meta_paused_chain_stops_on_each_create_failure(monkeypatch, failed_tool
     assert response.error.startswith("meta_chain_incomplete:")
     assert failed_tool in calls
     assert calls[-1] == failed_tool
-    if failed_tool == "ads_activate_entity":
-        assert response.result["status"] == "paused"
 
 
 # ===========================================================================

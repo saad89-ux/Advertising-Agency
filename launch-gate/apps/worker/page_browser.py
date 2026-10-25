@@ -77,9 +77,10 @@ class OpenedPage:
 class PageOpenError(RuntimeError):
     """Page opening failed for a stable, caller-readable reason."""
 
-    def __init__(self, reason_code: str, message: str) -> None:
+    def __init__(self, reason_code: str, message: str, *, http_status: int | None = None) -> None:
         super().__init__(message)
         self.reason_code = reason_code
+        self.http_status = http_status
 
 
 def _is_http_url(url: str) -> bool:

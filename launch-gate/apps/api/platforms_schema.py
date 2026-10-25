@@ -101,6 +101,71 @@ ALTER TABLE ad_performance_tracking ALTER COLUMN spend_usd DROP NOT NULL;
 ALTER TABLE ad_performance_tracking ALTER COLUMN spend_usd DROP DEFAULT;
 CREATE INDEX IF NOT EXISTS idx_ad_perf_client ON ad_performance_tracking (client_id);
 CREATE INDEX IF NOT EXISTS idx_ad_perf_platform ON ad_performance_tracking (platform);
+
+CREATE TABLE IF NOT EXISTS meta_sync_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id TEXT NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
+    sync_type VARCHAR(50) NOT NULL CHECK (sync_type IN ('INITIAL_IMPORT', 'METRIC_REFRESH')),
+    status VARCHAR(50) NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
+    records_synced INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+ALTER TABLE meta_sync_logs ADD COLUMN IF NOT EXISTS records_synced INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE meta_sync_logs ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE meta_sync_logs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE meta_sync_logs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_meta_sync_logs_workspace_started
+    ON meta_sync_logs(workspace_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS meta_sync_outbox (
+    sync_id UUID PRIMARY KEY REFERENCES meta_sync_logs(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
+    sync_type VARCHAR(50) NOT NULL CHECK (sync_type IN ('INITIAL_IMPORT', 'METRIC_REFRESH')),
+    lookback_days INTEGER NOT NULL CHECK (lookback_days BETWEEN 1 AND 90),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    queued_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_meta_sync_outbox_pending
+    ON meta_sync_outbox(created_at, sync_id) WHERE queued_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS meta_synced_objects (
+    workspace_id TEXT NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
+    meta_object_id VARCHAR(255) NOT NULL,
+    object_type VARCHAR(20) NOT NULL CHECK (object_type IN ('CAMPAIGN', 'ADSET', 'AD')),
+    parent_meta_object_id VARCHAR(255),
+    name TEXT,
+    effective_status VARCHAR(100),
+    objective VARCHAR(100),
+    configuration JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_sync_id UUID REFERENCES meta_sync_logs(id) ON DELETE SET NULL,
+    synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (workspace_id, meta_object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_synced_objects_parent
+    ON meta_synced_objects(workspace_id, parent_meta_object_id);
+CREATE INDEX IF NOT EXISTS idx_meta_synced_objects_type_status
+    ON meta_synced_objects(workspace_id, object_type, effective_status);
+
+CREATE TABLE IF NOT EXISTS meta_performance_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id TEXT NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
+    meta_object_id VARCHAR(255) NOT NULL,
+    object_type VARCHAR(20) NOT NULL CHECK (object_type IN ('CAMPAIGN', 'ADSET', 'AD')),
+    spend NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    impressions BIGINT NOT NULL DEFAULT 0,
+    clicks BIGINT NOT NULL DEFAULT 0,
+    conversions NUMERIC(14, 2) NOT NULL DEFAULT 0,
+    reporting_start DATE NOT NULL,
+    reporting_end DATE NOT NULL,
+    source_attribution VARCHAR(100) NOT NULL DEFAULT 'META_INSIGHTS_API',
+    synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (reporting_end >= reporting_start),
+    UNIQUE (workspace_id, meta_object_id, object_type, reporting_start, reporting_end, source_attribution)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_metrics_lookup
+    ON meta_performance_metrics(workspace_id, meta_object_id, reporting_start, reporting_end);
 """
 
 

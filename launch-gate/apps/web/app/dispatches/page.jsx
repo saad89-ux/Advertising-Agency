@@ -25,6 +25,10 @@ function DispatchesContent({ apiBaseUrl = API_BASE_URL }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [previewAd, setPreviewAd] = useState(null);
+  const [activationHash, setActivationHash] = useState("");
+  const [activationBudget, setActivationBudget] = useState("");
+  const [activationConfirmation, setActivationConfirmation] = useState("");
+  const [activationMessage, setActivationMessage] = useState("");
 
   // Sync with URL search params if they change
   useEffect(() => {
@@ -37,6 +41,29 @@ function DispatchesContent({ apiBaseUrl = API_BASE_URL }) {
       setSelectedBatchId(qBatch.startsWith("mock-") ? "" : qBatch);
     }
   }, [searchParams]);
+
+  const activateHierarchy = async () => {
+    if (!selectedBatchId || !activationHash || activationConfirmation !== "ACTIVATE" || !activationBudget) return;
+    setActivationMessage("");
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
+      const response = await fetch(`${apiBaseUrl}/campaign-flow/activate-hierarchy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          batch_id: selectedBatchId,
+          hierarchy_hash: activationHash,
+          confirmed_budget_minor_units: Number(activationBudget),
+        }),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const result = await response.json();
+      setActivationMessage(`Activation recorded for ${result.activated_campaigns.length} campaign(s).`);
+      await fetchData();
+    } catch (error) {
+      setActivationMessage(requestErrorMessage(error));
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -356,6 +383,19 @@ function DispatchesContent({ apiBaseUrl = API_BASE_URL }) {
             </button>
           </div>
         )}
+
+        <section style={{ marginBottom: "24px", padding: "18px", border: "1px solid rgba(245, 158, 11, 0.35)", borderRadius: "8px" }}>
+          <div style={{ fontSize: "14px", fontWeight: 700, color: "#fcd34d", marginBottom: "10px" }}>Explicit Meta activation</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "10px" }}>
+            <input value={activationHash} onChange={(event) => setActivationHash(event.target.value)} placeholder="Approved hierarchy hash" style={{ padding: "9px", color: "#fff" }} />
+            <input value={activationBudget} onChange={(event) => setActivationBudget(event.target.value.replace(/[^0-9]/g, ""))} placeholder="Confirmed budget (minor units)" inputMode="numeric" style={{ padding: "9px", color: "#fff" }} />
+            <input value={activationConfirmation} onChange={(event) => setActivationConfirmation(event.target.value)} placeholder="Type ACTIVATE" style={{ padding: "9px", color: "#fff" }} />
+          </div>
+          <button disabled={!selectedBatchId || !activationHash || !activationBudget || activationConfirmation !== "ACTIVATE"} onClick={activateHierarchy} style={{ marginTop: "12px", padding: "8px 12px", cursor: activationConfirmation === "ACTIVATE" ? "pointer" : "not-allowed" }}>
+            Activate reviewed campaigns
+          </button>
+          {activationMessage && <div role="status" style={{ marginTop: "10px", color: "#cbd5e1" }}>{activationMessage}</div>}
+        </section>
 
         {/* 1. MCP Platform Dispatch Pipeline Status */}
         <div style={{

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from difflib import get_close_matches
+from functools import lru_cache
+import json
+from pathlib import Path
 import re
 from urllib.parse import parse_qsl, urlsplit
 
@@ -29,12 +32,31 @@ _MEDIUM_ALIASES = {
     "paid_social": {"paid_social", "paid social", "paid-social", "paid", "social"},
     "cpc": {"cpc", "ppc", "paid_search"},
 }
-_CAMPAIGN_PATTERN = re.compile(
+_DEFAULT_CAMPAIGN_PATTERN = re.compile(
     r"^[a-z0-9]+(_[a-z0-9]+)*_(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$"
 )
-_OAK_CAMPAIGN_PATTERN = re.compile(
-    r"^[a-z0-9]+(_[a-z0-9]+)*_(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|q[1-4])$"
-)
+_NAMING_CONFIG_PATH = Path(__file__).resolve().parents[2] / "data" / "naming_convention.json"
+
+
+@lru_cache(maxsize=1)
+def _load_naming_config() -> dict:
+    try:
+        data = json.loads(_NAMING_CONFIG_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _campaign_pattern(client_id: str) -> re.Pattern:
+    config = _load_naming_config()
+    overrides = config.get("client_overrides", {})
+    client_config = overrides.get(client_id, {}) if isinstance(overrides, dict) else {}
+    pattern = client_config.get("campaign_pattern") if isinstance(client_config, dict) else None
+    pattern = pattern or config.get("campaign_pattern")
+    try:
+        return re.compile(pattern) if isinstance(pattern, str) else _DEFAULT_CAMPAIGN_PATTERN
+    except re.error:
+        return _DEFAULT_CAMPAIGN_PATTERN
 
 
 def _query_entries(destination_url: str) -> list[tuple[str, str]]:
@@ -58,6 +80,8 @@ def _finding(
     field: str,
     message: str,
     proposed_fix: str,
+    actual_value: str | None = None,
+    expected_format: str | None = None,
 ) -> FindingContract:
     return FindingContract(
         finding_id=f"{ad.ad_id}:utm_naming:{issue}:{field}",
@@ -67,6 +91,8 @@ def _finding(
         message=message,
         field=field,
         proposed_fix=proposed_fix,
+        actual_value=actual_value,
+        expected_format=expected_format,
     )
 
 
@@ -93,6 +119,8 @@ def check_utm_naming(ad: AdContract) -> list[FindingContract]:
                     field=expected_key,
                     message=f"Query parameter '{key}' appears misspelled; use '{expected_key}'.",
                     proposed_fix=f"Replace query key '{key}' with '{expected_key}'.",
+                    actual_value=key,
+                    expected_format=expected_key,
                 )
             )
 
@@ -130,15 +158,15 @@ def check_utm_naming(ad: AdContract) -> list[FindingContract]:
                         f"platform naming '{expected}'."
                     ),
                     proposed_fix=f"Use '{expected}' for {parameter} on {canonical_platform} ads.",
+                    actual_value=", ".join(incorrect_values),
+                    expected_format=expected,
                 )
             )
 
     campaign_values = [
         value.strip() for value in values_by_key.get("utm_campaign", []) if value.strip()
     ]
-    campaign_pattern = (
-        _OAK_CAMPAIGN_PATTERN if ad.client_id == "oakandhome" else _CAMPAIGN_PATTERN
-    )
+    campaign_pattern = _campaign_pattern(ad.client_id)
     for campaign in campaign_values:
         if campaign_pattern.fullmatch(campaign):
             continue
@@ -160,6 +188,8 @@ def check_utm_naming(ad: AdContract) -> list[FindingContract]:
                 field="utm_campaign",
                 message=f"Campaign value '{campaign}' does not match the naming convention.",
                 proposed_fix=fix,
+                actual_value=campaign,
+                expected_format=campaign_pattern.pattern,
             )
         )
 
@@ -178,6 +208,8 @@ def check_utm_naming(ad: AdContract) -> list[FindingContract]:
                     field="destination_url",
                     message="Required UTM parameters are not in the agreed order.",
                     proposed_fix=f"Order them as {order_text}.",
+                    actual_value=", ".join(actual_order),
+                    expected_format=order_text,
                 )
             )
 

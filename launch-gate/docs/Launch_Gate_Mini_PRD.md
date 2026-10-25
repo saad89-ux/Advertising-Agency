@@ -11,7 +11,7 @@
 
 ## 1. What are we building?
 
-A **pre-launch gate** that every batch of ads passes through before it goes live. A buyer uploads a messy launch sheet. The gate turns it into clean records, checks every ad, gives each ad a verdict, and shows a reviewer the ad beside its findings. **Only ads a person approves are sent**, and only to a stand-in (dry-run) ad platform. [B R1 to R6]
+A **pre-launch gate** that every batch of ads passes through before it goes live. A buyer uploads a messy launch sheet. The gate turns it into clean records, checks every ad, gives each ad a verdict, and shows a reviewer the ad beside its findings. **Only ads a person approves are sent**, by default to a stand-in (dry-run) ad platform. The owner-authorized Meta exception requires a separate human activation after paused creation. [B R1 to R6; owner authorization]
 
 **One-line pitch:** *Stop finding out about mistakes from the client.* [B section 4]
 
@@ -83,7 +83,7 @@ Per ad: `ready`, `fix needed`, `blocked`, `needs a person`, plus a one-screen ba
 - Approval records who, when and a **content hash**; only the approved version can be sent [D13].
 - Client approval given by email, text or call is recorded by the reviewer attaching a note or screenshot linked to the content hash [D3]. v1 does not read email, text or calls.
 - Sender uses an idempotency key and states `approved`, `sending`, `sent`; bounded retries with timeouts; dead-letter list [B R6].
-- Sends only to the stand-in platform. Real platform calls are designed and documented, **switched off** [B R6].
+- Sends to the stand-in platform by default. Owner-authorized Meta launches require explicit human authorization and both `META_MCP_ENABLE_LIVE` and `META_MCP_ALLOW_WRITES`; Meta objects are created paused and activated separately. [B R6; owner authorization]
 - A rejection or uncertain state alerts a person. There is no automatic relaunch.
 
 ### 4.7 Metrics and release gate [B R7]
@@ -114,7 +114,7 @@ Each ad is a trace with a span per step, tagged with ad and batch IDs (Langfuse,
 4. The page check never submits a form or buys anything.
 5. A cited rule number must come from a retrieved entry; none are invented.
 6. Step and spend caps are never exceeded.
-7. Real platform calls stay switched off.
+7. Real platform calls stay switched off by default. The owner-authorized Meta exception permits a campaign launch only after explicit human authorization and only when both `META_MCP_ENABLE_LIVE` and `META_MCP_ALLOW_WRITES` are enabled. Creation remains paused; activation is a separate operation.
 8. Secrets are never committed to the repository.
 
 [B R2 to R8; rule 8 is standard practice and part of the one-command, CI packaging in B section 8]
@@ -140,7 +140,7 @@ Each ad is a trace with a span per step, tagged with ad and batch IDs (Langfuse,
 | CI | GitHub Actions: checks plus replay | [D9] |
 | Start | single `docker compose up` | [B] |
 | Cloud deploy | any Docker-capable host; host not named | [D10] |
-| Ad platform | stand-in (dry run) from the data pack | [B] |
+| Ad platform | stand-in (dry run) by default; explicitly authorized Meta MCP launch is gated by human approval and both live/write flags | [B; owner authorization] |
 
 ---
 
@@ -148,7 +148,7 @@ Each ad is a trace with a span per step, tagged with ad and batch IDs (Langfuse,
 
 | Not included | Why |
 |---|---|
-| Publishing to real ad platforms, including MCP servers | No real accounts; brief says stand-in only and "MCP not needed". Designed and documented, switched off. [B] |
+| Unapproved publishing to real ad platforms | Real Meta writes remain disabled by default. The owner-authorized exception requires human authorization and both live/write flags; all other real platform publishing is out of scope. [B; owner authorization] |
 | Auto-correct and auto-relaunch after a rejection | Violates "nothing goes live without a person". [B R6] |
 | Continuous post-launch monitoring, root-cause node, monthly mistake report (your Nodes 9 to 12) | Needs real platforms; cut for a 4-day window. [B section 1, N] |
 | Client-facing approval link, client portal, client chasing by email, text or call | Out of scope [D4]. v1 uses content hash plus manual evidence [D3]. |

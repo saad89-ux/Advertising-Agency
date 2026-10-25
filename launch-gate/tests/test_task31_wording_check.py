@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 import pytest
 
@@ -185,6 +187,96 @@ def test_wording_check_unknown_situation_goes_to_person():
     assert any("unknown" in f.finding_id or "ambiguous" in f.message for f in result.findings)
 
 
+@pytest.mark.parametrize(
+    "result,expected_status,expected_reason,expected_review",
+    [
+        (SimpleNamespace(findings=[], needs_person=True, model_unavailable=False, retrieved_rules=[], summary="No client rules.", review_reason="client_rules_missing"), "needs_review", "client_rules_missing", True),
+        (SimpleNamespace(findings=[], needs_person=True, model_unavailable=False, retrieved_rules=[], summary="Rules could not be retrieved.", review_reason="rule_retrieval_unavailable"), "needs_review", "rule_retrieval_unavailable", True),
+        (SimpleNamespace(findings=[SimpleNamespace(finding_id="ad-wording-1:wording:claim", message="Verified rule violation.", rule_id="BL-C-01")], needs_person=False, model_unavailable=False, retrieved_rules=[object()], summary="Violation found.", review_reason=None), "fail", "verified_rule_violation", False),
+        (SimpleNamespace(findings=[SimpleNamespace(finding_id="ad-wording-1:wording:claim", message="Verified rule violation.", rule_id="BL-C-01")], needs_person=True, model_unavailable=False, retrieved_rules=[object()], summary="Violation and unknown claim.", review_reason="human_review_required"), "fail", "verified_rule_violation", True),
+        (SimpleNamespace(findings=[], needs_person=False, model_unavailable=False, retrieved_rules=[object()], summary="Wording passed.", review_reason=None), "pass", "rules_checked", False),
+        (SimpleNamespace(findings=[], needs_person=True, model_unavailable=False, retrieved_rules=[object()], summary="Needs a person.", review_reason="human_review_required"), "needs_review", "human_review_required", True),
+        (SimpleNamespace(findings=[], needs_person=False, model_unavailable=True, retrieved_rules=[object()], summary="Model unavailable.", review_reason="model_unavailable"), "not_checked", "model_unavailable", True),
+    ],
+)
+def test_preflight_wording_outcome_mapping(monkeypatch, result, expected_status, expected_reason, expected_review):
+    from apps.api.preflight import review_ad
+
+    monkeypatch.setattr("apps.worker.model_client.is_gemini_configured", lambda: True)
+    monkeypatch.setattr("apps.worker.wording_check.check_wording", lambda _ad: result)
+    checks = review_ad(sample_ad())
+    wording = next(check for check in checks if check["name"] == "wording")
+
+    assert wording["status"] == expected_status
+    assert wording["reason"] == expected_reason
+    assert wording["review_required"] is expected_review
+
+
+def test_wording_check_without_client_rules_requires_review(monkeypatch):
+    monkeypatch.setattr("apps.worker.wording_check.list_client_rules", lambda *_args, **_kwargs: [])
+
+    result = check_wording(sample_ad())
+
+    assert result.status == "needs_person"
+    assert result.review_reason == "client_rules_missing"
+    assert any(f.finding_id.endswith(":client_rules_missing") for f in result.findings)
+
+
+def test_wording_check_rule_retrieval_error_requires_review(monkeypatch):
+    def fail_retrieval(*_args, **_kwargs):
+        raise RuntimeError("simulated rules database outage")
+
+    monkeypatch.setattr("apps.worker.wording_check.list_client_rules", fail_retrieval)
+    result = check_wording(sample_ad())
+
+    assert result.status == "needs_person"
+    assert result.review_reason == "rule_retrieval_unavailable"
+    assert any(f.finding_id.endswith(":rule_retrieval_unavailable") for f in result.findings)
+
+
+def _png_bytes(width: int, height: int) -> bytes:
+    from PIL import Image
+
+    image = Image.new("RGB", (width, height), color="white")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_preflight_missing_creative_is_not_checked_with_required_ratios(monkeypatch):
+    from apps.api.preflight import review_ad
+
+    monkeypatch.setattr("apps.worker.model_client.is_gemini_configured", lambda: False)
+    checks = review_ad(sample_ad(creative_file=None, platform="facebook"))
+    creative = next(check for check in checks if check["name"] == "creative_size_ratio")
+
+    assert creative["status"] == "not_checked"
+    assert creative["reason"] == "creative_missing"
+    assert creative["details"][0]["actual_value"] == "<missing>"
+    assert creative["details"][0]["expected_format"]
+
+
+@pytest.mark.parametrize("dimensions,expected_status", [((1080, 1350), "pass"), ((1920, 1080), "fail")])
+def test_preflight_reports_measured_creative_dimensions(monkeypatch, dimensions, expected_status):
+    from apps.api.preflight import review_ad
+
+    width, height = dimensions
+    content = _png_bytes(width, height)
+
+    class MemoryStore:
+        def get(self, _file_ref):
+            return content
+
+    monkeypatch.setattr("apps.worker.file_storage.LocalFileStore", lambda: MemoryStore())
+    monkeypatch.setattr("apps.worker.model_client.is_gemini_configured", lambda: False)
+    checks = review_ad(sample_ad(creative_file="memory://creative.png", platform="facebook"))
+    creative = next(check for check in checks if check["name"] == "creative_size_ratio")
+
+    assert creative["status"] == expected_status
+    assert creative["details"][0]["actual_value"].startswith(f"{width}x{height} pixels")
+    assert creative["details"][0]["expected_format"]
+
+
 def test_wording_check_invented_citation_rejected_and_triggers_needs_person():
     ad = sample_ad()
     rules = sample_retrieved_rules()
@@ -335,7 +427,7 @@ def test_wording_check_no_rules_found_goes_to_person():
 
     assert result.needs_person is True
     assert result.status == "needs_person"
-    assert any("no_retrieved_rules" in f.finding_id for f in result.findings)
+    assert any("client_rules_missing" in f.finding_id for f in result.findings)
 
 
 def test_wording_check_unranked_mode_sends_all_rules_when_under_forty():

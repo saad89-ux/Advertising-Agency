@@ -1,3 +1,5 @@
+import json
+
 from apps.api.clients import create_client_tables
 from apps.api.batches import create_batches_table
 from apps.api.database import get_session
@@ -17,6 +19,10 @@ CREATE TABLE IF NOT EXISTS ads (
     creative_file TEXT,
     row_hash TEXT NOT NULL CHECK (length(trim(row_hash)) > 0),
     sheet_hash TEXT NOT NULL CHECK (length(trim(sheet_hash)) > 0),
+    campaign_key TEXT,
+    ad_set_key TEXT,
+    ad_key TEXT,
+    hierarchy_data JSONB,
     is_sample BOOLEAN NOT NULL DEFAULT FALSE,
     CHECK (
         (ad_text IS NOT NULL AND length(trim(ad_text)) > 0)
@@ -29,8 +35,17 @@ ENSURE_ADS_IS_SAMPLE_COLUMN = "ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_sampl
 INSERT_AD = """
 INSERT INTO ads (
     ad_id, batch_id, client_id, row_number, platform, platform_raw, ad_text, headline,
-    destination_url, creative_file, row_hash, sheet_hash
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    destination_url, creative_file, row_hash, sheet_hash, campaign_key, ad_set_key, ad_key, hierarchy_data
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+ENSURE_ADS_HIERARCHY_COLUMNS = """
+ALTER TABLE ads ADD COLUMN IF NOT EXISTS campaign_key TEXT;
+ALTER TABLE ads ADD COLUMN IF NOT EXISTS ad_set_key TEXT;
+ALTER TABLE ads ADD COLUMN IF NOT EXISTS ad_key TEXT;
+ALTER TABLE ads ADD COLUMN IF NOT EXISTS hierarchy_data JSONB;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ads_batch_client_ad_key
+    ON ads(batch_id, client_id, ad_key) WHERE ad_key IS NOT NULL;
 """
 
 ENSURE_PLATFORM_RAW_COLUMN = "ALTER TABLE ads ADD COLUMN IF NOT EXISTS platform_raw TEXT"
@@ -56,6 +71,7 @@ def create_ads_table() -> None:
     create_client_tables()
     with get_session() as connection:
         connection.execute(CREATE_ADS_TABLE)
+        connection.execute(ENSURE_ADS_HIERARCHY_COLUMNS)
         connection.execute(ENSURE_ADS_BATCH_FOREIGN_KEY)
 
 
@@ -82,5 +98,9 @@ def persist_ads_on_connection(connection, ads: list[dict[str, object]]) -> None:
                 ad.get("creative_file", ""),
                 ad["row_hash"],
                 ad["sheet_hash"],
+                ad.get("campaign_key"),
+                ad.get("ad_set_key"),
+                ad.get("ad_key"),
+                json.dumps(ad["hierarchy_data"], sort_keys=True) if ad.get("hierarchy_data") else None,
             ),
         )

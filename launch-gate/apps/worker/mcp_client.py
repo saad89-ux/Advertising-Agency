@@ -10,6 +10,7 @@ alerts via standard MCP tool contracts.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import logging
 import os
@@ -77,13 +78,15 @@ class MCPResponse:
     result: dict[str, Any]
     error: str | None = None
     rpc_id: str = field(default_factory=lambda: f"mcp_{uuid.uuid4().hex[:8]}")
+    status_code: int | None = None
 
 
 class MCPPlatformDispatcher:
     """Manages Meta MCP tool execution for Facebook and Instagram placements."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, access_token: str | None = None) -> None:
         self.meta_mcp_url = os.environ.get("MCP_META_SERVER_URL", "").strip()
+        self.access_token = access_token.strip() if isinstance(access_token, str) else ""
 
     def list_tools(self, platform: str) -> list[MCPToolDefinition]:
         """Return the real Meta campaign creation tools from the discovered catalog."""
@@ -126,6 +129,16 @@ class MCPPlatformDispatcher:
                 rpc_id=rpc_id,
             )
 
+        if tool_name in META_CREATE_TOOLS and {"status", "publish_as_active"} & arguments.keys():
+            return MCPResponse(
+                success=False,
+                platform=platform,
+                tool_name=tool_name,
+                result={},
+                error="Meta create tools are paused-only and do not accept status or activation overrides.",
+                rpc_id=rpc_id,
+            )
+
         live_mcp_enabled = os.environ.get("META_MCP_ENABLE_LIVE", "false").strip().lower() in {
             "1", "true", "yes"
         }
@@ -144,15 +157,19 @@ class MCPPlatformDispatcher:
             validate_meta_arguments(tool_name, arguments)
         except ValueError as exc:
             return MCPResponse(False, platform, tool_name, {}, str(exc), rpc_id)
-        account_id = os.environ.get("META_AD_ACCOUNT_ID", "").strip()
-        access_token = os.environ.get("META_MCP_ACCESS_TOKEN", "").strip()
+        account_id = str(arguments.get("ad_account_id") or "").strip().removeprefix("act_")
+        access_token = self.access_token or os.environ.get("META_SYSTEM_USER_TOKEN", "").strip()
         if is_write and not account_id:
-            return MCPResponse(False, platform, tool_name, {}, "META_AD_ACCOUNT_ID is not configured.", rpc_id)
+            return MCPResponse(False, platform, tool_name, {}, "ad_account_id is required from the authorized client workspace.", rpc_id)
         if live_mcp_enabled and self.meta_mcp_url and access_token:
             try:
                 from apps.worker.meta_mcp_client import MetaMCPClient
 
-                response = MetaMCPClient(enable_live=live_mcp_enabled, allow_writes=writes_allowed).call_tool_sync(
+                response = MetaMCPClient(
+                    access_token=access_token,
+                    enable_live=live_mcp_enabled,
+                    allow_writes=writes_allowed,
+                ).call_tool_sync(
                     tool_name,
                     arguments,
                     tool_description=f"Meta {tool_name} campaign lifecycle operation",
@@ -164,6 +181,7 @@ class MCPPlatformDispatcher:
                     result=response.result,
                     error=response.error,
                     rpc_id=response.rpc_id,
+                    status_code=response.status_code,
                 )
             except Exception as exc:
                 logger.exception("Meta MCP dispatch failed for %s", tool_name)
@@ -201,30 +219,73 @@ class MCPPlatformDispatcher:
         daily_budget_minor_units: int,
         image_url: str,
         special_ad_category: str = "NONE",
+        campaign_objective: str = "OUTCOME_TRAFFIC",
+        campaign_budget_strategy: str = "DAILY",
+        campaign_lifetime_budget_minor_units: int | None = None,
+        campaign_key: str | None = None,
+        ad_set_key: str | None = None,
+        ad_set_name: str | None = None,
+        targeting_spec: dict[str, Any] | None = None,
+        placements: list[str] | None = None,
+        optimization_goal: str = "LINK_CLICKS",
+        billing_event: str = "IMPRESSIONS",
+        ad_set_daily_budget_minor_units: int | None = None,
+        ad_set_lifetime_budget_minor_units: int | None = None,
+        adset_schedule: dict[str, Any] | None = None,
+        targeting_countries: list[str] | None = None,
+        special_ad_category_countries: list[str] | None = None,
         existing_ids: dict[str, str] | None = None,
         persist_stage=None,
+        persist_stage_status=None,
     ) -> MCPResponse:
-        """Create or resume one deterministic four-object chain, leaving every object paused."""
+        """Create or resume one deterministic chain using Meta's paused-only create tools.
+
+        The discovered create contracts do not accept a status field and guarantee
+        campaigns, ad sets, and ads are created paused. Publishing is a separate,
+        explicitly authorized activation operation.
+        """
         if platform not in {"facebook", "instagram"}:
             return MCPResponse(False, platform, "ads_create_campaign", {}, "unsupported_platform_meta_only")
         if not meta_live_writes_enabled():
             return MCPResponse(False, platform, "ads_create_campaign", {}, "real_platform_calls_disabled")
-        if not all((ad_account_id, page_id, targeting_country, image_url)) or daily_budget_minor_units < 1:
+        budget_strategy = campaign_budget_strategy.upper()
+        budget_is_valid = (
+            budget_strategy == "DAILY" and daily_budget_minor_units > 0 and campaign_lifetime_budget_minor_units is None
+        ) or (
+            budget_strategy == "LIFETIME" and bool(campaign_lifetime_budget_minor_units) and daily_budget_minor_units in (None, 0)
+        ) or (
+            budget_strategy == "AD_SET_DAILY" and bool(ad_set_daily_budget_minor_units) and daily_budget_minor_units in (None, 0)
+        ) or (
+            budget_strategy == "AD_SET_LIFETIME" and bool(ad_set_lifetime_budget_minor_units) and daily_budget_minor_units in (None, 0)
+        )
+        if not all((ad_account_id, page_id, targeting_country, image_url)) or not budget_is_valid:
             return MCPResponse(False, platform, "ads_create_campaign", {}, "Required Meta launch details are missing.")
         if platform == "instagram" and not instagram_user_id:
             return MCPResponse(False, platform, "ads_create_creative", {}, "Instagram account ID is required for Instagram placement.")
         if not image_url.startswith("https://"):
             return MCPResponse(False, platform, "ads_create_creative", {}, "Meta requires a publicly accessible HTTPS creative image URL.")
+        country_codes = [str(country).strip().upper() for country in (targeting_countries or [targeting_country])]
+        if not country_codes or any(len(country) != 2 or not country.isalpha() for country in country_codes):
+            return MCPResponse(False, platform, "ads_create_ad_set", {}, "Targeting requires valid two-letter country codes.")
+        category_countries = [str(country).strip().upper() for country in (special_ad_category_countries or country_codes)]
 
         safe_name = re.sub(r"[^A-Za-z0-9 _-]+", "", campaign_name).strip()[:80] or "Launch Gate Campaign"
         suffix = f"{ad_id}-{platform}"
+        campaign_key_digest = hashlib.sha256((campaign_key or suffix).encode("utf-8")).hexdigest()[:10]
+        ad_set_key_digest = hashlib.sha256((ad_set_key or suffix).encode("utf-8")).hexdigest()[:10]
         names = {
-            "campaign": f"{safe_name[:50]}-{suffix}",
-            "ad_set": f"{suffix}-adset",
+            "campaign": f"{safe_name[:40]}-{campaign_key_digest}",
+            "ad_set": (
+                f"{(ad_set_name or 'Ad Set')[:45]}-{ad_set_key_digest}"
+                if ad_set_key
+                else f"{suffix}-adset"
+            ),
             "creative": f"{suffix}-creative",
             "ad": f"{suffix}-ad",
         }
         ids = dict(existing_ids or {})
+        active_stage: str | None = None
+        active_lifecycle_status = "PENDING"
         conversation_id = uuid.uuid4().hex[:20]
         advertiser_request = "Review and update the campaign preview, then confirm launch on the selected Meta platform(s)."
         advertiser_job = "create_and_launch_new_ads"
@@ -329,24 +390,45 @@ class MCPPlatformDispatcher:
                     queue.extend(current)
             return None
 
+        def set_stage_status(stage: str, state: str, error: str | None = None) -> None:
+            nonlocal active_stage, active_lifecycle_status
+            if stage not in {"campaign", "ad_set"}:
+                return
+            active_stage = stage
+            active_lifecycle_status = state
+            if persist_stage_status:
+                persist_stage_status(stage, state, error)
+
         def create_or_resume(stage: str, level: str, tool_name: str, arguments: dict[str, Any], keys: tuple[str, ...]) -> str:
             if ids.get(stage):
+                set_stage_status(stage, "CREATED")
                 return ids[stage]
+            set_stage_status(stage, "RECONCILING")
             found = lookup_creative(names[stage]) if stage == "creative" else lookup_entity(level, names[stage])
             if found:
                 ids[stage] = found
                 if persist_stage:
                     persist_stage(stage, found)
+                set_stage_status(stage, "CREATED")
                 return found
+            set_stage_status(stage, "CREATING")
             response = self.call_tool(platform, tool_name, arguments)
             if not response.success:
-                raise RuntimeError(response.error or f"Meta {tool_name} failed.")
+                error_message = response.error or f"Meta {tool_name} failed."
+                uncertain = response.status_code in {408, 425, 500, 502, 503, 504} or any(
+                    marker in error_message.casefold()
+                    for marker in ("timeout", "timed out", "connection reset", "transport error")
+                )
+                set_stage_status(stage, "RECONCILING" if uncertain else "FAILED", error_message)
+                raise RuntimeError(error_message)
             created_id = object_id(response.result, keys)
             if not created_id:
+                set_stage_status(stage, "RECONCILING", "Meta returned success without an object ID.")
                 raise RuntimeError(f"Meta {tool_name} returned no object ID.")
             ids[stage] = created_id
             if persist_stage:
                 persist_stage(stage, created_id)
+            set_stage_status(stage, "CREATED")
             return created_id
 
         context = {
@@ -355,28 +437,55 @@ class MCPPlatformDispatcher:
             "advertiser_job": advertiser_job,
         }
         try:
-            campaign_id = create_or_resume("campaign", "campaign", "ads_create_campaign", {
+            campaign_arguments = {
                 **context,
                 "ad_account_id": ad_account_id,
                 "campaign_name": names["campaign"],
-                "objective": "OUTCOME_TRAFFIC",
+                "objective": campaign_objective,
                 "buying_type": "AUCTION",
                 "special_ad_categories": json.dumps([] if special_ad_category == "NONE" else [special_ad_category]),
-                "campaign_daily_budget": daily_budget_minor_units,
-                "campaign_bid_strategy": "LOWEST_COST_WITHOUT_CAP",
-                **({"special_ad_category_country": json.dumps([targeting_country.upper()])} if special_ad_category != "NONE" else {}),
-            }, ("campaign_id", "id"))
+                **({"special_ad_category_country": json.dumps(category_countries)} if special_ad_category != "NONE" else {}),
+            }
+            if budget_strategy == "DAILY":
+                campaign_arguments["campaign_daily_budget"] = daily_budget_minor_units
+                campaign_arguments["campaign_bid_strategy"] = "LOWEST_COST_WITHOUT_CAP"
+            elif budget_strategy == "LIFETIME":
+                campaign_arguments["campaign_lifetime_budget"] = campaign_lifetime_budget_minor_units
+                campaign_arguments["campaign_bid_strategy"] = "LOWEST_COST_WITHOUT_CAP"
+            campaign_id = create_or_resume("campaign", "campaign", "ads_create_campaign", campaign_arguments, ("campaign_id", "id"))
 
-            ad_set_id = create_or_resume("ad_set", "adset", "ads_create_ad_set", {
+            targeting = dict(targeting_spec or {"geo_locations": {"countries": country_codes}})
+            targeting.setdefault("geo_locations", {"countries": country_codes})
+            if placements:
+                allowed_placements = {"facebook", "instagram", "messenger", "audience_network"}
+                normalized_placements = [str(value).strip().casefold() for value in placements]
+                if any(value not in allowed_placements for value in normalized_placements):
+                    raise ValueError("Ad-set placements contain an unsupported Meta placement.")
+                targeting["publisher_platforms"] = normalized_placements
+            if platform not in targeting.get("publisher_platforms", []) and targeting_spec is None:
+                targeting["publisher_platforms"] = [platform]
+            ad_set_arguments = {
                 **context,
                 "ad_account_id": ad_account_id,
                 "campaign_id": campaign_id,
                 "ad_set_name": names["ad_set"],
-                "billing_event": "IMPRESSIONS",
-                "optimization_goal": "LINK_CLICKS",
-                "targeting": json.dumps({"geo_locations": {"countries": [targeting_country.upper()]}, "publisher_platforms": [platform]}),
+                "billing_event": billing_event,
+                "optimization_goal": optimization_goal,
+                "targeting": json.dumps(targeting),
                 "destination_type": "WEBSITE",
-            }, ("ad_set_id", "adset_id", "id"))
+            }
+            if budget_strategy == "AD_SET_DAILY":
+                ad_set_arguments["daily_budget"] = ad_set_daily_budget_minor_units
+            elif budget_strategy == "AD_SET_LIFETIME":
+                ad_set_arguments["lifetime_budget"] = ad_set_lifetime_budget_minor_units
+            schedule_specs = (adset_schedule or {}).get("adset_schedule")
+            if isinstance(schedule_specs, list) and schedule_specs:
+                ad_set_arguments["adset_schedule"] = json.dumps(schedule_specs)
+            if (adset_schedule or {}).get("start_time"):
+                ad_set_arguments["start_time"] = adset_schedule["start_time"]
+            if (adset_schedule or {}).get("end_time"):
+                ad_set_arguments["end_time"] = adset_schedule["end_time"]
+            ad_set_id = create_or_resume("ad_set", "adset", "ads_create_ad_set", ad_set_arguments, ("ad_set_id", "adset_id", "id"))
 
             creative_arguments = {
                 **context,
@@ -399,42 +508,26 @@ class MCPPlatformDispatcher:
                 "ad_name": names["ad"],
                 "creative": json.dumps({"creative_id": creative_id}),
             }, ("ad_id", "id"))
-            activation_targets = (
-                ("campaign", campaign_id, [campaign_id, ad_set_id, meta_ad_id]),
-                ("ad_set", ad_set_id, None),
-                ("ad", meta_ad_id, None),
-            )
-            for entity_type, entity_id, object_ids in activation_targets:
-                activation_arguments = {
-                    **context,
-                    "ad_account_id": ad_account_id,
-                    "entity_id": entity_id,
-                    "entity_type": entity_type,
-                    "publish_as_active": True,
-                }
-                if object_ids:
-                    activation_arguments["object_ids"] = object_ids
-                activation = self.call_tool(platform, "ads_activate_entity", activation_arguments)
-                if not activation.success:
-                    return MCPResponse(False, platform, activation.tool_name, {
-                        "campaign_id": campaign_id, "ad_set_id": ad_set_id,
-                        "creative_id": creative_id, "platform_ad_id": meta_ad_id,
-                        "status": "paused" if entity_type == "campaign" else "activation_incomplete",
-                    }, f"meta_chain_incomplete: {activation.error or f'Meta {entity_type} activation failed.'}")
             return MCPResponse(True, platform, "ads_create_ad", {
                 "platform_ad_id": meta_ad_id,
                 "campaign_id": campaign_id,
                 "ad_set_id": ad_set_id,
                 "creative_id": creative_id,
-                "status": "active_live",
+                "status": "created_paused",
+                "lifecycle_status": "CREATED",
                 "client_conversation_id": conversation_id,
             })
         except Exception as exc:
             logger.exception("Meta paused creation chain failed for ad %s on %s", ad_id, platform)
+            safe_error = " ".join(str(exc).split())[:500]
+            if persist_stage_status and active_stage and active_lifecycle_status in {"CREATING", "RECONCILING"}:
+                persist_stage_status(active_stage, active_lifecycle_status, safe_error)
             return MCPResponse(False, platform, "ads_create_ad", {
                 "campaign_id": ids.get("campaign"),
                 "ad_set_id": ids.get("ad_set"),
                 "creative_id": ids.get("creative"),
                 "platform_ad_id": ids.get("ad"),
                 "status": "paused",
-            }, f"meta_chain_incomplete: {exc}")
+                "lifecycle_status": active_lifecycle_status,
+                "failed_stage": active_stage,
+            }, f"meta_chain_incomplete: {safe_error}")

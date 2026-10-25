@@ -42,6 +42,7 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
   // Preflight & LLM Review state
   const [reviewResult, setReviewResult] = useState(null);
   const [launchDraft, setLaunchDraft] = useState(null);
+  const [needsReviewAcknowledged, setNeedsReviewAcknowledged] = useState(false);
   const [missingForm, setMissingForm] = useState({});
 
   // HITL Launch Modal & Notification Contact Settings
@@ -339,14 +340,15 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
                   }
 
                   setReviewResult(checked);
-                  if (checked.status !== "ready_for_review") {
+                  if (!["ready_for_review", "needs_review"].includes(checked.status)) {
                     setLaunchDraft(null);
                     setFormError(checked.message || "Review the findings and update the campaign before continuing.");
                     return;
                   }
                   setLaunchDraft(launchPayload);
+                  setNeedsReviewAcknowledged(false);
                   setFormError("");
-                  setLaunchStage("Preview ready for human review.");
+                  setLaunchStage(checked.status === "needs_review" ? "Preview requires human review." : "Preview ready for human review.");
                 } catch (err) {
                   console.warn(err);
                   setReviewResult(null);
@@ -358,8 +360,12 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
               };
 
               const confirmLaunch = async () => {
-                if (!launchDraft || reviewResult?.status !== "ready_for_review") {
+                if (!launchDraft || !["ready_for_review", "needs_review"].includes(reviewResult?.status)) {
                   setFormError("Prepare and review a campaign preview before confirming launch.");
+                  return;
+                }
+                if (reviewResult.status === "needs_review" && !needsReviewAcknowledged) {
+                  setFormError("Review the unresolved checks and acknowledge them before continuing.");
                   return;
                 }
                 if (!selectedPlatforms.length) {
@@ -374,7 +380,7 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
 
                 setFormError("");
                 setIsLaunching(true);
-                setLaunchStage("Dispatching to selected Meta platforms...");
+                setLaunchStage("Creating the reviewed Meta hierarchy in paused state...");
                 try {
                   const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
                   const launchPayload = {
@@ -389,6 +395,7 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
                     targeting_country: targetingCountry.trim().toUpperCase(),
                     daily_budget_minor_units: dailyBudgetMinorUnits ? Number(dailyBudgetMinorUnits) : null,
                     special_ad_category: specialAdCategory,
+                    hierarchy_preview_hash: reviewResult?.hierarchy_hash || null,
                     meta_launch: true,
                   };
                   const launchRes = await fetch(`${apiBaseUrl}/campaign-flow/launch-batch`, {
@@ -408,9 +415,9 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
                     message: (launchData.status === "blocked"
                       ? "Meta connector not configured — nothing was sent."
                       : launchData.status === "partial"
-                      ? "Campaign partially dispatched. Review the failed Meta destinations."
+                      ? "Meta hierarchy was only partially created. Review failed destinations; created objects remain paused."
                       : launchData.status === "launched"
-                      ? "Campaign dispatched to the configured Meta destinations."
+                      ? "Paused Meta hierarchy created. A separate explicit authorization is required to activate it."
                       : "Meta launch failed. Review the recorded dispatch results.") + " " + (launchData.notifications || []).map(notificationLabel).join(" "),
                     type: launchData.status === "launched" ? "success" : launchData.status === "blocked" ? "warning" : "error",
                   });
@@ -818,23 +825,23 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
           </div>
 
           {/* 4. VERIFIED HITL REVIEW PAUSE (Ready to Launch) */}
-          {reviewResult && reviewResult.status === "ready_for_review" && (
+          {reviewResult && ["ready_for_review", "needs_review"].includes(reviewResult.status) && (
             <div style={{
-              background: "rgba(16, 185, 129, 0.08)",
-              border: "1px solid rgba(16, 185, 129, 0.3)",
+              background: reviewResult.status === "needs_review" ? "rgba(245, 158, 11, 0.08)" : "rgba(16, 185, 129, 0.08)",
+              border: `1px solid ${reviewResult.status === "needs_review" ? "rgba(245, 158, 11, 0.3)" : "rgba(16, 185, 129, 0.3)"}`,
               borderRadius: "16px",
               padding: "24px",
               marginBottom: "24px",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "20px" }}>✅</span>
+                  <span style={{ fontSize: "20px" }}>{reviewResult.status === "needs_review" ? "⚠️" : "✅"}</span>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#6ee7b7" }}>
-                      Preflight Results — Awaiting Human Approval
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: reviewResult.status === "needs_review" ? "#fbbf24" : "#6ee7b7" }}>
+                      {reviewResult.status === "needs_review" ? "Preflight Results — Human Review Required" : "Preflight Results — Awaiting Human Approval"}
                     </h3>
                     <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                      Review unavailable checks before authorizing
+                      {reviewResult.message}
                     </div>
                   </div>
                 </div>
@@ -853,9 +860,45 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
                     boxShadow: "0 6px 18px rgba(16, 185, 129, 0.3)",
                   }}
                 >
-                  🚀 Launch Campaign Across Platforms
+                  {reviewResult.status === "needs_review" ? "Review unresolved checks" : "Review and authorize paused creation"}
                 </button>
               </div>
+
+              {reviewResult.hierarchy_preview && (
+                <div aria-label="Campaign hierarchy preview" style={{ marginBottom: "16px", padding: "14px 16px", background: "rgba(15, 23, 42, 0.6)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#e2e8f0", marginBottom: "8px" }}>Campaign hierarchy preview</div>
+                  <div style={{ fontSize: "12px", color: "#fcd34d", marginBottom: "8px" }}>
+                    Creation is paused. Publishing requires a separate explicit activation.
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", fontSize: "12px", color: "#cbd5e1" }}>
+                    <span>{reviewResult.hierarchy_preview.campaign_count} campaigns</span>
+                    <span>{reviewResult.hierarchy_preview.ad_set_count} ad sets</span>
+                    <span>{reviewResult.hierarchy_preview.creative_count} creatives</span>
+                    <span>{reviewResult.hierarchy_preview.ad_count} ads</span>
+                    <span>Total budget: {reviewResult.hierarchy_preview.total_budget_minor_units} minor units</span>
+                    {reviewResult.hierarchy_preview.meta_ad_account_id && (
+                      <span>Meta ad account: {reviewResult.hierarchy_preview.meta_ad_account_id}</span>
+                    )}
+                  </div>
+                  {reviewResult.hierarchy_preview.target_platforms?.length > 0 && (
+                    <div style={{ marginTop: "12px", fontSize: "12px", color: "#cbd5e1" }}>
+                      <strong style={{ color: "#e2e8f0" }}>Targets to create</strong>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
+                        {reviewResult.hierarchy_preview.target_summary?.map((campaign) => (
+                          <div key={campaign.campaign_key}>
+                            <span>{campaign.name}</span>
+                            {campaign.ad_sets.map((adSet) => (
+                              <div key={adSet.ad_set_key} style={{ paddingLeft: "14px", color: "#94a3b8" }}>
+                                {adSet.name}: {adSet.countries.join(", ") || "No countries"} · {adSet.platforms.join(", ") || "No placements"}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Summary Card */}
               <div style={{
@@ -1074,15 +1117,23 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
               </label>
               <p style={{ margin: 0, color: "#94a3b8", fontSize: 12 }}>Objective: Website traffic. Other objectives need additional Meta account configuration.</p>
             </div>}
-            {reviewResult?.status === "ready_for_review" && launchDraft && <p role="status" style={{ color: "#6ee7b7", fontSize: 13 }}>Preview is ready. Review the report and confirm only when the details are correct.</p>}
+            {reviewResult?.status === "ready_for_review" && launchDraft && <p role="status" style={{ color: "#6ee7b7", fontSize: 13 }}>All available checks passed. Review the report and confirm only when the details are correct.</p>}
+            {reviewResult?.status === "needs_review" && launchDraft && <p role="alert" style={{ color: "#fbbf24", fontSize: 13 }}>Some checks could not verify this campaign. Review each reason below; this is not a confirmed content violation.</p>}
             {reviewResult?.missing_items?.length > 0 && <div role="alert" style={{color: "#fcd34d", marginBottom: 16}}>
               {reviewResult.missing_items.map(item => <p key={item.field}>{item.label}: {item.reason}</p>)}
             </div>}
             {reviewResult?.checks && <div style={{marginBottom: 16}}>
-              {reviewResult.checks.map((check, i) => <p key={i} style={{color: check.status === "fail" ? "#fca5a5" : check.status === "not_checked" ? "#fcd34d" : "#6ee7b7"}}>
-                {check.platform}: {check.name} — {check.status} {(check.findings || []).join(" ")}
+              {reviewResult.checks.map((check, i) => <p key={i} style={{color: check.status === "fail" ? "#fca5a5" : ["needs_review", "not_checked"].includes(check.status) ? "#fcd34d" : "#6ee7b7"}}>
+                {check.platform}: {check.name} — {check.status}{check.reason ? ` (${check.reason})` : ""}{check.evidence_source ? ` · ${check.evidence_source}` : ""} {(check.findings || []).join(" ")}
+                {check.details?.map((detail, detailIndex) => <span key={detailIndex} style={{display: "block", marginLeft: 14}}>
+                  {detail.field}: actual {detail.actual_value ?? "<missing>"}; expected {detail.expected_format ?? "configured value"}. {detail.proposed_fix || ""}
+                </span>)}
               </p>)}
             </div>}
+            {reviewResult?.status === "needs_review" && launchDraft && <label style={{display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 16, color: "#fcd34d", fontSize: 13}}>
+              <input type="checkbox" checked={needsReviewAcknowledged} onChange={event => setNeedsReviewAcknowledged(event.target.checked)} />
+              I reviewed the unresolved checks and understand they are not verified passes.
+            </label>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               <button
@@ -1104,6 +1155,7 @@ export default function HomePage({ apiBaseUrl = API_BASE_URL }) {
                 const isLaunchDisabled =
                   isLaunching ||
                   selectedPlatforms.length === 0 ||
+                  (reviewResult?.status === "needs_review" && !needsReviewAcknowledged) ||
                   (hasEmployeeSession && (!employeeEmail || !employeeEmail.includes("@")));
                 return (
                   <button

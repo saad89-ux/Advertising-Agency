@@ -347,13 +347,13 @@ class TestCreativeAssetUploadEndpoint:
             assert data["size_bytes"] == len(mp4_content)
 
     @pytest.mark.parametrize(
-        ("filename", "content_type"),
+        ("filename", "content_type", "content"),
         [
-            ("screenshot.gif", "image/gif"),
-            ("screenshot.bmp", "image/bmp"),
-            ("screenshot.tiff", "image/tiff"),
-            ("screenshot.avif", "image/avif"),
-            ("screenshot.heic", "image/heic"),
+            ("screenshot.gif", "image/gif", b"GIF89a\x00\x00\x00\x00"),
+            ("screenshot.bmp", "image/bmp", b"BM\x00\x00\x00\x00"),
+            ("screenshot.tiff", "image/tiff", b"II*\x00\x00\x00\x00\x00"),
+            ("screenshot.avif", "image/avif", b"\x00\x00\x00\x18ftypavif\x00\x00\x00\x00"),
+            ("screenshot.heic", "image/heic", b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00"),
         ],
     )
     def test_upload_common_screenshot_formats(
@@ -362,6 +362,7 @@ class TestCreativeAssetUploadEndpoint:
         auth_headers: dict[str, str],
         filename: str,
         content_type: str,
+        content: bytes,
     ):
         file_store = LocalFileStore(root=tmp_path)
         client = TestClient(app)
@@ -369,13 +370,39 @@ class TestCreativeAssetUploadEndpoint:
         with patch("apps.api.uploads.get_file_store", return_value=file_store):
             response = client.post(
                 "/uploads/creative",
-                files={"file": (filename, b"synthetic screenshot bytes", content_type)},
+                files={"file": (filename, content, content_type)},
                 data={"client_id": "aurora"},
                 headers=auth_headers,
             )
 
         assert response.status_code == 200
         assert response.json()["filename"] == filename
+
+    @pytest.mark.parametrize(
+        ("filename", "content_type", "content"),
+        [
+            ("image.png", "text/plain", b"\x89PNG\r\n\x1a\n"),
+            ("image.png", "image/png", b"not a png"),
+        ],
+    )
+    def test_upload_creative_rejects_mismatched_or_spoofed_file(
+        self,
+        auth_headers: dict[str, str],
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ):
+        mock_store = MagicMock()
+        with patch("apps.api.uploads.get_file_store", return_value=mock_store):
+            response = TestClient(app).post(
+                "/uploads/creative",
+                files={"file": (filename, content, content_type)},
+                data={"client_id": "aurora"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 415
+        mock_store.put.assert_not_called()
 
     def test_upload_creative_pdf(self, tmp_path: Path, auth_headers: dict[str, str]):
         file_store = LocalFileStore(root=tmp_path)

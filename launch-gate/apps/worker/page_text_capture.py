@@ -63,6 +63,24 @@ async def capture_page_snapshot(
             page_error=error,
         )
 
+    if opened.status is None or opened.status >= 400:
+        status = opened.status
+        reason = "http_error" if status is not None else "http_response_unavailable"
+        message = f"Public page returned HTTP {status}; content was not evaluated." if status is not None else "Public page returned no HTTP status; content was not evaluated."
+        return PageCaptureResult(
+            page_snapshot={
+                "loaded": False,
+                "http_status": status,
+                "final_url": opened.final_url,
+                "visible_text": "",
+                "screenshot_ref": None,
+                "text_ref": None,
+            },
+            guard_signals=[],
+            verdict_floor=None,
+            page_error=PageOpenError(reason, message, http_status=status),
+        )
+
     visible_raw = opened.visible_text or ""
     hidden_raw = opened.hidden_text or ""
     visible_guard = guard_page_text(visible_raw)

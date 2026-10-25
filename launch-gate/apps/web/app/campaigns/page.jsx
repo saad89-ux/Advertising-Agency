@@ -24,13 +24,18 @@ export default function CampaignsPage({ apiBaseUrl = API_BASE_URL }) {
       const query = new URLSearchParams();
       for (const key of ["batch_id", "client_id"]) if (scope.get(key)) query.set(key, scope.get(key));
       const res = await fetch(`${apiBaseUrl}/campaign-flow/all-campaigns?${query}`, { headers });
-      if (!res.ok) throw new Error(await readError(res));
+      if (!res.ok) {
+        const requestError = new Error(await readError(res));
+        requestError.status = res.status;
+        throw requestError;
+      }
       const data = await res.json();
       setCampaigns(data);
     } catch (err) {
       console.error(err);
       setCampaigns([]);
-      setError(requestErrorMessage(err));
+      const status = err?.status ? `HTTP ${err.status}: ` : "";
+      setError(`${status}${requestErrorMessage(err)}`);
     } finally {
       setLoading(false);
     }

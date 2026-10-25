@@ -502,6 +502,45 @@ def test_upload_evidence_screenshot_file_success(fake_session, mock_db, monkeypa
     assert stored_bytes == screenshot_bytes
 
 
+def test_upload_evidence_rejects_unassigned_client_before_storage(fake_session, mock_db, monkeypatch):
+    from unittest.mock import Mock
+
+    uid = mock_users_helper(monkeypatch, assigned_clients=["client-alpha"], role="buyer")
+    token = make_token(uid, role="buyer")
+    save_file = Mock(return_value="a" * 32)
+    monkeypatch.setattr("apps.api.evidence.save_evidence_file", save_file)
+
+    response = TestClient(app).post(
+        "/ads/ad-ev-beta/evidence/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"note": "Unauthorized upload"},
+        files={"file": ("approval.png", io.BytesIO(b"image-bytes"), "image/png")},
+    )
+
+    assert response.status_code == 403
+    save_file.assert_not_called()
+
+
+def test_upload_evidence_size_limit_is_checked_before_storage(fake_session, mock_db, monkeypatch):
+    from unittest.mock import Mock
+
+    uid = mock_users_helper(monkeypatch, assigned_clients=["client-alpha"], role="buyer")
+    token = make_token(uid, role="buyer")
+    save_file = Mock(return_value="a" * 32)
+    monkeypatch.setattr("apps.api.evidence.MAX_EVIDENCE_SIZE_BYTES", 8)
+    monkeypatch.setattr("apps.api.evidence.save_evidence_file", save_file)
+
+    response = TestClient(app).post(
+        "/ads/ad-ev-1/evidence/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"note": "Too large"},
+        files={"file": ("approval.png", io.BytesIO(b"1234567890"), "image/png")},
+    )
+
+    assert response.status_code == 413
+    save_file.assert_not_called()
+
+
 def test_upload_evidence_rejects_unsupported_file_extension(fake_session, mock_db, monkeypatch):
     """Uploading executable or unsupported file extension fails with HTTP 422."""
     uid = mock_users_helper(monkeypatch, assigned_clients=["client-alpha"], role="buyer")

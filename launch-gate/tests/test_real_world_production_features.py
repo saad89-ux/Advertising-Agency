@@ -121,8 +121,7 @@ def test_meta_dispatch_stays_disabled_without_live_write_configuration(monkeypat
     monkeypatch.setenv("META_MCP_ENABLE_LIVE", "false")
     monkeypatch.setenv("META_MCP_ALLOW_WRITES", "false")
     monkeypatch.setenv("MCP_META_SERVER_URL", "https://mcp.facebook.com/ads")
-    monkeypatch.setenv("META_MCP_ACCESS_TOKEN", "test-token")
-    monkeypatch.setenv("META_AD_ACCOUNT_ID", "123456")
+    monkeypatch.setenv("META_SYSTEM_USER_TOKEN", "test-token")
     monkeypatch.setattr(
         MetaMCPClient,
         "call_tool_sync",
@@ -162,7 +161,6 @@ def test_meta_mcp_client_requires_configured_account_before_write(monkeypatch):
 
     monkeypatch.setenv("META_MCP_ENABLE_LIVE", "true")
     monkeypatch.setenv("META_MCP_ALLOW_WRITES", "true")
-    monkeypatch.setenv("META_AD_ACCOUNT_ID", "")
     client = MetaMCPClient(
         server_url="https://mcp.facebook.com/ads",
         access_token="test-token",
@@ -173,7 +171,7 @@ def test_meta_mcp_client_requires_configured_account_before_write(monkeypatch):
 
     assert result.success is False
     assert result.is_write_refusal is False
-    assert "META_AD_ACCOUNT_ID" in result.error
+    assert "ad_account_id" in result.error
 
 
 def test_dynamic_client_inference():

@@ -71,6 +71,11 @@ async def check_utm_survives_redirect(
         timeout_ms=timeout_ms,
         capture_screenshot=bool(original),
     )
+    if opened.status is None or opened.status >= 400:
+        status = opened.status
+        reason = "http_error" if status is not None else "http_response_unavailable"
+        message = f"Public page returned HTTP {status}; UTM redirect was not verified." if status is not None else "Public page returned no HTTP status; UTM redirect was not verified."
+        raise PageOpenError(reason, message, http_status=status)
     if not _http_url(opened.final_url):
         raise PageOpenError(
             "unsupported_url_scheme",

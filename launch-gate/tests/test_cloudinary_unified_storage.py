@@ -147,22 +147,27 @@ def test_cloudinary_file_store_get_via_httpx(monkeypatch: pytest.MonkeyPatch):
     with patch("httpx.get", return_value=mock_resp) as mock_httpx:
         data = store.get(target_url)
         assert data == b"image-payload"
-        mock_httpx.assert_called_once()
+        assert mock_httpx.call_args.kwargs["follow_redirects"] is False
 
 
-def test_cloudinary_file_store_get_urllib_fallback_on_httpx_error(monkeypatch: pytest.MonkeyPatch):
+def test_cloudinary_file_store_rejects_unconfigured_remote_hosts(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLOUDINARY_URL", "cloudinary://123:abc@mycloud")
+    store = CloudinaryFileStore()
+
+    with pytest.raises(ValueError, match="Invalid Cloudinary URL"):
+        store.get("https://127.0.0.1/admin")
+
+
+def test_cloudinary_file_store_get_does_not_fallback_to_urllib(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLOUDINARY_URL", "cloudinary://123:abc@mycloud")
     store = CloudinaryFileStore()
     target_url = "https://res.cloudinary.com/mycloud/image/upload/v1/fallback.png"
 
     with patch("httpx.get", side_effect=Exception("httpx error")), \
          patch("urllib.request.urlopen") as mock_urlopen:
-        mock_cm = MagicMock()
-        mock_cm.read.return_value = b"urllib-payload"
-        mock_urlopen.return_value.__enter__.return_value = mock_cm
-
-        data = store.get(target_url)
-        assert data == b"urllib-payload"
+        with pytest.raises(FileNotFoundError):
+            store.get(target_url)
+        mock_urlopen.assert_not_called()
 
 
 def test_cloudinary_file_store_get_invalid_url():
@@ -234,15 +239,12 @@ def test_unified_store_falls_back_to_local_on_cloudinary_error(tmp_path: Path, m
 
 
 def test_unified_store_get_handles_remote_and_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("CLOUDINARY_URL", "")
-    monkeypatch.setenv("CLOUDINARY_CLOUD_NAME", "")
-    monkeypatch.setenv("CLOUDINARY_API_KEY", "")
-    monkeypatch.setenv("CLOUDINARY_API_SECRET", "")
+    monkeypatch.setenv("CLOUDINARY_URL", "cloudinary://123:abc@mycloud")
 
     store = UnifiedFileStore(root=tmp_path / "storage")
 
     # Local object
-    local_ref = store.put(b"local data")
+    local_ref = store.local.put(b"local data")
     assert store.get(local_ref) == b"local data"
 
     # Remote URL object
@@ -251,7 +253,7 @@ def test_unified_store_get_handles_remote_and_local(tmp_path: Path, monkeypatch:
     mock_resp.raise_for_status.return_value = None
 
     with patch("httpx.get", return_value=mock_resp):
-        remote_data = store.get("https://res.cloudinary.com/demo/image/upload/sample.jpg")
+        remote_data = store.get("https://res.cloudinary.com/mycloud/image/upload/sample.jpg")
         assert remote_data == b"remote data"
 
 
@@ -273,6 +275,9 @@ def test_save_evidence_file_with_cloudinary(monkeypatch: pytest.MonkeyPatch):
 def test_get_ad_evidence_file_endpoint_streaming_and_redirect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from apps.api import auth, evidence
     from apps.api.evidence import get_ad_evidence_file_endpoint
+    from fastapi import HTTPException
+
+    monkeypatch.setenv("CLOUDINARY_URL", "cloudinary://123:abc@mycloud")
 
     client_id = "client-alpha"
     ad_id = "ad-cdn-test"
@@ -307,7 +312,7 @@ def test_get_ad_evidence_file_endpoint_streaming_and_redirect(tmp_path: Path, mo
         def execute(self, stmt, params=None):
             class Res:
                 def fetchone(self):
-                    return ("image/png",)
+                    return ("image/png",) if params and params[1] == cdn_url else None
             return Res()
 
     with patch("apps.api.evidence.get_session", return_value=MockSession()), \
@@ -334,3 +339,11 @@ def test_get_ad_evidence_file_endpoint_streaming_and_redirect(tmp_path: Path, mo
         )
         assert redirect_response.status_code == 307
         assert redirect_response.headers["location"] == cdn_url
+
+        with pytest.raises(HTTPException) as exc_info:
+            get_ad_evidence_file_endpoint(
+                ad_id=ad_id,
+                file_ref="https://res.cloudinary.com/mycloud/image/upload/v1/other.png",
+                user=mock_user,
+            )
+        assert exc_info.value.status_code == 404

@@ -47,7 +47,7 @@ Launch Gate is an automated pre-launch verification pipeline and reviewer cockpi
 4. **Tenant Isolation & Least Privilege (Rule 4 / Needs: 28)**: Strict separation of client rules and access per row (`client_id` scoping). Zero cross-client rule citations, data leaks, or unauthorized access.
 5. **Step & Spend Caps (Rule 5 / PRD §4.5)**: Hard cap of 5 steps per row and spend cap of $\$0.01$ per row ($\$0.25$ per 100 ads average target, $\$15.00$ assessment budget cap).
 6. **No Automatic Relaunch (Rule 6 / PRD §4.6)**: Any platform rejection or uncertain send state alerts a person and returns the ad to review. Never automatically relaunched.
-7. **Real Platform APIs Switched Off (Rule 7 / PRD §4.6)**: Real external ad platform calls (Meta, Google, TikTok) are designed and documented, but strictly switched OFF in v1. Sends dispatch only to the stand-in dry-run platform.
+7. **Live Platform Writes Require Authorization (Rule 7 / PRD §4.6)**: The stand-in dry-run sender is the default. Explicitly human-authorized Meta launches are available only when both `META_MCP_ENABLE_LIVE` and `META_MCP_ALLOW_WRITES` are enabled; campaigns are created paused and require separate human activation. Google and TikTok writes are disabled.
 
 ---
 
@@ -136,15 +136,15 @@ Ensure your local PostgreSQL service is running, then initialize all database ta
 python -c "from apps.api.schema import init_schema; init_schema(); print('Schema initialized successfully.')"
 ```
 
-### Seed Synthetic Pilot Clients and Users
+### Provision a User
 
-Run the interactive demo seed script to set up synthetic clients (`brightleaf`, `calmleaf`, `oakandhome`) and create test buyer and account manager credentials:
+Create a user for an existing client. The command prompts for a password and does not create demo users or clients:
 
 ```powershell
-python -m apps.api.seed_demo
+python -m scripts.create_user --email buyer@example.com --name "Campaign Buyer" --role buyer --client-id existing-client
 ```
 
-The script will prompt you for emails and passwords for the synthetic buyer and account manager accounts. Passwords are saved hashed via scrypt.
+Passwords are stored as scrypt hashes. The specified client must already exist.
 
 ---
 
@@ -158,7 +158,7 @@ Start the stand-in ad platform server which receives dry-run ad sends:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-uvicorn data.stand_in_platform.app:app --port 8100
+uvicorn data.stand_in_platform.app:app --host 127.0.0.1 --port 8100
 ```
 *Health check:* `http://127.0.0.1:8100/admin/stats`
 
@@ -168,7 +168,7 @@ Serve local mock landing pages used by headless page checks:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m http.server 8099 -d data/storefront_pages
+python -m http.server 8099 --bind 127.0.0.1 -d data/storefront_pages
 ```
 *Health check:* `http://127.0.0.1:8099/`
 
@@ -178,7 +178,7 @@ Start the core FastAPI backend with reload enabled:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-uvicorn apps.api.main:app --port 8000 --reload
+uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 *Interactive Swagger docs:* `http://127.0.0.1:8000/docs`  
 *API Health check:* `http://127.0.0.1:8000/health`
@@ -199,7 +199,7 @@ Install Node dependencies and start the Next.js development server:
 ```powershell
 cd apps/web
 npm install
-npm run dev
+npm run dev -- --hostname 127.0.0.1
 ```
 *Frontend UI:* `http://localhost:3000`
 
@@ -210,8 +210,8 @@ npm run dev
 ### 1. Log In to the Web UI
 
 1. Open `http://localhost:3000` in your browser.
-2. Enter the credentials seeded during `python -m apps.api.seed_demo` (e.g. `buyer_brightleaf@example.com` or your custom seeded email).
-3. The JWT token is securely stored in browser session storage and attached to subsequent API requests.
+2. Enter credentials for a user provisioned with `python -m scripts.create_user`.
+3. The JWT token is stored in browser local storage and attached to subsequent API requests.
 
 ### 2. Upload a Launch Sheet
 
@@ -368,7 +368,7 @@ python -m pytest tests/test_integration.py
 | **Metrics & Release Gate** | **REAL** | Batch and cross-batch quality metrics computation, reviewer performance tracking, financial cost ledger, simulated rejection rates with/without gate, CI production release gate enforcement. |
 | **Ad Data & Clients** | **SYNTHETIC** | 30 labeled sheets, 12 adversarial rows, synthetic clients (`brightleaf`, `calmleaf`, `oakandhome`), and mock storefront HTML pages. All evaluation reports labeled SYNTHETIC per PRD. |
 | **Stand-In Platform** | **SYNTHETIC** | FastAPI dry-run platform server (`data/stand_in_platform/app.py`) simulating platform policy rejections and network chaos (commit fails, timeouts). |
-| **Live External Ad APIs** | **MISSING BY DESIGN** | Direct calls to live Meta Marketing API, Google Ads API, and TikTok Marketing API are designed and documented in adapter contracts, but **strictly switched OFF** per Never-break Rule 7. |
+| **Live External Ad APIs** | **LIMITED** | Human-authorized Meta campaign creation and activation are available only with both live/write opt-in flags enabled. Meta objects are created paused and activated separately. Google and TikTok writes remain disabled. |
 
 ---
 

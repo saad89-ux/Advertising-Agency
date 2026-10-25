@@ -138,6 +138,8 @@ def _page_open_error_finding(
         proposed_fix="Ensure the destination URL is valid, reachable, on the allowed domain, and loads within the timeout.",
         rule_id=f"page.{reason}",
         file_ref=file_ref,
+        actual_value=f"HTTP {error.http_status}" if error.http_status is not None else None,
+        expected_format="successful HTTP response with readable page content",
     )
 
 

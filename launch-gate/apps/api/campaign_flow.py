@@ -23,8 +23,11 @@ from apps.api.notifications import NotificationDispatcher, create_notification_t
 from apps.api.client_ip import get_client_ip
 from apps.api.ingest import hash_normalized_row, hash_normalized_sheet
 from apps.api.platforms_schema import init_platform_tables
+from packages.contracts import BatchRowContract, validate_batch_row_consistency
 from apps.worker.agent_team import IssueTrackingSpecialistNode, RevenueTrackingSpecialistNode
-from apps.worker.mcp_client import MCPPlatformDispatcher
+from apps.worker.mcp_client import MCPPlatformDispatcher, MCPResponse
+from apps.worker.progress_emitter import emit_progress_event
+from apps.worker.states import MetaEntityStatus, entity_status_for_run
 from packages.rules.platform_normalization import normalize_platform
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,145 @@ CREATE TABLE IF NOT EXISTS meta_launch_objects (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (ad_id, platform)
 );
+CREATE TABLE IF NOT EXISTS meta_launch_campaigns (
+    entity_key TEXT PRIMARY KEY,
+    batch_id TEXT,
+    client_id TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram')),
+    grouping_key TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    budget_minor_units INTEGER NOT NULL DEFAULT 0,
+    meta_campaign_id TEXT,
+    lifecycle_status TEXT NOT NULL DEFAULT 'pending',
+    hierarchy_hash TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS meta_launch_activation_audit (
+    activation_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    hierarchy_hash TEXT NOT NULL,
+    campaign_key TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    meta_campaign_id TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    confirmed_budget_minor_units INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (batch_id, hierarchy_hash, campaign_key, platform)
+);
+CREATE TABLE IF NOT EXISTS meta_launch_approval_audit (
+    authorization_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES batches(batch_id) ON DELETE CASCADE,
+    client_id TEXT NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
+    hierarchy_hash TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    approved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (batch_id, client_id, hierarchy_hash)
+);
+CREATE TABLE IF NOT EXISTS meta_launch_ad_sets (
+    entity_key TEXT PRIMARY KEY,
+    campaign_entity_key TEXT NOT NULL REFERENCES meta_launch_campaigns(entity_key) ON DELETE CASCADE,
+    batch_id TEXT,
+    client_id TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram')),
+    grouping_key TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    meta_ad_set_id TEXT,
+    lifecycle_status TEXT NOT NULL DEFAULT 'pending',
+    hierarchy_hash TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS meta_campaign_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    batch_id TEXT NOT NULL REFERENCES batches(batch_id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
+    grouping_key VARCHAR(255) NOT NULL,
+    platform VARCHAR(50) NOT NULL DEFAULT 'meta',
+    meta_id VARCHAR(255) UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+    approval_snapshot_hash VARCHAR(64) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'CREATING', 'CREATED', 'FAILED', 'RECONCILING')),
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (batch_id, workspace_id, grouping_key)
+);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='meta_campaign_runs'::regclass
+          AND conname='meta_campaign_runs_status_lifecycle_check'
+    ) THEN
+        ALTER TABLE meta_campaign_runs DROP CONSTRAINT IF EXISTS meta_campaign_runs_status_check;
+        ALTER TABLE meta_campaign_runs ADD CONSTRAINT meta_campaign_runs_status_lifecycle_check
+            CHECK (status IN ('PENDING', 'CREATING', 'CREATED', 'FAILED', 'RECONCILING', 'ACTIVE'));
+    END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS meta_ad_set_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_run_id UUID NOT NULL REFERENCES meta_campaign_runs(id) ON DELETE CASCADE,
+    grouping_key VARCHAR(255) NOT NULL,
+    meta_id VARCHAR(255) UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+    approval_snapshot_hash VARCHAR(64) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'CREATING', 'CREATED', 'FAILED', 'RECONCILING')),
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (campaign_run_id, grouping_key)
+);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='meta_ad_set_runs'::regclass
+          AND conname='meta_ad_set_runs_status_lifecycle_check'
+    ) THEN
+        ALTER TABLE meta_ad_set_runs DROP CONSTRAINT IF EXISTS meta_ad_set_runs_status_check;
+        ALTER TABLE meta_ad_set_runs ADD CONSTRAINT meta_ad_set_runs_status_lifecycle_check
+            CHECK (status IN ('PENDING', 'CREATING', 'CREATED', 'FAILED', 'RECONCILING', 'ACTIVE'));
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_meta_campaign_runs_batch_workspace
+    ON meta_campaign_runs(batch_id, workspace_id);
+CREATE INDEX IF NOT EXISTS idx_meta_ad_set_runs_campaign
+    ON meta_ad_set_runs(campaign_run_id);
+INSERT INTO meta_campaign_runs
+    (batch_id, workspace_id, grouping_key, platform, meta_id, idempotency_key,
+     approval_snapshot_hash, config_hash, status, last_error, created_at, updated_at)
+SELECT batch_id, client_id, grouping_key, 'meta', meta_campaign_id, idempotency_key,
+       COALESCE(hierarchy_hash, repeat('0', 64)), COALESCE(hierarchy_hash, repeat('0', 64)),
+       CASE lifecycle_status WHEN 'created_paused' THEN 'CREATED' WHEN 'active' THEN 'ACTIVE'
+            WHEN 'failed' THEN 'FAILED' ELSE 'PENDING' END,
+       last_error, created_at, updated_at
+FROM meta_launch_campaigns
+ON CONFLICT (batch_id, workspace_id, grouping_key) DO NOTHING;
+INSERT INTO meta_ad_set_runs
+    (campaign_run_id, grouping_key, meta_id, idempotency_key, approval_snapshot_hash,
+     config_hash, status, last_error, created_at, updated_at)
+SELECT campaign_run.id, legacy_ad_set.grouping_key, legacy_ad_set.meta_ad_set_id,
+       legacy_ad_set.idempotency_key,
+       COALESCE(legacy_ad_set.hierarchy_hash, repeat('0', 64)),
+       COALESCE(legacy_ad_set.hierarchy_hash, repeat('0', 64)),
+       CASE legacy_ad_set.lifecycle_status WHEN 'created_paused' THEN 'CREATED' WHEN 'active' THEN 'ACTIVE'
+            WHEN 'failed' THEN 'FAILED' ELSE 'PENDING' END,
+       legacy_ad_set.last_error, legacy_ad_set.created_at, legacy_ad_set.updated_at
+FROM meta_launch_ad_sets legacy_ad_set
+JOIN meta_launch_campaigns legacy_campaign ON legacy_campaign.entity_key=legacy_ad_set.campaign_entity_key
+JOIN meta_campaign_runs campaign_run ON campaign_run.batch_id=legacy_campaign.batch_id
+    AND campaign_run.workspace_id=legacy_campaign.client_id
+    AND campaign_run.grouping_key=legacy_campaign.grouping_key
+ON CONFLICT (campaign_run_id, grouping_key) DO NOTHING;
 """
 
 
@@ -131,10 +273,52 @@ class PreflightReviewRequest(BaseModel):
     ad_overrides: dict[str, Any] = Field(default_factory=dict)
 
 
+class LaunchAdModel(BaseModel):
+    ad_key: str
+    ad_id: str | None = None
+    ad_set_key: str
+    platform: str
+    headline: str
+    ad_text: str
+    destination_url: str
+    creative_file: str
+    creative_mime_type: str | None = None
+    page_id: str | None = None
+    instagram_user_id: str | None = None
+
+
+class LaunchAdSetModel(BaseModel):
+    ad_set_key: str
+    campaign_key: str
+    name: str
+    targeting_country: str
+    targeting: dict[str, Any] = Field(default_factory=dict)
+    placements: list[str] = Field(default_factory=list)
+    optimization_goal: str = "LINK_CLICKS"
+    billing_event: str = "IMPRESSIONS"
+    daily_budget_minor_units: int | None = Field(None, gt=0)
+    lifetime_budget_minor_units: int | None = Field(None, gt=0)
+    schedule: dict[str, Any] = Field(default_factory=dict)
+    ads: list[LaunchAdModel] = Field(default_factory=list)
+
+
+class LaunchCampaignModel(BaseModel):
+    campaign_key: str
+    name: str
+    objective: str = "OUTCOME_TRAFFIC"
+    budget_strategy: str = "DAILY"
+    daily_budget_minor_units: int | None = Field(None, gt=0)
+    lifetime_budget_minor_units: int | None = Field(None, gt=0)
+    currency: str = "USD"
+    special_ad_category: str = "NONE"
+    ad_sets: list[LaunchAdSetModel] = Field(default_factory=list)
+
+
 class LaunchBatchRequest(BaseModel):
     client_id: str = ""
     batch_id: str | None = None
     launch_attempt_id: str | None = None
+    meta_launch: bool = False
     campaign_name: str = "Multi-Platform Growth Burst"
     employee_email: str
     employee_phone: str = ""
@@ -149,6 +333,21 @@ class LaunchBatchRequest(BaseModel):
     targeting_country: str | None = None
     daily_budget_minor_units: int | None = Field(None, ge=1)
     special_ad_category: str | None = None
+    campaigns: list[LaunchCampaignModel] = Field(default_factory=list)
+    hierarchy_preview_hash: str | None = None
+
+
+class RetryHierarchyEntityRequest(BaseModel):
+    batch_id: str
+    entity_key: str
+    entity_type: str
+
+
+class ActivateHierarchyRequest(BaseModel):
+    batch_id: str
+    campaign_keys: list[str] = Field(default_factory=list)
+    hierarchy_hash: str
+    confirmed_budget_minor_units: int = Field(gt=0)
 
 
 class HitlRemediateRequest(BaseModel):
@@ -165,6 +364,275 @@ class ManualAlertTestRequest(BaseModel):
     recipient_phone: str = ""
     alert_type: str = "manual_test"
 
+
+
+# --- Hierarchy validation and preview ---
+
+def build_launch_hierarchy(req: LaunchBatchRequest) -> dict[str, Any]:
+    """Normalize legacy launch settings and validated explicit hierarchy rows."""
+    if req.campaigns:
+        campaign_keys = [campaign.campaign_key for campaign in req.campaigns]
+        if len(set(campaign_keys)) != len(campaign_keys):
+            raise HTTPException(status_code=422, detail="campaign_key values must be unique.")
+        hierarchy = {"campaigns": [campaign.model_dump() for campaign in req.campaigns]}
+    else:
+        if not all((req.headline, req.ad_text, req.destination_url)):
+            return {"hierarchy": {"campaigns": []}, "hierarchy_hash": "", "preview": {}}
+        campaign_key = "campaign-default"
+        ad_set_key = "ad-set-default"
+        hierarchy = {"campaigns": [{
+            "campaign_key": campaign_key,
+            "name": req.campaign_name,
+            "objective": "OUTCOME_TRAFFIC",
+            "budget_strategy": "DAILY" if req.daily_budget_minor_units else "UNSPECIFIED",
+            "daily_budget_minor_units": req.daily_budget_minor_units,
+            "currency": "USD",
+            "special_ad_category": req.special_ad_category or "NONE",
+            "ad_sets": [{
+                "ad_set_key": ad_set_key,
+                "campaign_key": campaign_key,
+                "name": f"{req.campaign_name} Ad Set",
+                "targeting_country": req.targeting_country or "",
+                "targeting": {},
+                "placements": req.target_platforms,
+                "optimization_goal": "LINK_CLICKS",
+                "schedule": {},
+                "ads": [{
+                    "ad_key": f"ad-{platform}",
+                    "ad_set_key": ad_set_key,
+                    "platform": platform,
+                    "headline": req.headline,
+                    "ad_text": req.ad_text,
+                    "destination_url": req.destination_url,
+                    "creative_file": req.creative_file or "",
+                    "creative_mime_type": req.creative_mime_type,
+                    "page_id": req.meta_page_id,
+                    "instagram_user_id": req.instagram_user_id,
+                } for platform in req.target_platforms],
+            }],
+        }]}
+
+    campaign_count = 0
+    ad_set_count = 0
+    ad_count = 0
+    creative_count = 0
+    hierarchy_ad_ids: list[str] = []
+    hierarchy_ad_keys: set[str] = set()
+    total_budget = 0
+    for campaign in hierarchy["campaigns"]:
+        campaign_count += 1
+        daily_budget = campaign.get("daily_budget_minor_units")
+        lifetime_budget = campaign.get("lifetime_budget_minor_units")
+        budget_strategy = campaign.get("budget_strategy", "DAILY")
+        if budget_strategy not in {"DAILY", "LIFETIME", "AD_SET_DAILY", "AD_SET_LIFETIME", "UNSPECIFIED"}:
+            raise HTTPException(status_code=422, detail=f"Unsupported budget strategy '{budget_strategy}'.")
+        if daily_budget and lifetime_budget:
+            raise HTTPException(status_code=422, detail="A campaign cannot set both daily and lifetime budgets.")
+        if budget_strategy in {"DAILY", "AD_SET_DAILY"} and lifetime_budget:
+            raise HTTPException(status_code=422, detail="DAILY budget strategy cannot set a lifetime budget.")
+        if budget_strategy in {"LIFETIME", "AD_SET_LIFETIME"} and daily_budget:
+            raise HTTPException(status_code=422, detail="LIFETIME budget strategy cannot set a daily budget.")
+        if budget_strategy in {"DAILY", "LIFETIME"} and not (daily_budget or lifetime_budget):
+            raise HTTPException(status_code=422, detail=f"Campaign '{campaign['campaign_key']}' is missing its campaign-level budget.")
+        total_budget += daily_budget or lifetime_budget or 0
+        ad_set_keys: set[str] = set()
+        for ad_set in campaign["ad_sets"]:
+            ad_set_count += 1
+            ad_set_daily = ad_set.get("daily_budget_minor_units")
+            ad_set_lifetime = ad_set.get("lifetime_budget_minor_units")
+            if ad_set_daily and ad_set_lifetime:
+                raise HTTPException(status_code=422, detail="An ad set cannot set both daily and lifetime budgets.")
+            if budget_strategy == "AD_SET_DAILY" and not ad_set_daily:
+                raise HTTPException(status_code=422, detail=f"Ad set '{ad_set['ad_set_key']}' is missing its daily budget.")
+            if budget_strategy == "AD_SET_LIFETIME" and not ad_set_lifetime:
+                raise HTTPException(status_code=422, detail=f"Ad set '{ad_set['ad_set_key']}' is missing its lifetime budget.")
+            if budget_strategy in {"DAILY", "LIFETIME"} and (ad_set_daily or ad_set_lifetime):
+                raise HTTPException(status_code=422, detail="Ad-set budgets cannot be supplied with a campaign-level budget strategy.")
+            total_budget += ad_set_daily or ad_set_lifetime or 0
+            if ad_set["campaign_key"] != campaign["campaign_key"]:
+                raise HTTPException(status_code=422, detail="Ad set campaign_key does not match its parent campaign.")
+            if ad_set["ad_set_key"] in ad_set_keys:
+                raise HTTPException(status_code=422, detail="ad_set_key values must be unique within a campaign.")
+            ad_set_keys.add(ad_set["ad_set_key"])
+            creative_keys = set()
+            for ad in ad_set["ads"]:
+                ad_count += 1
+                hierarchy_ad_id = ad.get("ad_id")
+                if hierarchy_ad_id and hierarchy_ad_id in hierarchy_ad_ids:
+                    raise HTTPException(status_code=422, detail="Ad IDs must be unique within an explicit hierarchy.")
+                if hierarchy_ad_id:
+                    hierarchy_ad_ids.append(hierarchy_ad_id)
+                if ad["ad_key"] in hierarchy_ad_keys:
+                    raise HTTPException(status_code=422, detail="ad_key values must be unique within an explicit hierarchy.")
+                hierarchy_ad_keys.add(ad["ad_key"])
+                if ad["ad_set_key"] != ad_set["ad_set_key"]:
+                    raise HTTPException(status_code=422, detail="Ad ad_set_key does not match its parent ad set.")
+                creative_key = (
+                    ad["creative_file"], ad["creative_mime_type"], ad["headline"], ad["ad_text"], ad["destination_url"]
+                )
+                creative_keys.add(creative_key)
+            creative_count += len(creative_keys)
+    hierarchy_hash = hashlib.sha256(json.dumps(hierarchy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    target_platforms = sorted({
+        ad["platform"]
+        for campaign in hierarchy["campaigns"]
+        for ad_set in campaign["ad_sets"]
+        for ad in ad_set["ads"]
+    })
+    target_summary = [
+        {
+            "campaign_key": campaign["campaign_key"],
+            "name": campaign["name"],
+            "ad_sets": [
+                {
+                    "ad_set_key": ad_set["ad_set_key"],
+                    "name": ad_set["name"],
+                    "countries": sorted({
+                        str(country).upper()
+                        for country in (
+                            ad_set.get("targeting", {}).get("geo_locations", {}).get("countries", [])
+                            or [ad_set.get("targeting_country", "")]
+                        )
+                        if country
+                    }),
+                    "platforms": sorted({
+                        ad["platform"]
+                        for ad in ad_set["ads"]
+                    }),
+                }
+                for ad_set in campaign["ad_sets"]
+            ],
+        }
+        for campaign in hierarchy["campaigns"]
+    ]
+    return {
+        "hierarchy": hierarchy,
+        "hierarchy_hash": hierarchy_hash,
+        "preview": {
+            "campaign_count": campaign_count,
+            "ad_set_count": ad_set_count,
+            "creative_count": creative_count,
+            "ad_count": ad_count,
+            "total_budget_minor_units": total_budget,
+            "target_platforms": target_platforms,
+            "target_summary": target_summary,
+        },
+    }
+
+
+def load_batch_campaigns(connection: Any, batch_id: str, client_id: str) -> list[LaunchCampaignModel] | None:
+    """Rebuild grouped campaign models from an uploaded flat batch's row snapshots."""
+    rows = connection.execute(
+        "SELECT ad_id, hierarchy_data FROM ads WHERE batch_id=%s AND client_id=%s ORDER BY row_number",
+        (batch_id, client_id),
+    ).fetchall()
+    if not rows or not any(row[1] is not None for row in rows):
+        return None
+    if any(row[1] is None for row in rows):
+        raise HTTPException(status_code=422, detail="Hierarchy data must be present on every ad row in this batch.")
+
+    contract_rows: list[BatchRowContract] = []
+    for ad_id, raw_hierarchy in rows:
+        hierarchy_data = raw_hierarchy if isinstance(raw_hierarchy, dict) else json.loads(raw_hierarchy)
+        contract_rows.append(BatchRowContract.model_validate({**hierarchy_data, "ad_id": str(ad_id)}))
+    validated_rows = validate_batch_row_consistency([row.model_dump() for row in contract_rows])
+
+    campaigns: dict[str, dict[str, Any]] = {}
+    ad_sets: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in validated_rows:
+        campaign = campaigns.setdefault(row.campaign_key, {
+            "campaign_key": row.campaign_key,
+            "name": row.campaign_name,
+            "objective": row.campaign_objective,
+            "budget_strategy": row.campaign_budget_strategy,
+            "daily_budget_minor_units": row.campaign_budget_amount if row.campaign_budget_strategy == "DAILY" else None,
+            "lifetime_budget_minor_units": row.campaign_budget_amount if row.campaign_budget_strategy == "LIFETIME" else None,
+            "currency": "USD",
+            "special_ad_category": row.campaign_special_category,
+            "ad_sets": [],
+        })
+        ad_set_key = (row.campaign_key, row.ad_set_key)
+        ad_set = ad_sets.get(ad_set_key)
+        if ad_set is None:
+            countries = row.targeting_spec.get("geo_locations", {}).get("countries", [])
+            ad_set = {
+                "ad_set_key": row.ad_set_key,
+                "campaign_key": row.campaign_key,
+                "name": row.ad_set_name,
+                "targeting_country": countries[0] if countries else "",
+                "targeting": row.targeting_spec,
+                "placements": row.placements,
+                "optimization_goal": row.optimization_goal,
+                "billing_event": row.billing_event,
+                "schedule": row.schedule,
+                "daily_budget_minor_units": row.ad_set_budget_amount if row.campaign_budget_strategy == "AD_SET_DAILY" else None,
+                "lifetime_budget_minor_units": row.ad_set_budget_amount if row.campaign_budget_strategy == "AD_SET_LIFETIME" else None,
+                "ads": [],
+            }
+            ad_sets[ad_set_key] = ad_set
+            campaign["ad_sets"].append(ad_set)
+        ad_set["ads"].append({
+            "ad_key": row.ad_key,
+            "ad_id": row.ad_id,
+            "ad_set_key": row.ad_set_key,
+            "platform": normalize_platform(row.platform).canonical_value or row.platform,
+            "headline": row.headline,
+            "ad_text": row.body_copy,
+            "destination_url": row.destination_url,
+            "creative_file": row.creative_url,
+            "creative_mime_type": row.creative_mime_type,
+            "page_id": row.page_id,
+            "instagram_user_id": row.instagram_actor_id,
+        })
+
+    return [LaunchCampaignModel.model_validate(campaign) for campaign in campaigns.values()]
+
+
+def campaign_platforms(campaign: LaunchCampaignModel | dict[str, Any]) -> list[str]:
+    """Return canonical platform targets actually used by a campaign's ads."""
+    ad_sets = campaign.ad_sets if isinstance(campaign, LaunchCampaignModel) else campaign.get("ad_sets", [])
+    platforms = []
+    for ad_set in ad_sets:
+        ads = ad_set.ads if isinstance(ad_set, LaunchAdSetModel) else ad_set.get("ads", [])
+        for ad in ads:
+            platform = ad.platform if isinstance(ad, LaunchAdModel) else ad.get("platform", "")
+            normalized = normalize_platform(str(platform))
+            if normalized.canonical_value in {"facebook", "instagram"} and normalized.canonical_value not in platforms:
+                platforms.append(normalized.canonical_value)
+    return platforms
+
+
+def order_ads_by_hierarchy(
+    campaigns: list[dict[str, Any]],
+    ad_rows: list[tuple[Any, ...]],
+) -> list[tuple[Any, ...]]:
+    """Validate exact hierarchy-to-upload coverage and return rows in tree order."""
+    rows_by_id = {str(row[0]): row for row in ad_rows}
+    ordered_rows: list[tuple[Any, ...]] = []
+    seen_ids: set[str] = set()
+    for campaign in campaigns:
+        for ad_set in campaign["ad_sets"]:
+            for ad in ad_set["ads"]:
+                ad_id = str(ad.get("ad_id") or "")
+                if not ad_id or ad_id not in rows_by_id:
+                    raise HTTPException(status_code=422, detail=f"Hierarchy ad '{ad.get('ad_key')}' does not match an uploaded ad row.")
+                if ad_id in seen_ids:
+                    raise HTTPException(status_code=422, detail=f"Uploaded ad '{ad_id}' appears more than once in the hierarchy.")
+                if ad["platform"] != rows_by_id[ad_id][6]:
+                    raise HTTPException(status_code=422, detail=f"Hierarchy platform does not match uploaded ad '{ad_id}'.")
+                persisted_row = rows_by_id[ad_id]
+                if (
+                    ad.get("headline") != (persisted_row[1] or "")
+                    or ad.get("ad_text") != (persisted_row[2] or "")
+                    or ad.get("destination_url") != (persisted_row[3] or "")
+                    or ad.get("creative_file") != (persisted_row[5] or "")
+                ):
+                    raise HTTPException(status_code=409, detail=f"Hierarchy content or creative does not match uploaded ad '{ad_id}'. Re-upload or recheck the batch.")
+                seen_ids.add(ad_id)
+                ordered_rows.append(rows_by_id[ad_id])
+    if seen_ids != set(rows_by_id):
+        raise HTTPException(status_code=422, detail="Every uploaded ad row must appear exactly once in the approved hierarchy.")
+    return ordered_rows
 
 
 # --- Endpoints ---
@@ -210,6 +678,38 @@ def resolve_campaign_client(user: CurrentUser, client_id: str = "", batch_id: st
     raise HTTPException(status_code=422, detail=detail)
 
 
+@router.post("/hierarchy-preview")
+@endpoint_errors
+def hierarchy_preview(req: LaunchBatchRequest, request: Request, user: CurrentUser = Depends(get_request_user)) -> dict[str, Any]:
+    """Read-only preview of the campaign hierarchy; no Meta objects are created."""
+    if user.guest_session_id:
+        require_guest_csrf(request)
+    if req.batch_id:
+        req.client_id = resolve_campaign_client(user, req.client_id, req.batch_id)
+        with get_session() as conn:
+            stored_campaigns = load_batch_campaigns(conn, req.batch_id, req.client_id)
+        if stored_campaigns is not None:
+            req.campaigns = stored_campaigns
+            req.target_platforms = list(dict.fromkeys(
+                ad["platform"]
+                for campaign in stored_campaigns
+                for ad_set in campaign.ad_sets
+                for ad in ad_set.ads
+            )) or req.target_platforms
+    result = build_launch_hierarchy(req)
+    preview = result["preview"]
+    if req.model_dump().get("meta_launch"):
+        if user.guest_session_id:
+            raise HTTPException(status_code=403, detail="Meta campaign previews require an authenticated approver.")
+        with get_session() as conn:
+            from apps.api.clients import resolve_client_meta_account
+            try:
+                preview["meta_ad_account_id"] = resolve_client_meta_account(conn, req.client_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"preview": preview, "hierarchy_hash": result["hierarchy_hash"]}
+
+
 @router.post("/resolve-client")
 @endpoint_errors
 def resolve_launch_client(req: PreflightReviewRequest, request: Request, user: CurrentUser = Depends(get_request_user)):
@@ -230,11 +730,17 @@ def preflight_review(
     init_flow_tables()
     if user.guest_session_id:
         require_guest_csrf(request)
+    overrides = req.ad_overrides or {}
+    if overrides.get("meta_launch") and user.guest_session_id:
+        raise HTTPException(status_code=403, detail="Meta campaign previews require an authenticated approver.")
     client_id = resolve_campaign_client(user, req.client_id, req.batch_id,
                  str(req.ad_overrides.get("destination_url") or ""), req.input_text)
+    stored_hierarchy = None
+    if req.batch_id:
+        with get_session() as conn:
+            stored_hierarchy = load_batch_campaigns(conn, req.batch_id, client_id)
 
-    overrides = req.ad_overrides or {}
-    if overrides.get("meta_launch"):
+    if overrides.get("meta_launch") and stored_hierarchy is None:
         missing_meta = []
         for field, label in (("meta_page_id", "Facebook Page ID"), ("targeting_country", "Targeting country"),
                              ("daily_budget_minor_units", "Daily budget"), ("special_ad_category", "Special ad category")):
@@ -254,6 +760,28 @@ def preflight_review(
         if missing_meta:
             return {"status": "missing_requirements", "client_id": client_id,
                     "missing_items": missing_meta, "missing_count": len(missing_meta)}
+    elif overrides.get("meta_launch") and stored_hierarchy is not None:
+        valid_objectives = {
+            "OUTCOME_AWARENESS", "OUTCOME_TRAFFIC", "OUTCOME_ENGAGEMENT",
+            "OUTCOME_LEADS", "OUTCOME_SALES", "OUTCOME_APP_PROMOTION",
+        }
+        missing_meta = []
+        for campaign in stored_hierarchy:
+            if campaign.objective not in valid_objectives:
+                missing_meta.append({"field": "campaign_objective", "label": campaign.campaign_key, "reason": "Unsupported Meta campaign objective."})
+            for ad_set in campaign.ad_sets:
+                country_codes = ad_set.targeting.get("geo_locations", {}).get("countries", [])
+                if not country_codes or any(len(str(code).strip()) != 2 or not str(code).strip().isalpha() for code in country_codes):
+                    missing_meta.append({"field": "targeting_spec", "label": ad_set.ad_set_key, "reason": "Specify one or more two-letter countries for this launch integration."})
+                for ad in ad_set.ads:
+                    if not ad.page_id or not ad.creative_file.startswith("https://"):
+                        missing_meta.append({"field": "creative_or_page", "label": ad.ad_key, "reason": "Each ad requires a Page ID and public HTTPS creative."})
+                    if ad.creative_mime_type not in {"image/jpeg", "image/png"}:
+                        missing_meta.append({"field": "creative_mime_type", "label": ad.ad_key, "reason": "Each creative must declare PNG or JPEG MIME type."})
+                    if ad.platform == "instagram" and not ad.instagram_user_id:
+                        missing_meta.append({"field": "instagram_actor_id", "label": ad.ad_key, "reason": "Instagram ads require an Instagram actor ID."})
+        if missing_meta:
+            return {"status": "missing_requirements", "client_id": client_id, "missing_items": missing_meta, "missing_count": len(missing_meta)}
 
     if background:
         from apps.api.review_jobs import submit
@@ -274,13 +802,70 @@ def preflight_review(
         from apps.api.preflight import review_ad
         with get_session() as conn:
             rows = conn.execute("SELECT ad_id, platform, headline, ad_text, destination_url, creative_file, row_hash, sheet_hash, row_number FROM ads WHERE batch_id = %s AND client_id = %s", (req.batch_id, client_id)).fetchall()
+            grouped_campaigns = stored_hierarchy
         if not rows:
             raise HTTPException(status_code=422, detail="No ads for this client in the uploaded batch.")
         checks = []
         for row in rows:
             ad = AdContract(ad_id=row[0], batch_id=req.batch_id, client_id=client_id, platform=row[1], headline=row[2], ad_text=row[3], destination_url=row[4], creative_file=row[5] or None, row_hash=row[6], sheet_hash=row[7], row_number=row[8])
             checks.extend({**check, "ad_id": ad.ad_id, "platform": ad.platform} for check in review_ad(ad))
-        return {"status": "checks_failed" if any(c["status"] == "fail" for c in checks) else "ready_for_review", "checks": checks, "missing_items": [], "campaign_summary": {}, "client_id": client_id}
+        from apps.api.preflight import summarize_preflight_checks
+        verdict = summarize_preflight_checks(checks)
+        hierarchy_result: dict[str, Any] = {}
+        if grouped_campaigns is not None:
+            platforms = list(dict.fromkeys(
+                ad.platform
+                for campaign in grouped_campaigns
+                for ad_set in campaign.ad_sets
+                for ad in ad_set.ads
+            ))
+            launch_preview_request = LaunchBatchRequest(
+                client_id=client_id,
+                batch_id=req.batch_id,
+                employee_email="preflight@launch-gate.invalid",
+                target_platforms=platforms,
+                campaigns=grouped_campaigns,
+            )
+            hierarchy_result = build_launch_hierarchy(launch_preview_request)
+        elif overrides.get("meta_launch"):
+            platforms = overrides.get("target_platforms") or list(dict.fromkeys(row[1] for row in rows))
+            launch_preview_request = LaunchBatchRequest(
+                client_id=client_id,
+                batch_id=req.batch_id,
+                campaign_name=str(overrides.get("campaign_name") or "Campaign"),
+                employee_email="preflight@launch-gate.invalid",
+                target_platforms=platforms,
+                headline=str(overrides.get("headline") or ""),
+                ad_text=str(overrides.get("ad_text") or ""),
+                destination_url=str(overrides.get("destination_url") or ""),
+                creative_file=str(overrides.get("creative_file") or ""),
+                creative_mime_type=overrides.get("creative_mime_type"),
+                meta_page_id=overrides.get("meta_page_id"),
+                instagram_user_id=overrides.get("instagram_user_id"),
+                targeting_country=overrides.get("targeting_country"),
+                daily_budget_minor_units=overrides.get("daily_budget_minor_units"),
+                special_ad_category=overrides.get("special_ad_category"),
+                meta_launch=True,
+            )
+            hierarchy_result = build_launch_hierarchy(launch_preview_request)
+        if overrides.get("meta_launch") and hierarchy_result:
+            with get_session() as conn:
+                from apps.api.clients import resolve_client_meta_account
+                try:
+                    hierarchy_result["preview"]["meta_ad_account_id"] = resolve_client_meta_account(conn, client_id)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            **verdict,
+            "checks": checks,
+            "missing_items": [],
+            "campaign_summary": {},
+            "client_id": client_id,
+            **({
+                "hierarchy_preview": hierarchy_result["preview"],
+                "hierarchy_hash": hierarchy_result["hierarchy_hash"],
+            } if hierarchy_result else {}),
+        }
 
     headline = str(overrides.get("headline") or (raw_text.splitlines()[0] if raw_text else "")).strip()
     ad_text = str(overrides.get("ad_text") or raw_text).strip()
@@ -304,11 +889,445 @@ def preflight_review(
                         destination_url=dest_url, creative_file=overrides.get("creative_file") or None,
                         row_hash="preflight", sheet_hash="preflight")
         checks.extend({**check, "platform": platform} for check in review_ad(ad))
-    return {"status": "checks_failed" if any(c["status"] == "fail" for c in checks) else "ready_for_review",
-            "client_id": client_id, "checks": checks, "missing_items": [],
-            "campaign_summary": {"headline": headline, "ad_text": ad_text,
-                                 "destination_url": dest_url, "creative_file": overrides.get("creative_file")},
-            "message": "Review the recorded checks before authorizing. Unavailable checks require human review."}
+    from apps.api.preflight import summarize_preflight_checks
+    verdict = summarize_preflight_checks(checks)
+    hierarchy_result = None
+    if overrides.get("meta_launch"):
+        preview_request = LaunchBatchRequest(
+            client_id=client_id,
+            campaign_name=str(overrides.get("campaign_name") or "Campaign"),
+            employee_email="preflight@launch-gate.invalid",
+            target_platforms=platforms,
+            headline=headline,
+            ad_text=ad_text,
+            destination_url=dest_url,
+            creative_file=str(overrides.get("creative_file") or ""),
+            creative_mime_type=overrides.get("creative_mime_type"),
+            meta_page_id=overrides.get("meta_page_id"),
+            instagram_user_id=overrides.get("instagram_user_id"),
+            targeting_country=overrides.get("targeting_country"),
+            daily_budget_minor_units=overrides.get("daily_budget_minor_units"),
+            special_ad_category=overrides.get("special_ad_category"),
+            meta_launch=True,
+        )
+        hierarchy_result = build_launch_hierarchy(preview_request)
+        with get_session() as conn:
+            from apps.api.clients import resolve_client_meta_account
+            try:
+                hierarchy_result["preview"]["meta_ad_account_id"] = resolve_client_meta_account(conn, client_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**verdict, "client_id": client_id, "checks": checks, "missing_items": [],
+        "campaign_summary": {"headline": headline, "ad_text": ad_text,
+                             "destination_url": dest_url, "creative_file": overrides.get("creative_file")},
+        **({
+            "hierarchy_preview": hierarchy_result["preview"],
+            "hierarchy_hash": hierarchy_result["hierarchy_hash"],
+        } if hierarchy_result else {}),
+        "message": verdict["message"]}
+
+
+@router.post("/hierarchy/retry")
+@endpoint_errors
+def retry_hierarchy_entity(req: RetryHierarchyEntityRequest, user: CurrentUser = Depends(require_role("buyer", "account_manager"))) -> dict[str, Any]:
+    """Retry one failed campaign or ad set without recreating successful parents."""
+    if req.entity_type not in {"campaign", "ad_set"}:
+        raise HTTPException(status_code=422, detail="entity_type must be campaign or ad_set.")
+    table = "meta_campaign_runs" if req.entity_type == "campaign" else "meta_ad_set_runs"
+    id_column = "meta_id"
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            if req.entity_type == "campaign":
+                cur.execute("SELECT id, workspace_id, meta_id, status FROM meta_campaign_runs WHERE batch_id=%s AND (grouping_key=%s OR id::text=%s)", (req.batch_id, req.entity_key, req.entity_key))
+            else:
+                cur.execute("""SELECT ad_set.id, campaign.workspace_id, ad_set.meta_id, ad_set.status
+                             FROM meta_ad_set_runs ad_set JOIN meta_campaign_runs campaign ON campaign.id=ad_set.campaign_run_id
+                             WHERE campaign.batch_id=%s AND (ad_set.grouping_key=%s OR ad_set.id::text=%s)""",
+                            (req.batch_id, req.entity_key, req.entity_key))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Hierarchy entity was not found in this batch.")
+            if str(row[1]) not in set(user.assigned_client_ids):
+                raise HTTPException(status_code=403, detail="Client is not assigned to this user.")
+            run_id, client_id, meta_id, run_status = row[0], row[1], row[2], row[3]
+            if meta_id and run_status == "CREATED":
+                return {"status": "not_required", "entity_key": req.entity_key, "meta_object_id": meta_id}
+            cur.execute(f"UPDATE {table} SET status='PENDING', last_error=NULL, updated_at=NOW() WHERE id=%s", (run_id,))
+            if req.entity_type == "campaign":
+                cur.execute("UPDATE meta_launch_campaigns SET lifecycle_status='pending', last_error=NULL, updated_at=NOW() WHERE batch_id=%s AND client_id=%s AND grouping_key=%s", (req.batch_id, client_id, req.entity_key))
+            else:
+                cur.execute("UPDATE meta_launch_ad_sets SET lifecycle_status='pending', last_error=NULL, updated_at=NOW() WHERE batch_id=%s AND client_id=%s AND grouping_key=%s", (req.batch_id, client_id, req.entity_key))
+        conn.commit()
+    return {"status": "queued", "entity_key": req.entity_key, "entity_type": req.entity_type}
+
+
+@router.get("/hierarchy-status/{batch_id}")
+@endpoint_errors
+def get_hierarchy_status(batch_id: str, user: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
+    """Read hierarchy progress and aggregate planned/saved object counts from persisted IDs."""
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            allowed_clients = list(user.assigned_client_ids)
+            cur.execute(
+                """SELECT ad_set.id::text, ad_set.campaign_run_id::text,
+                          campaign.grouping_key, ad_set.grouping_key,
+                          ad_set.meta_id, ad_set.status, ad_set.last_error, campaign.workspace_id
+                   FROM meta_ad_set_runs ad_set
+                   JOIN meta_campaign_runs campaign ON campaign.id=ad_set.campaign_run_id
+                   WHERE campaign.batch_id=%s AND campaign.workspace_id=ANY(%s)""",
+                (batch_id, allowed_clients),
+            )
+            ad_sets = cur.fetchall()
+            cur.execute(
+                """SELECT run.id::text, run.grouping_key, run.platform, run.status, run.meta_id,
+                          run.last_error, run.workspace_id, COALESCE(legacy.budget_minor_units, 0)
+                   FROM meta_campaign_runs run
+                   LEFT JOIN meta_launch_campaigns legacy
+                     ON legacy.batch_id=run.batch_id AND legacy.client_id=run.workspace_id
+                    AND legacy.grouping_key=run.grouping_key
+                   WHERE run.batch_id=%s AND run.workspace_id=ANY(%s)""",
+                (batch_id, allowed_clients),
+            )
+            campaigns = cur.fetchall()
+            if not campaigns:
+                raise HTTPException(status_code=404, detail="No hierarchy runs found for this authorized batch.")
+            cur.execute("SELECT COUNT(*), COUNT(platform_ad_id) FROM meta_launch_objects o JOIN ads a ON a.ad_id=o.ad_id WHERE a.batch_id=%s", (batch_id,))
+            ad_counts = cur.fetchone()
+    progress = build_hierarchy_progress(campaigns, ad_sets)
+    return {
+        "batch_id": batch_id,
+        **progress,
+        "metrics": {
+            "campaign_count": len(campaigns),
+            "ad_set_count": len(ad_sets),
+            "ad_count": int(ad_counts[0] or 0),
+            "created_ad_count": int(ad_counts[1] or 0),
+            "planned_budget_minor_units": sum(int(row[4] or 0) for row in campaigns),
+        },
+    }
+
+
+def build_hierarchy_progress(
+    campaigns: list[tuple[Any, ...]],
+    ad_sets: list[tuple[Any, ...]],
+) -> dict[str, Any]:
+    """Build the client-facing nested hierarchy and aggregate successful progress."""
+    campaigns_by_id: dict[str, dict[str, Any]] = {}
+    campaign_payloads = []
+    for row in campaigns:
+        status_value = entity_status_for_run(row[3]).value
+        campaign = {
+            "run_id": row[0],
+            "grouping_key": row[1],
+            "platform": row[2],
+            "status": status_value,
+            "meta_object_id": row[4],
+            "last_error": row[5],
+            "workspace_id": row[6],
+            "budget_minor_units": row[7],
+            "ad_sets": [],
+        }
+        campaigns_by_id[row[0]] = campaign
+        campaign_payloads.append(campaign)
+
+    ad_set_payloads = []
+    for row in ad_sets:
+        status_value = entity_status_for_run(row[5]).value
+        ad_set = {
+            "run_id": row[0],
+            "campaign_run_id": row[1],
+            "campaign_key": row[2],
+            "grouping_key": row[3],
+            "meta_object_id": row[4],
+            "status": status_value,
+            "last_error": row[6],
+            "workspace_id": row[7],
+        }
+        parent = campaigns_by_id.get(row[1])
+        if parent is not None:
+            parent["ad_sets"].append(ad_set)
+        ad_set_payloads.append(ad_set)
+
+    successful_statuses = {MetaEntityStatus.CREATED_PAUSED.value, MetaEntityStatus.ACTIVE.value}
+    entity_count = len(campaign_payloads) + len(ad_set_payloads)
+    successful_count = sum(
+        item["status"] in successful_statuses
+        for item in campaign_payloads + ad_set_payloads
+    )
+    aggregate_completion = int(successful_count * 100 / entity_count) if entity_count else 0
+    return {
+        "aggregate_completion_percentage": aggregate_completion,
+        "summary": {
+            "total_campaign_groups": len(campaign_payloads),
+            "completed_campaign_groups": sum(item["status"] in successful_statuses for item in campaign_payloads),
+            "total_ad_sets": len(ad_set_payloads),
+            "completed_ad_sets": sum(item["status"] in successful_statuses for item in ad_set_payloads),
+        },
+        "structure": campaign_payloads,
+        "campaigns": [
+            {
+                "run_id": row[0],
+                "grouping_key": row[1],
+                "platform": row[2],
+                "status": row[3],
+                "meta_object_id": row[4],
+                "last_error": row[5],
+                "workspace_id": row[6],
+                "budget_minor_units": row[7],
+            }
+            for row in campaigns
+        ],
+        "ad_sets": [
+            {
+                "run_id": row[0],
+                "campaign_key": row[2],
+                "grouping_key": row[3],
+                "meta_object_id": row[4],
+                "status": row[5],
+                "last_error": row[6],
+                "workspace_id": row[7],
+            }
+            for row in ad_sets
+        ],
+    }
+
+
+def validate_activation_campaigns(campaigns: list[tuple[Any, ...]]) -> None:
+    if not campaigns:
+        raise HTTPException(status_code=409, detail="No paused campaigns matched the approved hierarchy snapshot.")
+    invalid_campaigns = [
+        str(row[0])
+        for row in campaigns
+        if not row[2] or row[5] != "created_paused"
+    ]
+    if invalid_campaigns:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only created_paused campaigns with Meta IDs can be activated: {', '.join(invalid_campaigns)}.",
+        )
+
+
+def meta_activation_confirmed_active(result: dict[str, Any]) -> bool:
+    return str(result.get("status") or "").casefold() == "active"
+
+
+@router.post("/activate-hierarchy", status_code=status.HTTP_200_OK)
+@endpoint_errors
+def activate_hierarchy(req: ActivateHierarchyRequest, request: Request, user: CurrentUser = Depends(require_role("account_manager", "buyer"))) -> dict[str, Any]:
+    """Explicitly activate previously created paused Meta objects after human confirmation."""
+    if user.guest_session_id:
+        require_guest_csrf(request)
+    from apps.worker.mcp_client import meta_live_writes_enabled
+    if not meta_live_writes_enabled():
+        raise HTTPException(status_code=409, detail="Meta live activation requires META_MCP_ENABLE_LIVE=true and META_MCP_ALLOW_WRITES=true.")
+
+    mcp_dispatcher = MCPPlatformDispatcher(
+        access_token=os.environ.get("META_SYSTEM_USER_TOKEN", "").strip()
+    )
+    activated_campaigns: list[str] = []
+    with get_session() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT client_id FROM ads WHERE batch_id=%s", (req.batch_id,))
+            client_rows = cur.fetchall()
+            if len(client_rows) != 1:
+                raise HTTPException(status_code=422, detail="Activation batch must resolve to exactly one authorized client.")
+            batch_client_id = str(client_rows[0][0])
+            if batch_client_id not in set(user.assigned_client_ids):
+                raise HTTPException(status_code=403, detail="Client is not assigned to this user.")
+            from apps.api.clients import resolve_client_meta_account
+            try:
+                meta_ad_account_id = resolve_client_meta_account(conn, batch_client_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            cur.execute(
+                """SELECT grouping_key, platform, meta_campaign_id, hierarchy_hash,
+                          budget_minor_units, lifecycle_status
+                   FROM meta_launch_campaigns
+                   WHERE batch_id=%s AND client_id=%s AND hierarchy_hash=%s
+                   ORDER BY grouping_key""",
+                (req.batch_id, batch_client_id, req.hierarchy_hash),
+            )
+            campaigns = cur.fetchall()
+            if req.campaign_keys:
+                campaigns = [row for row in campaigns if row[0] in set(req.campaign_keys)]
+            validate_activation_campaigns(campaigns)
+            planned_budget = sum(int(row[4]) for row in campaigns)
+            if req.confirmed_budget_minor_units != planned_budget:
+                raise HTTPException(status_code=409, detail=f"Confirmed budget {req.confirmed_budget_minor_units} does not match planned budget {planned_budget}.")
+            needs_reconciliation: list[str] = []
+            activation_errors: dict[str, str] = {}
+            activated_ad_sets: list[tuple[str, str]] = []
+            reconciliation_ad_sets: list[str] = []
+            for grouping_key, platform, meta_campaign_id, _stored_hash, _budget, _lifecycle_status in campaigns:
+                cur.execute(
+                    """SELECT ad_set.grouping_key, ad_set.meta_id
+                       FROM meta_ad_set_runs ad_set
+                       JOIN meta_campaign_runs campaign ON campaign.id=ad_set.campaign_run_id
+                       WHERE campaign.batch_id=%s AND campaign.workspace_id=%s
+                         AND campaign.grouping_key=%s
+                       ORDER BY ad_set.grouping_key""",
+                    (req.batch_id, batch_client_id, grouping_key),
+                )
+                ad_set_rows = cur.fetchall()
+                if any(not row[1] for row in ad_set_rows):
+                    raise HTTPException(status_code=409, detail=f"Campaign {grouping_key} has an ad set without a confirmed Meta ID.")
+                ad_set_runs = [(str(row[0]), str(row[1])) for row in ad_set_rows]
+                ad_set_ids = [meta_id for _key, meta_id in ad_set_runs]
+                cur.execute(
+                    """SELECT DISTINCT objects.platform_ad_id
+                       FROM meta_launch_objects objects
+                       JOIN ads ON ads.ad_id=objects.ad_id
+                       WHERE ads.batch_id=%s AND ads.client_id=%s
+                         AND objects.campaign_id=%s
+                       ORDER BY objects.platform_ad_id""",
+                    (req.batch_id, batch_client_id, meta_campaign_id),
+                )
+                ad_rows = cur.fetchall()
+                if any(not row[0] for row in ad_rows):
+                    raise HTTPException(status_code=409, detail=f"Campaign {grouping_key} has an ad without a confirmed Meta ID.")
+                ad_ids = [str(row[0]) for row in ad_rows]
+                cur.execute(
+                    """INSERT INTO meta_launch_activation_audit
+                       (activation_id, batch_id, hierarchy_hash, campaign_key, platform, meta_campaign_id, approved_by, confirmed_budget_minor_units)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (batch_id, hierarchy_hash, campaign_key, platform) DO UPDATE SET
+                       meta_campaign_id=EXCLUDED.meta_campaign_id, approved_by=EXCLUDED.approved_by,
+                       confirmed_budget_minor_units=EXCLUDED.confirmed_budget_minor_units""",
+                    (f"activation_{uuid.uuid4().hex}", req.batch_id, req.hierarchy_hash, grouping_key, platform,
+                     meta_campaign_id, user.user_id, req.confirmed_budget_minor_units),
+                )
+                conn.commit()
+                activation_targets = [
+                    (meta_campaign_id, "campaign"),
+                    *((ad_set_id, "ad_set") for ad_set_id in ad_set_ids),
+                    *((ad_id, "ad") for ad_id in ad_ids),
+                ]
+                activation_error = None
+                for entity_id, entity_type in activation_targets:
+                    response = mcp_dispatcher.call_tool(platform, "ads_activate_entity", {
+                        "ad_account_id": meta_ad_account_id,
+                        "entity_id": entity_id,
+                        "entity_type": entity_type,
+                        "object_ids": [entity_id],
+                        "publish_as_active": True,
+                    })
+                    if not response.success:
+                        activation_error = response.error or f"Meta {entity_type} activation failed."
+                        break
+                    result = response.result or {}
+                    if not meta_activation_confirmed_active(result):
+                        activation_error = (
+                            f"Meta did not confirm {entity_type} {entity_id} as active; "
+                            "status requires reconciliation."
+                        )
+                        break
+
+                if activation_error is None:
+                    cur.execute(
+                        """UPDATE meta_launch_campaigns
+                           SET lifecycle_status='active', updated_at=NOW(), last_error=NULL
+                           WHERE batch_id=%s AND client_id=%s AND grouping_key=%s
+                             AND hierarchy_hash=%s AND lifecycle_status='created_paused'""",
+                        (req.batch_id, batch_client_id, grouping_key, req.hierarchy_hash),
+                    )
+                    cur.execute(
+                        """UPDATE meta_campaign_runs SET status='ACTIVE', updated_at=NOW(), last_error=NULL
+                           WHERE batch_id=%s AND grouping_key=%s AND workspace_id=%s""",
+                        (req.batch_id, grouping_key, batch_client_id),
+                    )
+                    cur.execute(
+                        """UPDATE meta_ad_set_runs SET status='ACTIVE', updated_at=NOW(), last_error=NULL
+                           WHERE campaign_run_id IN (
+                               SELECT id FROM meta_campaign_runs
+                               WHERE batch_id=%s AND grouping_key=%s AND workspace_id=%s
+                           ) AND meta_id=ANY(%s)""",
+                        (req.batch_id, grouping_key, batch_client_id, ad_set_ids),
+                    )
+                    cur.execute(
+                        """UPDATE meta_launch_ad_sets SET lifecycle_status='active',
+                           updated_at=NOW(), last_error=NULL
+                           WHERE batch_id=%s AND client_id=%s AND meta_ad_set_id=ANY(%s)""",
+                        (req.batch_id, batch_client_id, ad_set_ids),
+                    )
+                    activated_ad_sets.extend(ad_set_runs)
+                    activated_campaigns.append(grouping_key)
+                else:
+                    needs_reconciliation.append(grouping_key)
+                    activation_errors[grouping_key] = activation_error
+                    reconciliation_ad_sets.extend(key for key, _meta_id in ad_set_runs)
+                    cur.execute(
+                        """UPDATE meta_launch_campaigns SET lifecycle_status='reconciling',
+                           last_error=%s, updated_at=NOW()
+                           WHERE batch_id=%s AND client_id=%s AND grouping_key=%s
+                             AND hierarchy_hash=%s""",
+                        (activation_error[:500], req.batch_id, batch_client_id, grouping_key, req.hierarchy_hash),
+                    )
+                    cur.execute(
+                        """UPDATE meta_campaign_runs SET status='RECONCILING',
+                           last_error=%s,
+                           updated_at=NOW()
+                           WHERE batch_id=%s AND grouping_key=%s AND workspace_id=%s""",
+                        (activation_error[:500], req.batch_id, grouping_key, batch_client_id),
+                    )
+                    cur.execute(
+                        """UPDATE meta_ad_set_runs SET status='RECONCILING',
+                           last_error=%s, updated_at=NOW()
+                           WHERE campaign_run_id IN (
+                               SELECT id FROM meta_campaign_runs
+                               WHERE batch_id=%s AND grouping_key=%s AND workspace_id=%s
+                           )""",
+                        (activation_error[:500], req.batch_id, grouping_key, batch_client_id),
+                    )
+                    cur.execute(
+                        """UPDATE meta_launch_ad_sets SET lifecycle_status='reconciling',
+                           last_error=%s, updated_at=NOW()
+                           WHERE batch_id=%s AND client_id=%s AND campaign_entity_key IN (
+                               SELECT entity_key FROM meta_launch_campaigns
+                               WHERE batch_id=%s AND client_id=%s AND grouping_key=%s
+                           )""",
+                        (activation_error[:500], req.batch_id, batch_client_id,
+                         req.batch_id, batch_client_id, grouping_key),
+                    )
+                conn.commit()
+        conn.commit()
+    for campaign_key in activated_campaigns:
+        emit_progress_event(
+            req.batch_id, "CAMPAIGN", campaign_key, MetaEntityStatus.ACTIVE,
+            client_id=batch_client_id,
+        )
+    for ad_set_key, _meta_id in activated_ad_sets:
+        emit_progress_event(
+            req.batch_id, "AD_SET", ad_set_key, MetaEntityStatus.ACTIVE,
+            client_id=batch_client_id,
+        )
+    for campaign_key in needs_reconciliation:
+        emit_progress_event(
+            req.batch_id,
+            "CAMPAIGN",
+            campaign_key,
+            MetaEntityStatus.NEEDS_RECONCILIATION,
+            activation_errors[campaign_key],
+            client_id=batch_client_id,
+        )
+    for ad_set_key in reconciliation_ad_sets:
+        emit_progress_event(
+            req.batch_id,
+            "AD_SET",
+            ad_set_key,
+            MetaEntityStatus.NEEDS_RECONCILIATION,
+            client_id=batch_client_id,
+        )
+    return {
+        "status": "active" if not needs_reconciliation else "needs_reconciliation",
+        "batch_id": req.batch_id,
+        "activated_campaigns": activated_campaigns,
+        "needs_reconciliation": needs_reconciliation,
+        "activation_errors": activation_errors,
+        "approved_by": user.user_id,
+        "hierarchy_hash": req.hierarchy_hash,
+        "confirmed_budget_minor_units": req.confirmed_budget_minor_units,
+        "activation_recorded": True,
+    }
 
 
 @router.post("/launch-batch", status_code=status.HTTP_201_CREATED)
@@ -320,53 +1339,212 @@ def launch_batch(
 ) -> dict[str, Any]:
     """Launch a batch to Meta, record the employee contact, and trigger dispatches."""
     init_flow_tables()
-    req.client_id = resolve_campaign_client(user, req.client_id, req.batch_id, req.destination_url or "", req.ad_text or req.headline or "")
-
     if not req.employee_email or "@" not in req.employee_email:
         raise HTTPException(status_code=400, detail="A valid employee email is required for notification tracking.")
-    launcher_phone = ""
-
     normalized_platforms: list[str] = []
     for raw_p in req.target_platforms:
         if not raw_p or not str(raw_p).strip():
             raise HTTPException(status_code=400, detail="Platform name cannot be empty.")
         norm = normalize_platform(str(raw_p))
-        if norm.flagged or not norm.canonical_value:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported platform '{raw_p}'. Launch Gate currently supports Meta only (Facebook and Instagram).",
-            )
-        if norm.canonical_value not in {"facebook", "instagram"}:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported platform '{raw_p}'. Launch Gate currently supports Meta only (Facebook and Instagram).",
-            )
-        if norm.canonical_value not in normalized_platforms:
-            normalized_platforms.append(norm.canonical_value)
-
-    if not normalized_platforms:
-        raise HTTPException(status_code=400, detail="At least one valid target platform must be selected.")
-
+        if norm.flagged or norm.canonical_value not in {"facebook", "instagram"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported platform '{raw_p}'. Launch Gate currently supports Meta only (Facebook and Instagram).")
+        normalized_platforms.append(norm.canonical_value)
+    normalized_platforms = list(dict.fromkeys(normalized_platforms))
+    req.client_id = resolve_campaign_client(user, req.client_id, req.batch_id, req.destination_url or "", req.ad_text or req.headline or "")
+    if req.batch_id and not req.campaigns:
+        with get_session() as conn:
+            stored_campaigns = load_batch_campaigns(conn, req.batch_id, req.client_id)
+        if stored_campaigns is not None:
+            req.campaigns = stored_campaigns
+            req.target_platforms = list(dict.fromkeys(
+                ad.platform
+                for campaign in stored_campaigns
+                for ad_set in campaign.ad_sets
+                for ad in ad_set.ads
+            )) or req.target_platforms
+            normalized_platforms = list(req.target_platforms)
+    if req.campaigns:
+        hierarchy = build_launch_hierarchy(req)
+        if not req.hierarchy_preview_hash:
+            raise HTTPException(status_code=409, detail="Explicit campaign hierarchy requires an approved preview hash.")
+        if req.hierarchy_preview_hash != hierarchy["hierarchy_hash"]:
+            raise HTTPException(status_code=409, detail="Launch hierarchy changed after preview; obtain a new hierarchy preview and approval.")
+    else:
+        hierarchy = build_launch_hierarchy(req)
+        if req.meta_launch:
+            if not req.hierarchy_preview_hash:
+                raise HTTPException(status_code=409, detail="Meta launch requires an approved hierarchy preview hash.")
+            if req.hierarchy_preview_hash != hierarchy["hierarchy_hash"]:
+                raise HTTPException(status_code=409, detail="Launch hierarchy changed after preview; obtain a new hierarchy preview and approval.")
     from apps.worker.mcp_client import meta_live_writes_enabled
-    if meta_live_writes_enabled():
-        missing_connection = [
-            name for name in ("MCP_META_SERVER_URL", "META_MCP_ACCESS_TOKEN", "META_AD_ACCOUNT_ID")
-            if not os.environ.get(name, "").strip()
-        ]
+    if req.meta_launch and not meta_live_writes_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="Meta campaign creation requires META_MCP_ENABLE_LIVE=true and META_MCP_ALLOW_WRITES=true.",
+        )
+    meta_ad_account_id = ""
+    campaign_run_ids: dict[str, Any] = {}
+    ad_set_run_ids: dict[str, Any] = {}
+
+    if req.meta_launch and req.campaigns and req.batch_id:
+        hierarchy_hash = hierarchy["hierarchy_hash"]
+        with get_session() as conn:
+            with conn.cursor() as cur:
+                for campaign in hierarchy["hierarchy"]["campaigns"]:
+                    platforms_for_campaign = campaign_platforms(campaign)
+                    if not platforms_for_campaign:
+                        raise HTTPException(status_code=422, detail=f"Campaign {campaign['campaign_key']} contains no supported Meta ads.")
+                    platform_key = platforms_for_campaign[0]
+                    campaign_entity_key = f"{req.batch_id}:{req.client_id}:{campaign['campaign_key']}"
+                    campaign_idempotency = hashlib.sha256(campaign_entity_key.encode()).hexdigest()
+                    campaign_budget_minor_units = (
+                        campaign.get("daily_budget_minor_units")
+                        or campaign.get("lifetime_budget_minor_units")
+                        or sum(
+                            ad_set.get("daily_budget_minor_units") or ad_set.get("lifetime_budget_minor_units") or 0
+                            for ad_set in campaign["ad_sets"]
+                        )
+                    )
+                    campaign_config = {
+                        key: campaign.get(key)
+                        for key in (
+                            "name", "objective", "budget_strategy", "daily_budget_minor_units",
+                            "lifetime_budget_minor_units", "currency", "special_ad_category",
+                        )
+                    }
+                    campaign_config_hash = hashlib.sha256(json.dumps(campaign_config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                    campaign_idempotency = hashlib.sha256(
+                        f"{req.batch_id}:{req.client_id}:{campaign['campaign_key']}:{campaign_config_hash}".encode()
+                    ).hexdigest()
+                    cur.execute(
+                        "SELECT id, config_hash, meta_id, status, approval_snapshot_hash FROM meta_campaign_runs WHERE batch_id=%s AND workspace_id=%s AND grouping_key=%s FOR UPDATE",
+                        (req.batch_id, req.client_id, campaign["campaign_key"]),
+                    )
+                    campaign_run = cur.fetchone()
+                    if campaign_run and campaign_run[1] != campaign_config_hash and campaign_run[4] != hierarchy_hash:
+                        raise HTTPException(status_code=409, detail=f"Campaign '{campaign['campaign_key']}' settings changed after its first launch attempt. Use a new campaign_key to create a distinct campaign.")
+                    if campaign_run:
+                        campaign_run_id = campaign_run[0]
+                        cur.execute(
+                            """UPDATE meta_campaign_runs SET platform=%s, idempotency_key=%s,
+                               approval_snapshot_hash=%s, config_hash=%s, status=CASE WHEN meta_id IS NULL THEN 'PENDING' ELSE status END,
+                               updated_at=NOW() WHERE id=%s""",
+                            (platform_key, campaign_idempotency, hierarchy_hash, campaign_config_hash, campaign_run_id),
+                        )
+                    else:
+                        cur.execute(
+                            """INSERT INTO meta_campaign_runs
+                               (batch_id, workspace_id, grouping_key, platform, idempotency_key,
+                                approval_snapshot_hash, config_hash, status)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,'PENDING') RETURNING id""",
+                            (req.batch_id, req.client_id, campaign["campaign_key"], platform_key,
+                             campaign_idempotency, hierarchy_hash, campaign_config_hash),
+                        )
+                        campaign_run_id = cur.fetchone()[0]
+                    campaign_run_ids[campaign_entity_key] = campaign_run_id
+                    cur.execute(
+                            """INSERT INTO meta_launch_campaigns
+                               (entity_key, batch_id, client_id, platform, grouping_key, idempotency_key, name, budget_minor_units, hierarchy_hash)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                               ON CONFLICT (entity_key) DO UPDATE SET name=EXCLUDED.name,
+                               budget_minor_units=EXCLUDED.budget_minor_units,
+                               hierarchy_hash=EXCLUDED.hierarchy_hash, updated_at=NOW()""",
+                            (campaign_entity_key, req.batch_id, req.client_id, platform_key, campaign["campaign_key"], campaign_idempotency,
+                             campaign["name"], campaign_budget_minor_units, hierarchy_hash),
+                        )
+                    for ad_set in campaign["ad_sets"]:
+                        ad_set_entity_key = f"{campaign_entity_key}:{ad_set['ad_set_key']}"
+                        ad_set_config = {
+                            key: ad_set.get(key)
+                            for key in (
+                                "name", "targeting", "placements", "optimization_goal", "billing_event",
+                                "daily_budget_minor_units", "lifetime_budget_minor_units", "schedule",
+                            )
+                        }
+                        ad_set_config_hash = hashlib.sha256(json.dumps(ad_set_config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                        ad_set_idempotency = hashlib.sha256(
+                            f"{campaign_run_id}:{ad_set['ad_set_key']}:{ad_set_config_hash}".encode()
+                        ).hexdigest()
+                        cur.execute(
+                            "SELECT id, config_hash, meta_id, status, approval_snapshot_hash FROM meta_ad_set_runs WHERE campaign_run_id=%s AND grouping_key=%s FOR UPDATE",
+                            (campaign_run_id, ad_set["ad_set_key"]),
+                        )
+                        ad_set_run = cur.fetchone()
+                        if ad_set_run and ad_set_run[1] != ad_set_config_hash and ad_set_run[4] != hierarchy_hash:
+                            raise HTTPException(status_code=409, detail=f"Ad set '{ad_set['ad_set_key']}' settings changed after its first launch attempt. Use a new ad_set_key to create a distinct ad set.")
+                        if ad_set_run:
+                            ad_set_run_id = ad_set_run[0]
+                            cur.execute(
+                                """UPDATE meta_ad_set_runs SET idempotency_key=%s, approval_snapshot_hash=%s,
+                                   config_hash=%s, status=CASE WHEN meta_id IS NULL THEN 'PENDING' ELSE status END,
+                                   updated_at=NOW() WHERE id=%s""",
+                                (ad_set_idempotency, hierarchy_hash, ad_set_config_hash, ad_set_run_id),
+                            )
+                        else:
+                            cur.execute(
+                                """INSERT INTO meta_ad_set_runs
+                                   (campaign_run_id, grouping_key, idempotency_key, approval_snapshot_hash,
+                                    config_hash, status)
+                                   VALUES (%s,%s,%s,%s,%s,'PENDING') RETURNING id""",
+                                (campaign_run_id, ad_set["ad_set_key"], ad_set_idempotency, hierarchy_hash, ad_set_config_hash),
+                            )
+                            ad_set_run_id = cur.fetchone()[0]
+                        ad_set_run_ids[ad_set_entity_key] = ad_set_run_id
+                        cur.execute(
+                                """INSERT INTO meta_launch_ad_sets
+                                   (entity_key, campaign_entity_key, batch_id, client_id, platform, grouping_key,
+                                    idempotency_key, name, hierarchy_hash)
+                                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                   ON CONFLICT (entity_key) DO UPDATE SET name=EXCLUDED.name,
+                                   hierarchy_hash=EXCLUDED.hierarchy_hash, updated_at=NOW()""",
+                                  (ad_set_entity_key, campaign_entity_key, req.batch_id, req.client_id, platform_key, ad_set["ad_set_key"],
+                                 ad_set_idempotency, ad_set["name"], hierarchy_hash),
+                            )
+            conn.commit()
+
+    launcher_phone = ""
+
+    if req.meta_launch:
+        missing_connection = []
+        if not os.environ.get("MCP_META_SERVER_URL", "").strip():
+            missing_connection.append("MCP_META_SERVER_URL")
+        if not os.environ.get("META_SYSTEM_USER_TOKEN", "").strip():
+            missing_connection.append("META_SYSTEM_USER_TOKEN")
         if missing_connection:
             raise HTTPException(status_code=503, detail=f"Live Meta configuration is incomplete: {', '.join(missing_connection)}.")
-        if not req.meta_page_id or not req.targeting_country or not req.daily_budget_minor_units:
-            raise HTTPException(status_code=422, detail="Page ID, targeting country, and daily budget are required for Meta launch.")
-        if not req.targeting_country.strip().isalpha() or len(req.targeting_country.strip()) != 2:
-            raise HTTPException(status_code=422, detail="Targeting country must be a two-letter country code.")
-        if "instagram" in normalized_platforms and not req.instagram_user_id:
-            raise HTTPException(status_code=422, detail="Instagram account ID is required when Instagram is selected.")
-        if not req.creative_file or not req.creative_file.startswith("https://"):
-            raise HTTPException(status_code=422, detail="Meta launch requires an uploaded creative with a public HTTPS URL.")
-        if req.creative_mime_type not in {"image/jpeg", "image/png"}:
-            raise HTTPException(status_code=422, detail="The current Meta create chain requires a PNG or JPEG image creative.")
-        if req.special_ad_category not in {"NONE", "HOUSING", "EMPLOYMENT", "FINANCIAL_PRODUCTS_SERVICES", "ISSUES_ELECTIONS_POLITICS"}:
-            raise HTTPException(status_code=422, detail="Unsupported Meta special ad category.")
+        if req.campaigns:
+            for campaign in hierarchy["hierarchy"]["campaigns"]:
+                if campaign["special_ad_category"] not in {"NONE", "HOUSING", "EMPLOYMENT", "FINANCIAL_PRODUCTS_SERVICES", "ISSUES_ELECTIONS_POLITICS"}:
+                    raise HTTPException(status_code=422, detail=f"Unsupported special ad category in campaign {campaign['campaign_key']}.")
+                for ad_set in campaign["ad_sets"]:
+                    if not ad_set["targeting_country"] or len(ad_set["targeting_country"]) != 2 or not ad_set["targeting_country"].isalpha():
+                        raise HTTPException(status_code=422, detail=f"Ad set {ad_set['ad_set_key']} requires one two-letter targeting country.")
+                    for ad in ad_set["ads"]:
+                        if not ad["page_id"] or not str(ad["creative_file"]).startswith("https://"):
+                            raise HTTPException(status_code=422, detail=f"Ad {ad['ad_key']} requires a Page ID and public HTTPS creative.")
+                        if ad["creative_mime_type"] not in {"image/jpeg", "image/png"}:
+                            raise HTTPException(status_code=422, detail=f"Ad {ad['ad_key']} requires a PNG or JPEG creative.")
+                        if ad["platform"] == "instagram" and not ad["instagram_user_id"]:
+                            raise HTTPException(status_code=422, detail=f"Ad {ad['ad_key']} requires an Instagram actor ID.")
+        else:
+            if not req.meta_page_id or not req.targeting_country or not req.daily_budget_minor_units:
+                raise HTTPException(status_code=422, detail="Page ID, targeting country, and daily budget are required for Meta launch.")
+            if not req.targeting_country.strip().isalpha() or len(req.targeting_country.strip()) != 2:
+                raise HTTPException(status_code=422, detail="Targeting country must be a two-letter country code.")
+            if "instagram" in normalized_platforms and not req.instagram_user_id:
+                raise HTTPException(status_code=422, detail="Instagram account ID is required when Instagram is selected.")
+            if not req.creative_file or not req.creative_file.startswith("https://"):
+                raise HTTPException(status_code=422, detail="Meta launch requires an uploaded creative with a public HTTPS URL.")
+            if req.creative_mime_type not in {"image/jpeg", "image/png"}:
+                raise HTTPException(status_code=422, detail="The current Meta create chain requires a PNG or JPEG image creative.")
+            if req.special_ad_category not in {"NONE", "HOUSING", "EMPLOYMENT", "FINANCIAL_PRODUCTS_SERVICES", "ISSUES_ELECTIONS_POLITICS"}:
+                raise HTTPException(status_code=422, detail="Unsupported Meta special ad category.")
+        with get_session() as account_conn:
+            from apps.api.clients import resolve_client_meta_account
+            try:
+                meta_ad_account_id = resolve_client_meta_account(account_conn, req.client_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     batch_id = req.batch_id or f"batch_{req.client_id[:3]}_{uuid.uuid4().hex[:8]}"
     launch_attempt_id = (req.launch_attempt_id or "").strip() or f"lnch_{batch_id[:12]}_{uuid.uuid4().hex[:8]}"
@@ -413,7 +1591,7 @@ def launch_batch(
 
             # Query real ads for this batch or client
             cur.execute(
-                "SELECT ad_id, headline, ad_text, destination_url, row_hash, creative_file, platform FROM ads WHERE batch_id = %s AND client_id = %s;",
+                "SELECT ad_id, headline, ad_text, destination_url, row_hash, creative_file, platform, hierarchy_data FROM ads WHERE batch_id = %s AND client_id = %s;",
                 (actual_batch_id, req.client_id),
             )
             ads_list = cur.fetchall()
@@ -450,10 +1628,63 @@ def launch_batch(
                 from apps.api.queue import AdJob
                 outbox.persist_ad_jobs_on_connection(conn, [AdJob(batch_id=actual_batch_id, ad_id=generated_ad_id)])
                 cur.execute("UPDATE batches SET sheet_hash = %s WHERE batch_id = %s", (hash_normalized_sheet([canonical]), actual_batch_id))
-                ads_list = [(generated_ad_id, ad_headline, ad_text, dest_url, hash_normalized_row(canonical), req.creative_file, normalized_platforms[0])]
+                ads_list = [(generated_ad_id, ad_headline, ad_text, dest_url, hash_normalized_row(canonical), req.creative_file, normalized_platforms[0], None)]
+
+            hierarchy_by_ad_id: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, str]] = {}
+            campaign_parent_ids: dict[str, str] = {}
+            ad_set_parent_ids: dict[str, str] = {}
+            failed_hierarchy_entities: dict[str, str] = {}
+            if req.campaigns:
+                hierarchy_campaigns = hierarchy["hierarchy"]["campaigns"]
+                ads_list = order_ads_by_hierarchy(hierarchy_campaigns, ads_list)
+                for campaign in hierarchy_campaigns:
+                    campaign_entity_key = f"{actual_batch_id}:{req.client_id}:{campaign['campaign_key']}"
+                    for ad_set in campaign["ad_sets"]:
+                        ad_set_entity_key = f"{campaign_entity_key}:{ad_set['ad_set_key']}"
+                        for ad in ad_set["ads"]:
+                            hierarchy_by_ad_id[str(ad["ad_id"])] = (
+                                campaign, ad_set, ad, campaign_entity_key, ad_set_entity_key
+                            )
+                cur.execute(
+                    "SELECT grouping_key, meta_id FROM meta_campaign_runs WHERE batch_id=%s AND workspace_id=%s",
+                    (actual_batch_id, req.client_id),
+                )
+                campaign_parent_ids = {
+                    f"{actual_batch_id}:{req.client_id}:{key}": str(value)
+                    for key, value in cur.fetchall() if value
+                }
+                cur.execute(
+                    """SELECT campaign.grouping_key, ad_set.grouping_key, ad_set.meta_id
+                       FROM meta_ad_set_runs ad_set
+                       JOIN meta_campaign_runs campaign ON campaign.id=ad_set.campaign_run_id
+                       WHERE campaign.batch_id=%s AND campaign.workspace_id=%s""",
+                    (actual_batch_id, req.client_id),
+                )
+                ad_set_parent_ids = {
+                    f"{actual_batch_id}:{req.client_id}:{campaign_key}:{ad_set_key}": str(value)
+                    for campaign_key, ad_set_key, value in cur.fetchall() if value
+                }
+            if req.meta_launch:
+                cur.execute(
+                    """INSERT INTO meta_launch_approval_audit
+                       (authorization_id, batch_id, client_id, hierarchy_hash, approved_by)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT (batch_id, client_id, hierarchy_hash) DO UPDATE SET
+                           approved_by=EXCLUDED.approved_by, approved_at=NOW()""",
+                    (
+                        f"auth_{uuid.uuid4().hex}",
+                        actual_batch_id,
+                        req.client_id,
+                        hierarchy["hierarchy_hash"],
+                        user.user_id,
+                    ),
+                )
+                conn.commit()
 
             # Initialize MCP platform tool dispatcher
-            mcp_dispatcher = MCPPlatformDispatcher()
+            mcp_dispatcher = MCPPlatformDispatcher(
+                access_token=os.environ.get("META_SYSTEM_USER_TOKEN", "").strip()
+            )
             notifications_dispatched: list[dict[str, Any]] = []
             dispatch_results: list[dict[str, Any]] = []
 
@@ -478,6 +1709,15 @@ def launch_batch(
                         raise HTTPException(status_code=409, detail="Dead-lettered ad cannot be dispatched without remediation and re-approval.")
                     if curr_hash and curr_hash != ad_row[4]:
                         raise HTTPException(status_code=409, detail="Ad content changed; save an edit and recheck before authorizing.")
+                if req.batch_id and not req.meta_launch and (
+                    not existing_approval
+                    or existing_approval[0] not in {"approved", "sent"}
+                    or existing_approval[1] != ad_row[4]
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Every ad in an existing batch must be approved in review before dry-run dispatch.",
+                    )
 
                 cur.execute(
                     """
@@ -501,7 +1741,14 @@ def launch_batch(
                 cur.execute("INSERT INTO approval_history (ad_id, from_state, to_state, changed_by, content_hash, reason) VALUES (%s,%s,%s,%s,%s,%s)",
                             (ad_id, existing_approval[0] if existing_approval else 'pending_review', 'approved', user.user_id, ad_row[4], 'Explicit campaign authorization'))
                 conn.commit()
-                for plat in normalized_platforms:
+                row_platforms = (
+                    [normalize_platform(str(ad_row[6])).canonical_value]
+                    if req.campaigns or not req.meta_launch
+                    else normalized_platforms
+                )
+                for plat in row_platforms:
+                    if plat not in {"facebook", "instagram"}:
+                        raise HTTPException(status_code=422, detail=f"Ad {ad_id} has unsupported platform in hierarchy.")
                     disp_id = f"disp_{ad_id}_{plat}_{ad_row[4][:16]}"
                     handle = f"@{req.client_id}_{plat}"
                     cur.execute("SELECT status FROM ad_live_dispatches WHERE dispatch_id = %s", (disp_id,))
@@ -516,6 +1763,12 @@ def launch_batch(
                     )
                     stored_objects = cur.fetchone()
                     existing_ids = dict(zip(("campaign", "ad_set", "creative", "ad"), stored_objects or (None, None, None, None)))
+                    if req.meta_launch and req.campaigns:
+                        parent_campaign, parent_ad_set, hierarchy_ad, campaign_entity_key, ad_set_entity_key = hierarchy_by_ad_id[ad_id]
+                        if campaign_parent_ids.get(campaign_entity_key):
+                            existing_ids["campaign"] = campaign_parent_ids[campaign_entity_key]
+                        if ad_set_parent_ids.get(ad_set_entity_key):
+                            existing_ids["ad_set"] = ad_set_parent_ids[ad_set_entity_key]
 
                     def persist_meta_stage(stage: str, object_id: str) -> None:
                         columns = {"campaign": "campaign_id", "ad_set": "ad_set_id", "creative": "creative_id", "ad": "platform_ad_id"}
@@ -525,29 +1778,193 @@ def launch_batch(
                                 ON CONFLICT (ad_id, platform) DO UPDATE SET {column}=EXCLUDED.{column}, updated_at=NOW()""",
                             (ad_id, plat, object_id),
                         )
+                        if req.campaigns and stage == "campaign":
+                            campaign_parent_ids[campaign_entity_key] = object_id
+                            cur.execute(
+                                "UPDATE meta_campaign_runs SET meta_id=%s, status='CREATED', last_error=NULL, updated_at=NOW() WHERE id=%s",
+                                (object_id, campaign_run_ids[campaign_entity_key]),
+                            )
+                            cur.execute(
+                                "UPDATE meta_launch_campaigns SET meta_campaign_id=%s, lifecycle_status='created_paused', updated_at=NOW() WHERE entity_key=%s",
+                                (object_id, campaign_entity_key),
+                            )
+                        if req.campaigns and stage == "ad_set":
+                            ad_set_parent_ids[ad_set_entity_key] = object_id
+                            cur.execute(
+                                "UPDATE meta_ad_set_runs SET meta_id=%s, status='CREATED', last_error=NULL, updated_at=NOW() WHERE id=%s",
+                                (object_id, ad_set_run_ids[ad_set_entity_key]),
+                            )
+                            cur.execute(
+                                "UPDATE meta_launch_ad_sets SET meta_ad_set_id=%s, lifecycle_status='created_paused', updated_at=NOW() WHERE entity_key=%s",
+                                (object_id, ad_set_entity_key),
+                            )
                         conn.commit()
 
-                    mcp_resp = mcp_dispatcher.dispatch_paused_ad(
+                    def persist_meta_stage_status(stage: str, run_status: str, error: str | None = None) -> None:
+                        if not req.campaigns:
+                            return
+                        safe_error = " ".join(str(error or "").split())[:500] or None
+                        if stage == "campaign":
+                            cur.execute(
+                                "UPDATE meta_campaign_runs SET status=%s, last_error=%s, updated_at=NOW() WHERE id=%s",
+                                (run_status, safe_error, campaign_run_ids[campaign_entity_key]),
+                            )
+                            compatibility_status = {"PENDING": "pending", "CREATING": "creating", "RECONCILING": "reconciling", "CREATED": "created_paused", "FAILED": "failed", "ACTIVE": "active"}[run_status]
+                            cur.execute(
+                                "UPDATE meta_launch_campaigns SET lifecycle_status=%s, last_error=%s, updated_at=NOW() WHERE entity_key=%s",
+                                (compatibility_status, safe_error, campaign_entity_key),
+                            )
+                        elif stage == "ad_set":
+                            cur.execute(
+                                "UPDATE meta_ad_set_runs SET status=%s, last_error=%s, updated_at=NOW() WHERE id=%s",
+                                (run_status, safe_error, ad_set_run_ids[ad_set_entity_key]),
+                            )
+                            compatibility_status = {"PENDING": "pending", "CREATING": "creating", "RECONCILING": "reconciling", "CREATED": "created_paused", "FAILED": "failed", "ACTIVE": "active"}[run_status]
+                            cur.execute(
+                                "UPDATE meta_launch_ad_sets SET lifecycle_status=%s, last_error=%s, updated_at=NOW() WHERE entity_key=%s",
+                                (compatibility_status, safe_error, ad_set_entity_key),
+                            )
+                        conn.commit()
+                        emit_progress_event(
+                            req.batch_id,
+                            "CAMPAIGN" if stage == "campaign" else "AD_SET",
+                            campaign_entity_key if stage == "campaign" else ad_set_entity_key,
+                            entity_status_for_run(run_status),
+                            safe_error,
+                            req.client_id,
+                        )
+
+                    if req.meta_launch and req.campaigns:
+                        campaign_budget_strategy = parent_campaign["budget_strategy"]
+                        campaign_daily_budget = parent_campaign.get("daily_budget_minor_units") or 0
+                        campaign_lifetime_budget = parent_campaign.get("lifetime_budget_minor_units")
+                        ad_set_daily_budget = parent_ad_set.get("daily_budget_minor_units")
+                        ad_set_lifetime_budget = parent_ad_set.get("lifetime_budget_minor_units")
+                        ad_page_id = hierarchy_ad.get("page_id") or ""
+                        ad_actor_id = hierarchy_ad.get("instagram_user_id")
+                        ad_targeting = parent_ad_set.get("targeting") or {}
+                        ad_country = parent_ad_set.get("targeting_country") or ""
+                        ad_countries = parent_ad_set.get("targeting", {}).get("geo_locations", {}).get("countries", [])
+                        campaign_countries = list(dict.fromkeys(
+                            str(country).upper()
+                            for ad_set_model in parent_campaign.get("ad_sets", [])
+                            for country in (ad_set_model.get("targeting", {}).get("geo_locations", {}).get("countries", []))
+                        ))
+                        ad_objective = parent_campaign.get("objective") or "OUTCOME_TRAFFIC"
+                        ad_special_category = parent_campaign.get("special_ad_category") or "NONE"
+                        ad_optimization_goal = parent_ad_set.get("optimization_goal") or "LINK_CLICKS"
+                        ad_billing_event = parent_ad_set.get("billing_event") or "IMPRESSIONS"
+                        ad_schedule = parent_ad_set.get("schedule") or {}
+                        ad_campaign_name = parent_campaign["name"]
+                        ad_creative_url = hierarchy_ad.get("creative_file") or ""
+                    else:
+                        campaign_budget_strategy = "DAILY"
+                        campaign_daily_budget = req.daily_budget_minor_units or 0
+                        campaign_lifetime_budget = None
+                        ad_set_daily_budget = None
+                        ad_set_lifetime_budget = None
+                        ad_page_id = req.meta_page_id or ""
+                        ad_actor_id = req.instagram_user_id
+                        ad_targeting = None
+                        ad_country = req.targeting_country or ""
+                        ad_countries = [ad_country] if ad_country else []
+                        campaign_countries = [ad_country] if ad_country else []
+                        ad_objective = "OUTCOME_TRAFFIC"
+                        ad_special_category = req.special_ad_category or "NONE"
+                        ad_optimization_goal = "LINK_CLICKS"
+                        ad_billing_event = "IMPRESSIONS"
+                        ad_schedule = None
+                        ad_campaign_name = req.campaign_name
+                        ad_creative_url = req.creative_file or ""
+
+                    prior_parent_failure = None
+                    if req.meta_launch and req.campaigns:
+                        prior_parent_failure = (
+                            failed_hierarchy_entities.get(campaign_entity_key)
+                            or failed_hierarchy_entities.get(ad_set_entity_key)
+                        )
+                    if prior_parent_failure:
+                        mcp_resp = MCPResponse(
+                            False,
+                            plat,
+                            "ads_create_ad",
+                            {"campaign_id": existing_ids.get("campaign"), "ad_set_id": existing_ids.get("ad_set")},
+                            f"meta_chain_incomplete: prior parent creation failed: {prior_parent_failure}",
+                        )
+                    elif req.meta_launch:
+                        mcp_resp = mcp_dispatcher.dispatch_paused_ad(
                         platform=plat,
                         ad_id=ad_id,
-                        campaign_name=req.campaign_name,
+                        campaign_name=ad_campaign_name,
                         headline=headline,
                         ad_text=ad_row[2] or "",
                         destination_url=destination_url or "",
-                        ad_account_id=os.environ.get("META_AD_ACCOUNT_ID", "").strip().removeprefix("act_"),
-                        page_id=req.meta_page_id or "",
-                        instagram_user_id=req.instagram_user_id,
-                        targeting_country=req.targeting_country or "",
-                        daily_budget_minor_units=req.daily_budget_minor_units or 0,
-                        image_url=req.creative_file or "",
-                        special_ad_category=req.special_ad_category,
+                        ad_account_id=meta_ad_account_id,
+                        page_id=ad_page_id,
+                        instagram_user_id=ad_actor_id,
+                        targeting_country=ad_country,
+                        daily_budget_minor_units=campaign_daily_budget,
+                        image_url=ad_creative_url,
+                        special_ad_category=ad_special_category,
+                        campaign_objective=ad_objective,
+                        campaign_budget_strategy=campaign_budget_strategy,
+                        campaign_lifetime_budget_minor_units=campaign_lifetime_budget,
+                        campaign_key=campaign_entity_key if req.campaigns else None,
+                        ad_set_key=ad_set_entity_key if req.campaigns else None,
+                        ad_set_name=parent_ad_set["name"] if req.campaigns else None,
+                        targeting_spec=ad_targeting,
+                        placements=parent_ad_set.get("placements") if req.campaigns else None,
+                        optimization_goal=ad_optimization_goal,
+                        billing_event=ad_billing_event,
+                        ad_set_daily_budget_minor_units=ad_set_daily_budget,
+                        ad_set_lifetime_budget_minor_units=ad_set_lifetime_budget,
+                        adset_schedule=ad_schedule,
+                        targeting_countries=ad_countries,
+                        special_ad_category_countries=campaign_countries,
                         existing_ids=existing_ids,
                         persist_stage=persist_meta_stage,
-                    )
+                        persist_stage_status=persist_meta_stage_status,
+                        )
+                    else:
+                        from apps.worker.sender import send_ad_to_stand_in
+
+                        stand_in_result = send_ad_to_stand_in(
+                            ad_id,
+                            connection=conn,
+                            user_id=user.user_id,
+                        )
+                        mcp_resp = MCPResponse(
+                            success=stand_in_result.get("status") == "sent",
+                            platform=plat,
+                            tool_name="stand_in_dry_run",
+                            result={
+                                "platform_ad_id": stand_in_result.get("platform_ad_id"),
+                                "status": "paused",
+                                "platform_review_status": "Stand-in dry-run accepted",
+                                "audit_notes": "Dry-run only; no live Meta object was created.",
+                            },
+                            error=stand_in_result.get("error"),
+                        )
 
                     # Check success on every connector call; on failure do not write fake rows
                     if not mcp_resp.success or not (mcp_resp.result or {}).get("platform_ad_id"):
                         error_msg = mcp_resp.error or "Platform did not confirm an ad ID. Delivery is unconfirmed."
+                        if req.campaigns:
+                            safe_error = " ".join(str(error_msg).split())[:500]
+                            result_ids = mcp_resp.result or {}
+                            if not result_ids.get("campaign_id"):
+                                failed_hierarchy_entities[campaign_entity_key] = safe_error
+                            elif not result_ids.get("ad_set_id"):
+                                failed_hierarchy_entities[ad_set_entity_key] = safe_error
+                            cur.execute(
+                                "UPDATE meta_launch_campaigns SET lifecycle_status='failed', last_error=%s, updated_at=NOW() WHERE entity_key=%s AND meta_campaign_id IS NULL",
+                                (safe_error, campaign_entity_key),
+                            )
+                            cur.execute(
+                                "UPDATE meta_launch_ad_sets SET lifecycle_status='failed', last_error=%s, updated_at=NOW() WHERE entity_key=%s AND meta_ad_set_id IS NULL",
+                                (safe_error, ad_set_entity_key),
+                            )
+                            conn.commit()
                         is_unconfigured = error_msg in {"connector_not_configured", "real_platform_calls_disabled"} or error_msg.startswith("meta_chain_incomplete:")
                         disp_status = "blocked_connector_not_configured" if is_unconfigured else "rejected"
                         if error_msg == "real_platform_calls_disabled":
@@ -621,7 +2038,7 @@ def launch_batch(
                              launch_attempt_id, existing_ids.get("campaign"), existing_ids.get("ad_set"), existing_ids.get("creative")),
                         )
 
-                        if not is_unconfigured:
+                        if req.meta_launch and not is_unconfigured:
                             cur.execute(
                                 """
                                 INSERT INTO ad_sends (
@@ -654,29 +2071,31 @@ def launch_batch(
                         INSERT INTO ad_live_dispatches (
                             dispatch_id, ad_id, batch_id, client_id, platform, handle,
                             status, platform_ad_id, platform_review_status, platform_review_notes, live_preview_url,
-                            meta_campaign_id, meta_ad_set_id, meta_creative_id
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            launch_attempt_id, meta_campaign_id, meta_ad_set_id, meta_creative_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (dispatch_id) DO UPDATE SET
                             status = EXCLUDED.status,
                             platform_ad_id = EXCLUDED.platform_ad_id,
                             platform_review_status = EXCLUDED.platform_review_status,
                             platform_review_notes = EXCLUDED.platform_review_notes,
+                            launch_attempt_id = EXCLUDED.launch_attempt_id,
                             meta_campaign_id = EXCLUDED.meta_campaign_id,
                             meta_ad_set_id = EXCLUDED.meta_ad_set_id,
                             meta_creative_id = EXCLUDED.meta_creative_id,
                             last_tracked_at = NOW();
                         """,
                         (disp_id, ad_id, actual_batch_id, req.client_id, plat, handle, platform_status, plat_ad_id, platform_review, audit_notes, live_url,
-                         mcp_result.get("campaign_id"), mcp_result.get("ad_set_id"), mcp_result.get("creative_id")),
+                         launch_attempt_id, mcp_result.get("campaign_id"), mcp_result.get("ad_set_id"), mcp_result.get("creative_id")),
                     )
 
-                    cur.execute("INSERT INTO ad_sends (send_id,ad_id,client_id,batch_id,idempotency_key,content_hash,platform,status,platform_ad_id,is_dry_run) VALUES (%s,%s,%s,%s,%s,%s,%s,'sent',%s,FALSE) ON CONFLICT (send_id) DO NOTHING",
-                                (f"send_{disp_id}",ad_id,req.client_id,actual_batch_id,disp_id,ad_row[4],plat,plat_ad_id))
-                    perf_resp = mcp_dispatcher.call_tool(
+                    if req.meta_launch:
+                        cur.execute("INSERT INTO ad_sends (send_id,ad_id,client_id,batch_id,idempotency_key,content_hash,platform,status,platform_ad_id,is_dry_run) VALUES (%s,%s,%s,%s,%s,%s,%s,'sent',%s,FALSE) ON CONFLICT (send_id) DO NOTHING",
+                                    (f"send_{disp_id}",ad_id,req.client_id,actual_batch_id,disp_id,ad_row[4],plat,plat_ad_id))
+                        perf_resp = mcp_dispatcher.call_tool(
                         platform=plat,
                         tool_name="ads_get_ad_entities",
                         arguments={
-                            "ad_account_id": os.environ.get("META_AD_ACCOUNT_ID", "").strip().removeprefix("act_"),
+                            "ad_account_id": meta_ad_account_id,
                             "level": "ad",
                             "object_ids": [plat_ad_id],
                             "fields": ["amount_spent", "impressions", "clicks", "ctr", "omni_purchase", "omni_purchase_values"],
@@ -684,8 +2103,10 @@ def launch_batch(
                             "advertiser_request": "Review and update the campaign preview, then confirm launch on the selected Meta platform(s).",
                             "advertiser_job": "create_and_launch_new_ads",
                         },
-                    )
-                    if perf_resp.success:
+                        )
+                    else:
+                        perf_resp = None
+                    if perf_resp and perf_resp.success:
                         perf_res = perf_resp.result
                         perf_rows = perf_res if isinstance(perf_res, list) else (perf_res.get("ad_entities") or perf_res.get("data") or [])
                         perf_ad = next((item for item in perf_rows if isinstance(item, dict) and str(item.get("id")) == str(plat_ad_id)), None)

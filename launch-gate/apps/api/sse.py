@@ -216,6 +216,35 @@ def calculate_batch_live_status(
     progress_percent = round((processed_ads / total_ads) * 100.0, 1) if total_ads > 0 else 100.0
     status_str = "completed" if total_ads > 0 and pending_ads == 0 else ("processing" if total_ads > 0 else "empty")
 
+    campaign_statuses: list[dict[str, Any]] = []
+    ad_set_statuses: list[dict[str, Any]] = []
+    try:
+        campaign_rows = connection.execute(
+                """SELECT id::text, grouping_key, platform, meta_id, status, last_error, workspace_id
+                    FROM meta_campaign_runs WHERE batch_id=%s AND workspace_id=ANY(%s)""",
+                (batch_id, list(allowed_clients)),
+        ).fetchall()
+        campaign_statuses = [
+            {"run_id": row[0], "grouping_key": row[1], "platform": row[2], "meta_campaign_id": row[3],
+             "lifecycle_status": row[4], "last_error": row[5], "client_id": row[6]}
+            for row in campaign_rows
+        ]
+        ad_set_rows = connection.execute(
+            """SELECT ad_set.id::text, campaign.grouping_key, ad_set.grouping_key, campaign.platform,
+                      ad_set.meta_id, ad_set.status, ad_set.last_error, campaign.workspace_id
+               FROM meta_ad_set_runs ad_set
+               JOIN meta_campaign_runs campaign ON campaign.id=ad_set.campaign_run_id
+                    WHERE campaign.batch_id=%s AND campaign.workspace_id=ANY(%s)""",
+                (batch_id, list(allowed_clients)),
+        ).fetchall()
+        ad_set_statuses = [
+            {"run_id": row[0], "campaign_key": row[1], "grouping_key": row[2], "platform": row[3],
+             "meta_ad_set_id": row[4], "lifecycle_status": row[5], "last_error": row[6], "client_id": row[7]}
+            for row in ad_set_rows
+        ]
+    except Exception:
+        pass
+
     return {
         "batch_id": batch_id,
         "status": status_str,
@@ -226,6 +255,8 @@ def calculate_batch_live_status(
         "verdict_counts": verdict_counts,
         "total_findings": total_findings,
         "client_ids": sorted({ad["client_id"] for ad in visible_ads}),
+        "campaign_statuses": campaign_statuses,
+        "ad_set_statuses": ad_set_statuses,
         "ad_statuses": ad_statuses,
     }
 

@@ -26,6 +26,8 @@ function BatchReviewScreen({ params, apiBaseUrl = API_BASE_URL }) {
   const [copiedId, setCopiedId] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
   const [notificationEmail, setNotificationEmail] = useState("");
+  const [hierarchyProgress, setHierarchyProgress] = useState(null);
+  const [hierarchyError, setHierarchyError] = useState(null);
 
   // Edit Modal State
   const [editingAd, setEditingAd] = useState(null);
@@ -60,6 +62,43 @@ function BatchReviewScreen({ params, apiBaseUrl = API_BASE_URL }) {
 
   useEffect(() => {
     fetchBatch();
+  }, [batchId, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!batchId) return undefined;
+    let cancelled = false;
+    const updateHierarchy = async () => {
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("launch_gate_token") : null;
+        const headers = { Accept: "application/json" };
+        if (token) headers.Authorization = "Bearer " + token;
+        const response = await fetch(`${apiBaseUrl}/campaign-flow/hierarchy-status/${batchId}`, {
+          headers,
+          credentials: "include",
+        });
+        if (response.status === 404) {
+          if (!cancelled) {
+            setHierarchyProgress(null);
+            setHierarchyError(null);
+          }
+          return;
+        }
+        if (!response.ok) throw new Error(await readError(response));
+        const data = await response.json();
+        if (!cancelled) {
+          setHierarchyProgress(data);
+          setHierarchyError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setHierarchyError(requestErrorMessage(err));
+      }
+    };
+    updateHierarchy();
+    const timer = window.setInterval(updateHierarchy, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [batchId, apiBaseUrl]);
 
   // Derived filtered ads
@@ -509,10 +548,58 @@ function BatchReviewScreen({ params, apiBaseUrl = API_BASE_URL }) {
               }}
             >
               <span>🚀</span>
-              <span>{isLaunching ? "Connecting MCP..." : "Re-Dispatch to Meta"}</span>
+              <span>{isLaunching ? "Sending approved ads..." : "Send approved ads to dry-run"}</span>
             </button>
           </div>
         </div>
+
+        {hierarchyProgress && (
+          <section style={{
+            background: "rgba(15, 23, 42, 0.7)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            borderRadius: "16px",
+            padding: "20px",
+            marginBottom: "28px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", marginBottom: "12px" }}>
+              <strong style={{ color: "#f8fafc" }}>Campaign launch progress</strong>
+              <span style={{ color: "#38bdf8", fontWeight: 700 }}>
+                {hierarchyProgress.aggregate_completion_percentage}% complete
+              </span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label="Campaign launch progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={hierarchyProgress.aggregate_completion_percentage}
+              style={{ height: "8px", borderRadius: "8px", background: "rgba(148, 163, 184, 0.18)", marginBottom: "16px" }}
+            >
+              <div style={{
+                width: `${hierarchyProgress.aggregate_completion_percentage}%`,
+                height: "100%",
+                borderRadius: "8px",
+                background: "linear-gradient(90deg, #3b82f6, #10b981)",
+              }} />
+            </div>
+            {hierarchyProgress.structure.map((campaign) => (
+              <div key={campaign.run_id} style={{ padding: "10px 0", borderTop: "1px solid rgba(255, 255, 255, 0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                  <span style={{ color: "#e2e8f0" }}>Campaign: {campaign.grouping_key}</span>
+                  <span style={{ color: "#94a3b8" }}>{campaign.status}</span>
+                </div>
+                {campaign.last_error && <div role="alert" style={{ color: "#fca5a5", fontSize: "12px", marginTop: "4px" }}>{campaign.last_error}</div>}
+                {campaign.ad_sets.map((adSet) => (
+                  <div key={adSet.run_id} style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "6px 0 0 18px", fontSize: "13px" }}>
+                    <span style={{ color: "#94a3b8" }}>Ad set: {adSet.grouping_key}</span>
+                    <span style={{ color: "#64748b" }}>{adSet.status}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </section>
+        )}
+        {hierarchyError && <div role="alert" style={{ color: "#fca5a5", fontSize: "12px", marginBottom: "16px" }}>{hierarchyError}</div>}
 
         {/* 3. Top KPI Metric Cards */}
         <div style={{

@@ -105,6 +105,34 @@ app.include_router(pipeline_router)
 app.include_router(campaign_flow_router)
 
 
+_SAFE_METHODS = {"GET", "HEAD"}
+_MUTATING_PATH_MARKERS = (
+    "/send", "/approve", "/reject", "/verify-send", "/launch", "/dispatch",
+    "/reconcile", "/retry", "/edit", "/remediate", "/retention", "/resolve-client",
+    "/preflight-review", "/test-alert",
+)
+
+
+def custom_openapi():
+    schema = app.openapi_schema
+    if schema is not None:
+        return schema
+    schema = FastAPI.openapi(app)
+    for path, operations in schema.get("paths", {}).items():
+        for method, operation in operations.items():
+            if method.upper() not in {value.upper() for value in _SAFE_METHODS} and method.upper() != "HEAD":
+                side_effecting = True
+            else:
+                side_effecting = any(marker in path for marker in _MUTATING_PATH_MARKERS)
+            operation["x-launch-gate-safety"] = "side_effecting" if side_effecting else "read_only"
+            operation["x-requires-human-confirmation"] = side_effecting
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s", request.url.path, exc_info=exc)

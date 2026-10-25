@@ -131,6 +131,7 @@ class WordingCheckResult:
     response_ref: str | None = None
     retrieval_mode: str = "unranked_fallback"
     model_unavailable: bool = False
+    review_reason: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -279,6 +280,7 @@ def check_wording(
 
     # 3. Rule Retrieval
     active_retrieved_rules: list[RetrievedRule] = []
+    rule_retrieval_failed = False
     if retrieved_rules is not None:
         active_retrieved_rules = list(retrieved_rules)
     else:
@@ -314,6 +316,7 @@ def check_wording(
         except Exception as exc:
             logger.warning("Retrieval failed for ad %s: %s", ad.ad_id, exc)
             active_retrieved_rules = []
+            rule_retrieval_failed = True
 
     # If unranked rules exceed 40 (e.g. passed explicitly), truncate and flag rules_truncated
     if any(getattr(r, "retrieval_mode", None) == "unranked_fallback" for r in active_retrieved_rules) and len(active_retrieved_rules) > 40:
@@ -342,18 +345,24 @@ def check_wording(
     # If no rules exist for this client, it's an unknown situation -> needs_person
     if not active_retrieved_rules:
         needs_person = True
+        review_reason = "rule_retrieval_unavailable" if rule_retrieval_failed else "client_rules_missing"
+        review_message = (
+            "Client rules could not be retrieved; human review required."
+            if rule_retrieval_failed
+            else f"No client rules available for {ad.client_id!r}; human review required."
+        )
         no_rules_finding = FindingContract(
-            finding_id=f"{ad.ad_id}:wording:no_retrieved_rules",
+            finding_id=f"{ad.ad_id}:wording:{review_reason}",
             ad_id=ad.ad_id,
             row_number=ad.row_number,
             check_type=CheckType.WORDING,
-            message=f"No client rules available or retrieved for {ad.client_id!r}; flagged for human review.",
+            message=review_message,
             field="ad_text",
             proposed_fix="Review client brand book and claims register.",
             rule_id=None,
         )
         all_findings.append(no_rules_finding)
-        summary = "Wording check: no rules available; needs human review."
+        summary = review_message
         current_shared_state.summary = summary
         current_shared_state.status = "needs_person"
         return WordingCheckResult(
@@ -366,6 +375,7 @@ def check_wording(
             prompt_ref=prompt_ref,
             response_ref=response_ref,
             retrieval_mode=effective_retrieval_mode,
+            review_reason=review_reason,
         )
 
     # 4. Keyword Pre-filter (deterministic, source=keyword_rule)
@@ -408,12 +418,14 @@ def check_wording(
         return WordingCheckResult(
             findings=all_findings,
             needs_person=True,
+            model_unavailable=True,
             status="needs_person",
             summary=summary,
             retrieved_rules=active_retrieved_rules,
             shared_state=current_shared_state,
             prompt_ref=prompt_ref,
             response_ref=response_ref,
+            review_reason="model_credentials_unavailable",
         )
 
     effective_model = os.environ.get("SPECIALIST_MODEL", os.environ.get("GEMINI_MODEL", DEFAULT_SPECIALIST_MODEL))
@@ -514,6 +526,7 @@ def check_wording(
             prompt_ref=prompt_ref,
             response_ref=response_ref,
             retrieval_mode=effective_retrieval_mode,
+            review_reason="model_unavailable",
         )
 
     # Store raw model response in file storage if available
@@ -701,4 +714,5 @@ def check_wording(
         prompt_ref=prompt_ref,
         response_ref=response_ref,
         retrieval_mode=effective_retrieval_mode,
+        review_reason="human_review_required" if needs_person else None,
     )

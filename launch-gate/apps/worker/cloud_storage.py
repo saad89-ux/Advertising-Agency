@@ -6,7 +6,7 @@ import io
 import logging
 import os
 from typing import Any
-import urllib.request
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -31,6 +31,35 @@ def is_cloudinary_configured() -> bool:
     api_key = os.environ.get("CLOUDINARY_API_KEY", "").strip()
     api_secret = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
     return bool(cloud_name and api_key and api_secret)
+
+
+def is_cloudinary_asset_url(file_ref: str) -> bool:
+    load_dotenv()
+    try:
+        parsed = urlsplit(file_ref)
+        configured_url = os.environ.get("CLOUDINARY_URL", "").strip()
+        configured_cloud_name = (
+            urlsplit(configured_url).hostname
+            if configured_url
+            else os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
+        )
+        path = [part for part in parsed.path.split("/") if part]
+        return (
+            parsed.scheme == "https"
+            and parsed.hostname == "res.cloudinary.com"
+            and parsed.port is None
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+            and bool(configured_cloud_name)
+            and len(path) >= 4
+            and path[0] == configured_cloud_name
+            and path[1] in {"image", "raw", "video"}
+            and path[2] == "upload"
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 class CloudinaryFileStore:
@@ -97,27 +126,21 @@ class CloudinaryFileStore:
 
     def get(self, file_ref: str, timeout_seconds: float = 15.0) -> bytes:
         """Download asset content from Cloudinary CDN URL."""
-        if file_ref.startswith(("http://", "https://")):
-            try:
-                import httpx
-                resp = httpx.get(
-                    file_ref,
-                    headers={"User-Agent": "LaunchGate/1.0"},
-                    timeout=timeout_seconds,
-                    follow_redirects=True,
-                )
-                resp.raise_for_status()
-                return resp.content
-            except Exception as exc:
-                logger.debug("httpx download failed for %s, falling back to urllib: %s", file_ref, exc)
-                try:
-                    req = urllib.request.Request(file_ref, headers={"User-Agent": "LaunchGate/1.0"})
-                    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                        return resp.read()
-                except Exception as u_exc:
-                    logger.error("Failed downloading asset from Cloudinary %s: %s", file_ref, u_exc)
-                    raise FileNotFoundError(f"Could not download remote asset from {file_ref}: {u_exc}") from u_exc
-        raise ValueError(f"Invalid Cloudinary URL reference: {file_ref}")
+        if not is_cloudinary_asset_url(file_ref):
+            raise ValueError("Invalid Cloudinary URL reference")
+        try:
+            import httpx
+            resp = httpx.get(
+                file_ref,
+                headers={"User-Agent": "LaunchGate/1.0"},
+                timeout=timeout_seconds,
+                follow_redirects=False,
+            )
+            resp.raise_for_status()
+            return resp.content
+        except Exception as exc:
+            logger.error("Failed downloading Cloudinary asset: %s", exc)
+            raise FileNotFoundError("Could not download asset from storage") from exc
 
     def delete(self, file_ref: str) -> None:
         """Delete an asset from Cloudinary by its public ID or URL."""

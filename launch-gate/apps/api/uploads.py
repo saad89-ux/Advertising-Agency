@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from urllib.parse import urlsplit
 from pathlib import PurePath, PureWindowsPath
 from typing import Any
 from uuid import uuid4
@@ -36,6 +37,7 @@ from apps.api.settings import (
     max_upload_bytes,
     max_xlsx_uncompressed_bytes,
 )
+from packages.contracts import BatchRowContract, validate_batch_row_consistency
 from packages.rules.platform_normalization import normalize_platform
 
 
@@ -106,6 +108,54 @@ def _rejected_payload(row: RejectedRow) -> dict[str, object]:
     }
 
 
+def validate_hierarchy_rows(
+    client_id: str,
+    indexed_rows: list[tuple[int, dict[str, str]]],
+) -> bool:
+    """Validate and annotate hierarchy rows; return False for a legacy flat sheet."""
+    hierarchy_keys = {"campaign_key", "ad_set_key", "ad_key"}
+    row_flags = [any(str(row.get(key, "")).strip() for key in hierarchy_keys) for _, row in indexed_rows]
+    if not any(row_flags):
+        return False
+    if not all(row_flags):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Client {client_id}: hierarchy keys must be present on every row or on none of the rows.",
+        )
+    contract_rows: list[BatchRowContract] = []
+    for index, row in indexed_rows:
+        payload = {key: value for key, value in row.items() if key in BatchRowContract.model_fields}
+        payload["body_copy"] = row.get("body_copy") or row.get("ad_text") or ""
+        payload["creative_url"] = row.get("creative_url") or row.get("creative_file") or ""
+        for optional_field in ("campaign_budget_amount", "ad_set_budget_amount", "creative_mime_type", "instagram_actor_id"):
+            if payload.get(optional_field) == "":
+                payload[optional_field] = None
+        if payload.get("placements") == "":
+            payload["placements"] = []
+        if payload.get("schedule") == "":
+            payload["schedule"] = {}
+        if not payload.get("creative_mime_type"):
+            extension = PurePath(urlsplit(payload["creative_url"]).path).suffix.casefold()
+            payload["creative_mime_type"] = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(extension)
+        try:
+            contract_rows.append(BatchRowContract.model_validate(payload))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid campaign hierarchy at source row {index}: {exc}",
+            ) from exc
+    try:
+        validated_rows = validate_batch_row_consistency(contract_rows)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    for (_, row), hierarchy_row in zip(indexed_rows, validated_rows):
+        row["_hierarchy_data"] = hierarchy_row.model_dump(mode="json")
+        row["ad_text"] = hierarchy_row.body_copy
+        row["headline"] = hierarchy_row.headline
+        row["creative_file"] = hierarchy_row.creative_url
+    return True
+
+
 def _dispatch_pending_jobs() -> None:
     try:
         outbox.dispatch_pending_jobs(enqueue_fn=enqueue_ad_jobs)
@@ -160,6 +210,9 @@ def _persist_upload(
     else:
         for client_id in known_rows_by_client:
             require_client_access(user, client_id)
+
+    for client_id, indexed_rows in known_rows_by_client.items():
+        validate_hierarchy_rows(client_id, indexed_rows)
     rejected.sort(key=lambda row: row.data_row_index)
 
     batch_id = str(uuid4())
@@ -218,6 +271,10 @@ def _persist_upload(
                             "headline": row.get("headline") or None,
                             "destination_url": row["destination_url"],
                             "creative_file": row.get("creative_file", ""),
+                            "campaign_key": row.get("campaign_key"),
+                            "ad_set_key": row.get("ad_set_key"),
+                            "ad_key": row.get("ad_key"),
+                            "hierarchy_data": row.get("_hierarchy_data"),
                             "row_hash": hash_normalized_row(row),
                             "sheet_hash": parsed.sheet_hash,
                         }
@@ -451,6 +508,46 @@ SUPPORTED_CREATIVE_MIMES = {
     "application/pdf",
 }
 
+_CREATIVE_MIME_BY_EXTENSION = {
+    ".png": {"image/png"},
+    ".jpg": {"image/jpeg", "image/jpg"},
+    ".jpeg": {"image/jpeg", "image/jpg"},
+    ".webp": {"image/webp"},
+    ".gif": {"image/gif"},
+    ".bmp": {"image/bmp", "image/x-ms-bmp"},
+    ".tif": {"image/tiff", "image/tif", "image/x-tiff"},
+    ".tiff": {"image/tiff", "image/tif", "image/x-tiff"},
+    ".avif": {"image/avif"},
+    ".heic": {"image/heic"},
+    ".heif": {"image/heif"},
+    ".mp4": {"video/mp4"},
+    ".pdf": {"application/pdf"},
+}
+
+
+def _creative_signature_matches(extension: str, content: bytes) -> bool:
+    if extension == ".png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if extension in {".jpg", ".jpeg"}:
+        return content.startswith(b"\xff\xd8\xff")
+    if extension == ".webp":
+        return content.startswith(b"RIFF") and b"WEBP" in content[:16]
+    if extension == ".gif":
+        return content.startswith((b"GIF87a", b"GIF89a"))
+    if extension == ".bmp":
+        return content.startswith(b"BM")
+    if extension in {".tif", ".tiff"}:
+        return content.startswith((b"II*\x00", b"MM\x00*"))
+    if extension == ".avif":
+        return len(content) >= 12 and content[4:8] == b"ftyp" and content[8:12] in {b"avif", b"avis"}
+    if extension in {".heic", ".heif"}:
+        return len(content) >= 12 and content[4:8] == b"ftyp" and content[8:12] in {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1"}
+    if extension == ".mp4":
+        return len(content) >= 12 and content[4:8] == b"ftyp"
+    if extension == ".pdf":
+        return content.startswith(b"%PDF-")
+    return False
+
 
 @router.post("/uploads/creative")
 async def upload_creative(
@@ -464,7 +561,7 @@ async def upload_creative(
     ext = PurePath(filename.replace("\\", "/")).suffix.casefold()
     content_type = (file.content_type or "").split(";", 1)[0].strip().casefold()
 
-    if ext not in SUPPORTED_CREATIVE_EXTENSIONS and content_type not in SUPPORTED_CREATIVE_MIMES:
+    if ext not in SUPPORTED_CREATIVE_EXTENSIONS or content_type not in _CREATIVE_MIME_BY_EXTENSION.get(ext, set()):
         raise HTTPException(
             status_code=415,
             detail={
@@ -487,6 +584,15 @@ async def upload_creative(
         raise HTTPException(
             status_code=413,
             detail=f"File is larger than {_display_bytes(upload_limit)} (limit: {upload_limit} bytes)",
+        )
+
+    if not _creative_signature_matches(ext, content):
+        raise HTTPException(
+            status_code=415,
+            detail={
+                "reason_code": "file_signature_mismatch",
+                "message": "File contents do not match the declared creative format.",
+            },
         )
 
     file_store = get_file_store()

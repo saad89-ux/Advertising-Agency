@@ -56,8 +56,8 @@ def run_meta_smoke() -> int:
     load_dotenv()
 
     server_url = os.environ.get("MCP_META_SERVER_URL", "").strip() or "https://mcp.facebook.com/ads"
-    access_token = os.environ.get("META_MCP_ACCESS_TOKEN", "").strip()
-    ad_account_id = os.environ.get("META_AD_ACCOUNT_ID", "").strip()
+    access_token = os.environ.get("META_SYSTEM_USER_TOKEN", "").strip()
+    ad_account_id = ""
 
     print(f"Target MCP Endpoint : {server_url}")
     print(f"Token Configured    : {'YES (' + _mask_token(access_token) + ')' if access_token else 'NO'}")
@@ -66,8 +66,8 @@ def run_meta_smoke() -> int:
 
     # 1. Configuration Check
     if not access_token:
-        print("\n[CONFIG ERROR] META_MCP_ACCESS_TOKEN is missing in .env.")
-        print("Please add META_MCP_ACCESS_TOKEN to .env with your Meta Business Bearer token.")
+        print("\n[CONFIG ERROR] META_SYSTEM_USER_TOKEN is missing in .env.")
+        print("Please add META_SYSTEM_USER_TOKEN to .env with the agency System User token.")
         print("Required scopes: ads_management, ads_read, ads_mcp_management.")
         return 1
 
@@ -94,7 +94,7 @@ def run_meta_smoke() -> int:
         print(f"\n[FAIL] Handshake failed after {duration:.2f}s: {err_msg}")
         if "401" in err_msg or "unauthorized" in err_msg.lower():
             print("\n>> Cause: HTTP 401 Unauthorized.")
-            print(">> Your META_MCP_ACCESS_TOKEN is invalid, expired, or missing required scopes.")
+            print(">> Your META_SYSTEM_USER_TOKEN is invalid, expired, or missing required scopes.")
             return 3
         if "403" in err_msg or "forbidden" in err_msg.lower():
             print("\n>> Cause: HTTP 403 Forbidden.")
@@ -115,7 +115,7 @@ def run_meta_smoke() -> int:
         # Fallback to ads_get_ad_accounts if no specific account ID is set
         chosen_tool = "ads_get_ad_accounts" if "ads_get_ad_accounts" in tool_names else tool_names[0]
         tool_args = {}
-        print(f"META_AD_ACCOUNT_ID not set. Calling account listing tool '{chosen_tool}'...")
+        print(f"No workspace account was supplied. Calling account listing tool '{chosen_tool}'...")
 
     call_start = time.monotonic()
     res = client.call_tool_sync(chosen_tool, tool_args)

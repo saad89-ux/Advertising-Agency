@@ -12,6 +12,8 @@ from redis import Redis
 
 
 AD_JOB_QUEUE = "launch_gate:ad_jobs"
+META_SYNC_QUEUE = "launch_gate:meta_sync_jobs"
+META_SYNC_PROCESSING_QUEUE = "launch_gate:meta_sync_jobs:processing"
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,16 @@ class AdJob:
 
     batch_id: str
     ad_id: str
+
+
+@dataclass(frozen=True)
+class MetaSyncJob:
+    """Workspace-scoped Meta sync request stored in Redis by ID only."""
+
+    sync_id: str
+    workspace_id: str
+    sync_type: str
+    lookback_days: int
 
 
 def _redis_client() -> Redis:
@@ -46,6 +58,95 @@ def enqueue_ad_jobs(
             for job in jobs
         ]
         return int(client.rpush(AD_JOB_QUEUE, *messages))
+    finally:
+        if redis_client is None:
+            client.close()
+
+
+def enqueue_meta_sync_job(
+    job: MetaSyncJob, *, redis_client: Redis | None = None
+) -> int:
+    """Persist a compact Meta sync request for the background worker."""
+    return enqueue_meta_sync_jobs((job,), redis_client=redis_client)
+
+
+def enqueue_meta_sync_jobs(
+    jobs: Sequence[MetaSyncJob], *, redis_client: Redis | None = None
+) -> int:
+    """Append validated Meta sync requests to Redis in one operation."""
+    if not jobs:
+        return 0
+    if any(
+        not job.sync_id.strip()
+        or not job.workspace_id.strip()
+        or job.sync_type not in {"INITIAL_IMPORT", "METRIC_REFRESH"}
+        or isinstance(job.lookback_days, bool)
+        or not isinstance(job.lookback_days, int)
+        or not 1 <= job.lookback_days <= 90
+        for job in jobs
+    ):
+        raise ValueError("invalid Meta sync job")
+    client = redis_client or _redis_client()
+    try:
+        messages = [
+            json.dumps(asdict(job), separators=(",", ":"), sort_keys=True)
+            for job in jobs
+        ]
+        return int(client.rpush(META_SYNC_QUEUE, *messages))
+    finally:
+        if redis_client is None:
+            client.close()
+
+
+def claim_meta_sync_job(*, redis_client: Redis | None = None) -> str | None:
+    """Atomically move the oldest pending sync request to the processing list."""
+    client = redis_client or _redis_client()
+    try:
+        return client.lmove(META_SYNC_QUEUE, META_SYNC_PROCESSING_QUEUE, "LEFT", "RIGHT")
+    finally:
+        if redis_client is None:
+            client.close()
+
+
+def acknowledge_meta_sync_job(message: str, *, redis_client: Redis | None = None) -> int:
+    """Remove a completed sync request from the processing list."""
+    client = redis_client or _redis_client()
+    try:
+        return int(client.lrem(META_SYNC_PROCESSING_QUEUE, 1, message))
+    finally:
+        if redis_client is None:
+            client.close()
+
+
+def retry_meta_sync_job(message: str, *, redis_client: Redis | None = None) -> None:
+    """Atomically return a failed-to-execute sync request to the pending list."""
+    client = redis_client or _redis_client()
+    try:
+        moved = client.eval(
+            """if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
+                   return redis.call('LPUSH', KEYS[2], ARGV[1])
+               end
+               return 0""",
+            2,
+            META_SYNC_PROCESSING_QUEUE,
+            META_SYNC_QUEUE,
+            message,
+        )
+        if not moved:
+            raise RuntimeError("could not return the claimed Meta sync job to its queue")
+    finally:
+        if redis_client is None:
+            client.close()
+
+
+def recover_meta_sync_jobs(*, redis_client: Redis | None = None) -> int:
+    """Restore jobs left in processing by a worker that stopped before acknowledging."""
+    client = redis_client or _redis_client()
+    recovered = 0
+    try:
+        while client.lmove(META_SYNC_PROCESSING_QUEUE, META_SYNC_QUEUE, "RIGHT", "LEFT") is not None:
+            recovered += 1
+        return recovered
     finally:
         if redis_client is None:
             client.close()
