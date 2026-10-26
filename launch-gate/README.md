@@ -1,391 +1,119 @@
 # Launch Gate
 
-**Pre-Launch Ad Verification Gate for Performance Marketing Agencies**  
-*Stop finding out about mistakes from the client.* (PRD §1)
+Launch Gate is a pre-launch quality-control application for advertising campaigns. It helps an agency review a batch of ads before they go live, so problems can be found while the campaign is still being prepared rather than after launch.
 
-Launch Gate is an automated pre-launch verification pipeline and reviewer cockpit. Media buyers upload spreadsheet batches (CSV or XLSX) containing ad copy, platform targeting, URLs, and creative assets. Launch Gate turns messy rows into validated records, evaluates mechanical platform rules, opens landing pages headlessly to verify offers and UTM survivability, verifies wording claims against client brand books and claims registers, derives deterministic composite verdicts, and provides an interactive review screen for buyers and account managers. Only ads approved by a person can ever be sent to ad platforms (switched to dry-run stand-in platform in v1).
+## The Problem It Solves
 
----
+Launch details often arrive in spreadsheets, while tracking conventions, platform limits, landing-page offers, and client-specific wording rules have to be checked separately. When those checks rely on a long manual checklist, some can be missed or applied inconsistently. Errors such as broken tracking parameters, incorrect offer details, platform rejections, or wording that does not follow a client's rules can lead to wasted ad spend, rework, and client dissatisfaction.
 
-## Architecture & Core Invariants
+Launch Gate brings those checks into one review workflow. It is designed for advertising buyers and account managers who need to check many ads consistently without handing launch decisions over to an automated system.
 
-### Verification Dataflow Architecture
+## How It Works
 
-```
-[ Upload Sheet (CSV/XLSX) ]
-           │
-           ▼
-[ Ingest & Deduplication ] ───► Isolates malformed rows, hashes row and sheet
-           │
-           ▼
-[ Mechanical Layer ] ────────► UTM presence, UTM naming, character limits, creative ratios
-           │
-           ▼
-[ Headless Page Layer ] ─────► Playwright opens URL: 404s, UTM redirect drops, discount/threshold mismatches, offer expiration
-           │
-           ▼
-[ Wording & Citation Layer ] ─► Client-scoped retrieval over brand book & claims register, Gemini LLM check, output guard
-           │
-           ▼
-[ Verdict Engine ] ──────────► Deterministic aggregation: ready | fix needed | blocked | needs a person (LangGraph flow)
-           │
-           ▼
-[ Reviewer Cockpit & SSE ] ──► Interactive review screen: approve (with evidence), edit copy, dismiss finding
-           │
-           ▼
-[ Idempotent Sender ] ───────► Dry-run stand-in platform with backoff, timeouts, dead-letter queue, person alerts
-           │
-           ▼
-[ Metrics & Release Gate ] ──► Quality, reviewer, financial ledger, simulated rejection rates, CI release gate
-```
+1. A buyer uploads a campaign launch sheet in CSV or XLSX format.
+2. Launch Gate normalizes the rows, avoids adding a duplicate sheet again, and isolates malformed rows so they do not prevent other ads from being checked.
+3. It checks each ad for tracking and platform requirements, compares the ad with its landing page using read-only page checks, and checks wording against the relevant client's rules.
+4. Each ad receives findings and a verdict, such as `ready`, `fix needed`, `blocked`, or `needs a person`. The reviewer sees the ad alongside the findings and can approve, edit, or reject it.
+5. Only the approved version is eligible to be sent. By default, local development sends to a stand-in platform in dry-run mode; it does not publish real ads.
 
-### The 7 Never-Break Invariants
+The goal is to make pre-launch checks more consistent and their results easier to review. Launch Gate provides decision support: a person remains responsible for approval, and uncertain cases are surfaced for human judgment.
 
-1. **Human Approval Gate (Rule 1)**: No ad is sent to any platform without a human reviewer's approval recorded in the audit trail.
-2. **Approved Version Idempotency (Rule 2 / PRD D13)**: Only the exact version approved by the reviewer (verified via cryptographic content hash) can be sent. Each send is keyed by a deterministic idempotency key.
-3. **False Alarm Ceiling (Rule 3 / PRD §3)**: Clean rows false alarms must never exceed 5.0% (target $\le 3.0\%$).
-4. **Tenant Isolation & Least Privilege (Rule 4 / Needs: 28)**: Strict separation of client rules and access per row (`client_id` scoping). Zero cross-client rule citations, data leaks, or unauthorized access.
-5. **Step & Spend Caps (Rule 5 / PRD §4.5)**: Hard cap of 5 steps per row and spend cap of $\$0.01$ per row ($\$0.25$ per 100 ads average target, $\$15.00$ assessment budget cap).
-6. **No Automatic Relaunch (Rule 6 / PRD §4.6)**: Any platform rejection or uncertain send state alerts a person and returns the ad to review. Never automatically relaunched.
-7. **Live Platform Writes Require Authorization (Rule 7 / PRD §4.6)**: The stand-in dry-run sender is the default. Explicitly human-authorized Meta launches are available only when both `META_MCP_ENABLE_LIVE` and `META_MCP_ALLOW_WRITES` are enabled; campaigns are created paused and require separate human activation. Google and TikTok writes are disabled.
+## What It Does
 
----
+- Accepts CSV and XLSX launch sheets and normalizes their data for review.
+- Runs mechanical checks for tracking, platform text limits, and creative specifications.
+- Checks landing pages in read-only mode for page availability, tracking redirects, and offer details.
+- Applies the relevant client's brand and claims rules to wording checks, and presents citations with findings.
+- Gives reviewers a per-ad verdict and findings screen where they can approve, edit, or reject ads.
+- Records approvals and workflow data, and processes checks in the background.
 
-## Local Services & Port Map
+The project is intended for local development and testing. Deployment and CI/CD are out of scope. See [CLAUDE.md](CLAUDE.md) for project constraints and [docs/Launch_Gate_Mini_PRD.md](docs/Launch_Gate_Mini_PRD.md) for product requirements.
 
-| Service | Port | Description |
-| :--- | :---: | :--- |
-| **FastAPI Backend** | `8000` | REST API, SSE live event stream, authentication, upload ingestion, review actions, and metrics endpoints |
-| **Next.js Frontend** | `3000` | Interactive web dashboard: Home, Upload, Live Status, Reviewer Cockpit, and Quality Metrics screen |
-| **Stand-In Ad Platform** | `8100` | Synthetic dry-run ad platform simulating Meta/Google/TikTok APIs with idempotency and chaos testing |
-| **Mock Storefront Pages** | `8099` | Local mock landing pages server for headless browser page checks and discount verification |
-| **PostgreSQL + pgvector**| `5432` | Relational storage for batches, ads, approvals, findings, edits, audit logs, and vector rule embeddings |
-| **Redis** | `6379` | Message broker and job queue for asynchronous ad ingestion and outbox processing |
+## Requirements
 
----
+- Python 3.12 or newer
+- Node.js and npm
+- PostgreSQL with the `vector` extension available
+- Redis
+- Playwright Chromium for landing-page checks
 
-## Prerequisites & Installation
+PostgreSQL and Redis should be running locally before starting the application.
 
-### 1. System Requirements
+## Setup
 
-- **Python**: 3.12+ (tested with 3.12.10)
-- **Node.js**: 18+ and `npm`
-- **PostgreSQL**: 15+ (with `vector` / pgvector extension)
-- **Redis**: 7+
-- **Playwright Chromium**: for headless landing page checks
-
-### 2. Clone and Setup Python Environment
-
-From the repository root (e.g. in PowerShell on Windows or bash on macOS/Linux):
+Run these commands from the repository root. PowerShell examples are shown first; POSIX alternatives are noted where they differ.
 
 ```powershell
-# 1. Create and activate virtual environment
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1    # On Linux/macOS: source .venv/bin/activate
-
-# 2. Upgrade pip and install all Python dependencies
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-
-# 3. Install Playwright browser binary
 playwright install chromium
+npm ci --prefix apps/web
+Copy-Item .env.example .env
 ```
 
----
+On macOS or Linux, activate the environment with `source .venv/bin/activate` and copy the configuration with `cp .env.example .env`.
 
-## Environment Configuration (`.env`)
+Edit `.env` and set `DATABASE_URL`, `REDIS_URL`, and a unique `JWT_SECRET` (replace the example placeholder). Configure `MODEL_API_KEY` to enable provider-backed wording checks. Keep `.env` private; do not commit it.
 
-Copy `.env.example` to `.env` in the repository root:
+Create the database named in `DATABASE_URL` and ensure PostgreSQL can load the `vector` extension. The local runner attempts schema initialization at startup.
+
+## Start Locally
+
+With PostgreSQL and Redis running and `.env` configured, start the application from the repository root:
 
 ```powershell
-Copy-Item .env.example .env     # On Linux/macOS: cp .env.example .env
+python run_local.py
 ```
 
-Edit `.env` with your local settings:
+The runner starts the FastAPI API, background worker, Next.js development server, local stand-in platform, and mock storefront. Leave the terminal open while using the app. Press `Ctrl+C` to stop it.
 
-| Variable | Description | Default / Example |
-| :--- | :--- | :--- |
-| `DATABASE_URL` | Local PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/launch_gate` |
-| `TEST_DATABASE_URL` | Isolated test PostgreSQL database (for integration tests) | `postgresql://postgres:postgres@localhost:5432/launch_gate_test` |
-| `REDIS_URL` | Local Redis connection string | `redis://localhost:6379/0` |
-| `TEST_REDIS_URL` | Isolated test Redis database | `redis://localhost:6379/1` |
-| `JWT_SECRET` | Private secret signing key (min 32 chars; must replace placeholder) | `your-secure-random-jwt-secret-key-32chars` |
-| `JWT_EXPIRE_MINUTES` | Access token lifespan in minutes | `60` |
-| `MODEL_API_KEY` | Optional: Google Gemini API key from Google AI Studio | `AIzaSy...` (falls back to mock/heuristic rules if omitted) |
-| `SPEND_CAP_PER_ROW` | Hard spend cap per ad row in USD | `0.01` |
-| `SPEND_CAP_TOTAL` | Total assessment budget spend cap in USD | `15.00` |
-| `STORAGE_DIR` | Local directory for uploaded sheets, screenshots, evidence | `storage` |
-| `MAX_UPLOAD_BYTES` | Maximum CSV upload file size in bytes (2 MB) | `2097152` |
-| `MAX_XLSX_UNCOMPRESSED_BYTES` | Maximum XLSX uncompressed file size (20 MB) | `20971520` |
-| `MAX_EDIT_LOOPS` | Maximum allowed bounded reviewer re-check iterations | `5` |
-| `STAND_IN_PLATFORM_URL` | URL of the stand-in dry-run ad platform | `http://127.0.0.1:8100` |
-| `LOCAL_STOREFRONT_BASE` | URL for local storefront page checks | `http://127.0.0.1:8099` |
+- Web app: <http://localhost:3000>
+- API health: <http://127.0.0.1:8000/health>
+- API documentation: <http://127.0.0.1:8000/docs>
+- Stand-in platform: <http://127.0.0.1:8100/admin/stats>
+- Mock storefront: <http://127.0.0.1:8099/>
 
-> [!IMPORTANT]
-> The API will refuse to start if `JWT_SECRET` is unset or contains the default placeholder.
+If a required port is already in use, stop the other process before starting Launch Gate. For separate API or frontend startup, configuration details, or troubleshooting, see [docs/RUNNING_LOCALLY.md](docs/RUNNING_LOCALLY.md).
 
----
+## Accounts and Data
 
-## Database Initialization & Demo Seeding
-
-### Initialize Database Schema
-
-Ensure your local PostgreSQL service is running, then initialize all database tables and constraints:
-
-```powershell
-python -c "from apps.api.schema import init_schema; init_schema(); print('Schema initialized successfully.')"
-```
-
-### Provision a User
-
-Create a user for an existing client. The command prompts for a password and does not create demo users or clients:
+No demo users or batches are created automatically. User provisioning requires an existing client and prompts for a password:
 
 ```powershell
 python -m scripts.create_user --email buyer@example.com --name "Campaign Buyer" --role buyer --client-id existing-client
 ```
 
-Passwords are stored as scrypt hashes. The specified client must already exist.
+The allowed roles are `buyer` and `account_manager`. Repeat `--client-id` to assign multiple clients. Client rules, sample sheets, and synthetic storefront pages are under `data/`; use synthetic data for local testing.
 
----
+## Safety Defaults
 
-## Step-by-Step Local Run Instructions
+- The stand-in sender is the default; local sends do not publish real ads.
+- Meta live reads and writes are disabled by default. Real Meta writes require both `META_MCP_ENABLE_LIVE=true` and `META_MCP_ALLOW_WRITES=true`, as well as explicit human authorization in the application.
+- Landing-page checks are read-only. They do not submit forms or make purchases.
+- Reviewer approval is required before content can be sent.
 
-To run the complete Launch Gate system locally with live UI and dry-run execution, open five terminal windows from the repository root:
+Keep both Meta flags false for ordinary local development. See [docs/RUNNING_LOCALLY.md](docs/RUNNING_LOCALLY.md) for the read-only Meta diagnostics and integration-test procedure.
 
-### Terminal 1: Stand-In Ad Platform (Port 8100)
+## Tests
 
-Start the stand-in ad platform server which receives dry-run ad sends:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-uvicorn data.stand_in_platform.app:app --host 127.0.0.1 --port 8100
-```
-*Health check:* `http://127.0.0.1:8100/admin/stats`
-
-### Terminal 2: Local Storefront Server (Port 8099)
-
-Serve local mock landing pages used by headless page checks:
+Run the local test suite from the repository root:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m http.server 8099 --bind 127.0.0.1 -d data/storefront_pages
-```
-*Health check:* `http://127.0.0.1:8099/`
-
-### Terminal 3: FastAPI Backend API (Port 8000)
-
-Start the core FastAPI backend with reload enabled:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --reload
-```
-*Interactive Swagger docs:* `http://127.0.0.1:8000/docs`  
-*API Health check:* `http://127.0.0.1:8000/health`
-
-### Terminal 4: Asynchronous Worker Runner
-
-Start the background worker runner that processes outbox jobs and executes checks:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m apps.worker.main
+python -m pytest -q
 ```
 
-### Terminal 5: Next.js Frontend Dashboard (Port 3000)
+Tests marked `integration` require local PostgreSQL and Redis configuration. Tests marked `live_meta` are opt-in and perform read-only checks against a configured sandbox account. Do not enable live Meta writes to run tests.
 
-Install Node dependencies and start the Next.js development server:
+## Project Layout
 
-```powershell
-cd apps/web
-npm install
-npm run dev -- --hostname 127.0.0.1
-```
-*Frontend UI:* `http://localhost:3000`
-
----
-
-## End-to-End Walkthrough
-
-### 1. Log In to the Web UI
-
-1. Open `http://localhost:3000` in your browser.
-2. Enter credentials for a user provisioned with `python -m scripts.create_user`.
-3. The JWT token is stored in browser local storage and attached to subsequent API requests.
-
-### 2. Upload a Launch Sheet
-
-1. On the home screen, select **Upload Launch Sheet**.
-2. Drag and drop or browse for any sample sheet from `data/labeled_sheets/` (e.g., `sheet_01.csv` or `sheet_02.xlsx`).
-3. Click **Upload and Verify**.
-4. The file is uploaded, hashed, deduplicated against prior sheets, and partitioned into ad jobs.
-
-### 3. Live Progress Stream (SSE)
-
-1. The app automatically navigates to the batch review page with an active SSE live status pill (`connected`).
-2. As worker jobs process ads through mechanical, page, and wording layers, real-time status updates stream in via Server-Sent Events (`GET /batches/{batch_id}/events`).
-
-### 4. Reviewer Cockpit (`/review` or `/batches/{batchId}/review`)
-
-1. **Batch Summary Banner**: Displays batch status, total ads, and verdict counts:
-   - `Ready` (green): Passed all checks, 0 findings, ready for approval.
-   - `Fix Needed` (amber): Fixable mechanical, page, or wording findings.
-   - `Blocked` (red): Fatal violations (expired offer, 404 dead page, forbidden claim).
-   - `Needs a Person` (purple): Novel unregistered claims, unknown client rules, or guard triggers.
-2. **Filter & Search Tabs**: Filter ads by verdict status (`All`, `Ready`, `Fix Needed`, `Blocked`, `Needs Person`).
-3. **Ad Card & Finding Inspector**:
-   - View ad copy, platform badge, headline, and creative asset preview.
-   - Inspect findings side-by-side with rule citations, error explanations, and proposed fixes.
-   - **Reviewer Actions**:
-     - **Approve**: Opens modal to attach client approval evidence (mandatory approval note or screenshot upload) linked cryptographically to the content hash.
-     - **Edit Copy**: Edit headline, body text, or destination URL. Requires a mandatory reason; automatically re-evaluates the edited ad through a bounded re-check loop (up to 5 iterations).
-     - **Dismiss Finding**: Dismiss false-alarm findings with an explanation note; automatically recalculates the ad's verdict.
-     - **Reject Ad**: Mark an unviable ad as rejected with a permanent rejection reason.
-
-### 5. Idempotent Stand-In Send (`POST /batches/{batch_id}/send-approved`)
-
-1. Click **Send Approved Ads** in the batch header.
-2. All approved ads belonging to the user's assigned clients are dispatched to the stand-in ad platform.
-3. Each ad uses a deterministic idempotency key. Stand-in platform returns `201 Created` or `200 OK` (`Idempotent-Replay: true`).
-4. Replaying send on already-sent ads is guaranteed to create **0 duplicate platform records**.
-
-### 6. Dead-Letter Queue & Person Alerts (`/alerts`)
-
-1. If an ad encounters persistent network timeouts or repeated platform 500s across retries, it moves to the `dead_letter` state and creates a person alert.
-2. Reviewers can visit the alerts page to inspect the failure, resolve the alert with a note, and trigger a manual retry via `POST /ads/{ad_id}/retry`.
-
-### 7. Quality & Operational Metrics Screen (`/metrics`)
-
-1. Navigate to **Metrics** in the navigation bar.
-2. View real-time operational and quality KPIs:
-   - **CI Release Gate Banner**: Visual pass/fail status checking compliance against the 5% false alarm ceiling and 5% dead-letter ceiling.
-   - **Simulated Rejection Rates**: Without-gate predicted failure rate vs. with-gate platform rejection rate, showing total rejections avoided and protection effectiveness.
-   - **Problem Breakdown**: Finding counts grouped by check type (`mechanical`, `page`, `wording`), field breakdown, and top violated rules table.
-   - **Reviewer Performance**: Approvals, rejections, manual edits, dismissed false alarms, and cleaned ads count.
-   - **Financial Ledger**: Model spend per ad, total spend vs. $15 cap, total steps, and cost per 100 ads.
-   - **Export Metrics**: One-click download of the complete metrics JSON report.
-
----
-
-## Evaluation Suites & Verification Scripts
-
-Launch Gate includes reproducible evaluation scripts that score the complete verification pipeline against ground truth datasets:
-
-### 1. 30-Sheet Replay & Scoring Gate (PRD §4.7 / §11 / D9)
-
-Evaluates all 30 labeled sheets (3,260 valid ad rows, 41 malformed rows isolated) across synthetic clients:
-
-```powershell
-# Run dev split (20 sheets)
-python evals/replay_30_sheets.py --split dev
-
-# Run held-out split (10 sheets, protected with --final)
-python evals/replay_30_sheets.py --split held_out --final
-
-# Run complete 30-sheet benchmark and export JSON report
-python evals/replay_30_sheets.py --split all --final --output data/replay_30_sheets_report.json
-```
-
-**Results:**
-- **Planted Recall**: **100.00%** across all 19 planted error types (1,972 / 1,972 errors detected).
-- **Verdict Accuracy**: **100.00%** (3,260 / 3,260 valid rows correctly classified).
-- **False Alarm Rate**: **0.00%** (0 false alarms on 1,667 clean rows, target $\le 5.0\%$).
-- **False-Ready Count**: **0** (0 bad ads misclassified as `ready`).
-- **CI Release Gate**: **PASSED** in **2.62s**.
-
-### 2. Cross-Cutting Safety Suite (PRD §3 / Needs: 28, 39, 47)
-
-Evaluates 500 repeat clicks, worker crashes mid-send, and cross-client penetration probes:
-
-```powershell
-python evals/cross_cutting_safety_eval.py --output data/cross_cutting_safety_report.json
-```
-
-**Results:**
-- **500 Repeat Clicks**: 1 initial send + 499 idempotent replays $\rightarrow$ exactly **0 duplicate records** on platform; 500 unapproved clicks 100% blocked; 500 tampered clicks 100% blocked.
-- **Worker Crash Mid-Send**: Pre-network crash and post-commit crash simulations recover cleanly with 0 platform duplicates; orphaned `sending` ads reconciled to `dead_letter` with person alert and no auto-relaunch.
-- **Cross-Client Isolation**: 0 rule overlap in rule index; 10 / 10 multi-tenant API penetration probes blocked with `403 Forbidden` / `404 Not Found`; 12 / 12 adversarial prompt injection rows contained.
-
-### 3. Adversarial Guard Replay
-
-Replays the 12 owner-provided adversarial rows against input guards and tool policies:
-
-```powershell
-python evals/task20_adversarial_guard_eval.py
-```
-
-### 4. Pure Mechanical & Page Offer Replays
-
-```powershell
-# Mechanical limits and UTM naming replay
-python evals/mechanical_replay.py
-
-# Headless page check offer/discount replay
-python evals/task25_page_offer_eval.py
-```
-
----
-
-## Running the Automated Test Suite
-
-Launch Gate features a comprehensive automated test battery with over 680 tests spanning all 54 development milestones:
-
-```powershell
-# Run the complete test suite
-python -m pytest
-
-# Run with concise summary and disable cache writes
-python -m pytest -q -p no:cacheprovider
-
-# Run a specific task test file (e.g. Task 54 Safety Suite)
-python -m pytest tests/test_task54_safety_suite.py -v
-```
-
-### Optional: Real-Service Integration Tests
-
-To run real database and Redis integration tests against local test instances (opt-in):
-
-```powershell
-# Configure test database and redis in .env, then run:
-$env:RUN_INTEGRATION="1"
-python -m pytest tests/test_integration.py
-```
-
----
-
-## What is Real, Faked, Missing (PRD §11 Alignment)
-
-| Subsystem | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **Ingest Engine** | **REAL** | CSV and XLSX parsing, platform and column normalization, blank handling, SHA-256 row & sheet hashing, duplicate sheet detection, malformed row isolation. |
-| **Mechanical Rules** | **REAL** | UTM presence, platform-specific UTM naming conventions, headline/body character limits, creative size and aspect ratio matching. |
-| **Headless Page Checks** | **REAL** | Playwright Chromium browser navigation, UTM redirect preservation verification, offer text/price/date extraction, discount and threshold mismatch checks, expired offer detection. Read-only: never submits forms or purchases. |
-| **Wording & Citations** | **REAL** | Tenant-scoped retrieval over client brand books and claims registers, citation verification against real rule IDs, unknown claim human routing, prompt injection containment. |
-| **Composite Verdict Engine** | **REAL** | Deterministic LangGraph state machine aggregating ad findings into `ready`, `fix_needed`, `blocked`, and `needs_person`. Hard enforcement of 5 steps and $0.01 spend caps per row. |
-| **Reviewer Cockpit UI** | **REAL** | Next.js interactive reviewer dashboard, findings inspector, client approval evidence attachment, reviewer edits with bounded re-check loops, finding dismissal with reason audit trail. |
-| **Idempotent Sender** | **REAL** | Idempotency key per content hash, exponential backoff with jitter, request timeouts, dead-letter queue, person alerts, atomic state transitions (`approved` $\rightarrow$ `sending` $\rightarrow$ `sent` / `rejected` / `dead_letter`). |
-| **SSE Live Updates** | **REAL** | Server-Sent Events endpoint (`/batches/{batch_id}/events`) broadcasting real-time progress pills to frontend. |
-| **Metrics & Release Gate** | **REAL** | Batch and cross-batch quality metrics computation, reviewer performance tracking, financial cost ledger, simulated rejection rates with/without gate, CI production release gate enforcement. |
-| **Ad Data & Clients** | **SYNTHETIC** | 30 labeled sheets, 12 adversarial rows, synthetic clients (`brightleaf`, `calmleaf`, `oakandhome`), and mock storefront HTML pages. All evaluation reports labeled SYNTHETIC per PRD. |
-| **Stand-In Platform** | **SYNTHETIC** | FastAPI dry-run platform server (`data/stand_in_platform/app.py`) simulating platform policy rejections and network chaos (commit fails, timeouts). |
-| **Live External Ad APIs** | **LIMITED** | Human-authorized Meta campaign creation and activation are available only with both live/write opt-in flags enabled. Meta objects are created paused and activated separately. Google and TikTok writes remain disabled. |
-
----
-
-## License & Operational Notice
-
-Built for **Fernlight Media, LLC** (Denver, CO) under the Launch Gate Mini PRD specification.  
-All sample brands, ad copies, and evaluation sheets are **SYNTHETIC** datasets for performance verification and release gating.
-# Anonymous guest sessions
-
-Visitors can upload CSV/XLSX campaign sheets without signing in. The API issues a random
-256-bit guest cookie (`launch_gate_guest`) with `HttpOnly`, `Path=/`, and a 30-day default
-expiry (`GUEST_SESSION_TTL_DAYS`, valid range 1–365). The database stores only a SHA-256
-token hash and a session-specific synthetic client; batches point to that session. Guest
-cookies are revocable with `DELETE /auth/guest-session`. They are never exposed to browser
-JavaScript or placed in URLs. `APP_ENV=production` sets `Secure` and `SameSite=None`, so
-production must use HTTPS. Cookie-authenticated POST requests require an `Origin` matching
-`FRONTEND_ORIGINS`; configure that list narrowly and keep credentialed CORS enabled only
-for those trusted origins. New sessions are limited to 20 per source address per hour;
-the limiter stores an IP hash and does not participate in ownership checks. Employees
-continue using JWTs and assigned-client permissions.
+- `apps/api/`: FastAPI endpoints, authentication, access control, and approval APIs.
+- `apps/web/`: Next.js user interface.
+- `apps/worker/`: background checks and sender workflows.
+- `packages/`: shared contracts, guards, and mechanical rules.
+- `data/`: client rules, synthetic fixtures, and evaluation inputs.
+- `evals/`: local replay and evaluation scripts.
+- `tests/`: automated tests.
+- `storage/`: generated local artifacts; not source data.
+- `docs/`: product, architecture, and local-running documentation.
