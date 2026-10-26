@@ -1,0 +1,70 @@
+# Render Blueprint for Launch Gate (backend API + worker + Redis).
+# The frontend (Next.js) is deployed separately on Vercel.
+services:
+  - type: web
+    name: launchgate-api
+    runtime: docker
+    rootDir: launch-gate
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      # --- mode & safety -------------------------------------------------
+      - key: APP_ENV
+        value: production
+      - key: REQUIRE_CLOUDINARY
+        value: "true"
+      - key: ALLOW_DYNAMIC_CLIENTS
+        value: "true"
+      - key: META_MCP_ENABLE_LIVE
+        value: "false"
+      - key: META_MCP_ALLOW_WRITES
+        value: "false"
+      - key: NOTIFICATION_DELIVERY_SINK
+        value: smtp
+      - key: SPEND_CAP_PER_ROW
+        value: "0.01"
+      - key: SPEND_CAP_TOTAL
+        value: "15.00"
+      - key: PLAYWRIGHT_NO_SANDBOX
+        value: "false"
+      # Render's internal proxies use private 10.x addresses; without this every
+      # visitor looks like the same IP and shares one login rate-limit bucket.
+      - key: TRUSTED_PROXIES
+        value: 10.0.0.0/8
+      # --- generated / wired automatically ---------------------------------
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: launchgate-redis
+          property: connectionString
+      # --- you fill these in (secrets) -------------------------------------
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLOUDINARY_FOLDER
+        value: launchgate_campaigns
+      - key: MODEL_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+
+  - type: keyvalue
+    name: launchgate-redis
+    plan: free
+    region: singapore
+    # Queue safety: "noeviction" makes Redis refuse writes when full instead of
+    # silently deleting queued ad jobs (the default policy would delete them).
+    maxmemoryPolicy: noeviction
+    # Empty allow-list = reachable only from your other Render services (private).
+    ipAllowList: []

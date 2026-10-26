@@ -1,18 +1,21 @@
+
 .env
-/storage/
+.env.*
+!.env.example
+!.env.*.example
 
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
-.venv/
 .pytest_temp/
+.venv/
+venv/
+.coverage
+htmlcov/
 
 node_modules/
+.next/
 
+/storage/
 
-
-# Next.js generated files
-apps/web/.next/
-
-# Local RAR backup (if inside the repository)
-launch-gate.rar
+/launch-gate.rar

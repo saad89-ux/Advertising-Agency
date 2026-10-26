@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.pytest_temp
+node_modules
+apps/web
+tests
+docs
+storage
+*.rar
