@@ -1603,32 +1603,49 @@ def launch_batch(
                         status_code=422,
                         detail="No real ads were found for this batch. Upload a campaign sheet or provide complete campaign copy and a destination URL before launching.",
                     )
-                generated_ad_id = f"ad_{actual_batch_id[:12]}_{uuid.uuid4().hex[:6]}"
                 ad_headline = req.headline.strip()
                 ad_text = req.ad_text.strip()
                 dest_url = req.destination_url.strip()
-                canonical = {"platform": normalized_platforms[0], "headline": ad_headline,
-                             "ad_text": ad_text, "destination_url": dest_url,
-                             "creative_file": req.creative_file or ""}
-                cur.execute(
-                    """
-                    INSERT INTO ads (
-                        ad_id, batch_id, client_id, row_number, platform, headline, ad_text, destination_url,
-                        creative_file, row_hash, sheet_hash, is_sample
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
-                    ON CONFLICT (ad_id) DO NOTHING;
-                    """,
-                    (
-                        generated_ad_id, actual_batch_id, req.client_id, 1, normalized_platforms[0],
-                        ad_headline, ad_text, dest_url, req.creative_file,
-                        hash_normalized_row(canonical), hash_normalized_sheet([canonical]),
-                    ),
-                )
+                canonical_rows = [
+                    {
+                        "platform": platform,
+                        "headline": ad_headline,
+                        "ad_text": ad_text,
+                        "destination_url": dest_url,
+                        "creative_file": req.creative_file or "",
+                    }
+                    for platform in normalized_platforms
+                ]
+                generated_sheet_hash = hash_normalized_sheet(canonical_rows)
+                ads_list = []
+                for row_number, canonical in enumerate(canonical_rows, start=1):
+                    generated_ad_id = f"ad_{actual_batch_id[:12]}_{uuid.uuid4().hex[:6]}"
+                    row_hash = hash_normalized_row(canonical)
+                    cur.execute(
+                        """
+                        INSERT INTO ads (
+                            ad_id, batch_id, client_id, row_number, platform, headline, ad_text, destination_url,
+                            creative_file, row_hash, sheet_hash, is_sample
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                        ON CONFLICT (ad_id) DO NOTHING;
+                        """,
+                        (
+                            generated_ad_id, actual_batch_id, req.client_id, row_number, canonical["platform"],
+                            ad_headline, ad_text, dest_url, req.creative_file,
+                            row_hash, generated_sheet_hash,
+                        ),
+                    )
+                    ads_list.append((
+                        generated_ad_id, ad_headline, ad_text, dest_url, row_hash,
+                        req.creative_file, canonical["platform"], None,
+                    ))
                 from apps.api import outbox
                 from apps.api.queue import AdJob
-                outbox.persist_ad_jobs_on_connection(conn, [AdJob(batch_id=actual_batch_id, ad_id=generated_ad_id)])
-                cur.execute("UPDATE batches SET sheet_hash = %s WHERE batch_id = %s", (hash_normalized_sheet([canonical]), actual_batch_id))
-                ads_list = [(generated_ad_id, ad_headline, ad_text, dest_url, hash_normalized_row(canonical), req.creative_file, normalized_platforms[0], None)]
+                outbox.persist_ad_jobs_on_connection(
+                    conn,
+                    [AdJob(batch_id=actual_batch_id, ad_id=row[0]) for row in ads_list],
+                )
+                cur.execute("UPDATE batches SET sheet_hash = %s WHERE batch_id = %s", (generated_sheet_hash, actual_batch_id))
 
             hierarchy_by_ad_id: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, str]] = {}
             campaign_parent_ids: dict[str, str] = {}
@@ -1741,11 +1758,14 @@ def launch_batch(
                 cur.execute("INSERT INTO approval_history (ad_id, from_state, to_state, changed_by, content_hash, reason) VALUES (%s,%s,%s,%s,%s,%s)",
                             (ad_id, existing_approval[0] if existing_approval else 'pending_review', 'approved', user.user_id, ad_row[4], 'Explicit campaign authorization'))
                 conn.commit()
-                row_platforms = (
-                    [normalize_platform(str(ad_row[6])).canonical_value]
-                    if req.campaigns or not req.meta_launch
-                    else normalized_platforms
-                )
+                batch_platforms = {
+                    normalize_platform(str(row[6])).canonical_value
+                    for row in ads_list
+                }
+                row_scoped_platforms = bool(ads_list) and batch_platforms == set(normalized_platforms)
+                row_platforms = [normalize_platform(str(ad_row[6])).canonical_value] if (
+                    req.campaigns or not req.meta_launch or row_scoped_platforms
+                ) else normalized_platforms
                 for plat in row_platforms:
                     if plat not in {"facebook", "instagram"}:
                         raise HTTPException(status_code=422, detail=f"Ad {ad_id} has unsupported platform in hierarchy.")

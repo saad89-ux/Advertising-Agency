@@ -127,7 +127,7 @@ def test_input_mode_1_prompt_launch(auth_client, clean_db):
     data = res.json()
     assert data["launch_attempt_id"] == attempt_id
     assert data["batch_id"].startswith("batch_")
-    assert len(data["results"]) == 2  # Facebook & Instagram
+    assert {item["platform"] for item in data["results"]} == {"facebook", "instagram"}
 
 
 def test_input_mode_2_spreadsheet_upload(auth_client, clean_db):

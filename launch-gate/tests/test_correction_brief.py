@@ -85,7 +85,7 @@ def test_prompt_launch_and_repeat_history(client):
     assert response.status_code == 201, response.text
     data = response.json()
     assert data["status"] == "launched"
-    assert len(data["results"]) == 1
+    assert {item["platform"] for item in data["results"]} == {"facebook", "instagram"}
     assert data["notifications"] == []
     assert "sms_dispatch" not in data["notification_contact"]
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
@@ -94,13 +94,14 @@ def test_prompt_launch_and_repeat_history(client):
         again = client.post("/campaign-flow/launch-batch", json=payload(batch_id=batch))
         assert again.status_code == 201, again.text
     history = client.get("/campaign-flow/chat-history").json()
-    assert next(row for row in history if row["batch_id"] == batch)["ad_count"] == 1
+    assert next(row for row in history if row["batch_id"] == batch)["ad_count"] == 2
     with get_session() as conn:
-        row = conn.execute("SELECT a.row_hash,a.sheet_hash,p.content_hash,p.approved_by FROM ads a JOIN ad_approvals p USING (ad_id) WHERE a.batch_id=%s", (batch,)).fetchone()
-        assert row[0] and row[1] and row[0] == row[2] and row[3] == "brief-user"
+        rows = conn.execute("SELECT a.row_hash,a.sheet_hash,p.content_hash,p.approved_by FROM ads a JOIN ad_approvals p USING (ad_id) WHERE a.batch_id=%s", (batch,)).fetchall()
+        assert len(rows) == 2
+        assert all(row[0] and row[1] and row[0] == row[2] and row[3] == "brief-user" for row in rows)
         assert conn.execute("SELECT COUNT(*) FROM campaign_launch_contacts WHERE batch_id=%s", (batch,)).fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM send_alerts WHERE batch_id=%s", (batch,)).fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM ad_sends WHERE batch_id=%s AND is_dry_run=TRUE", (batch,)).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM ad_sends WHERE batch_id=%s AND is_dry_run=TRUE", (batch,)).fetchone()[0] == 2
     assert client.get(f"/batches/{batch}").status_code == 200
 
 

@@ -25,14 +25,15 @@ def test_create_ads_table_ensures_client_table_and_issues_ddl(monkeypatch):
 
     assert calls["clients"] == 1
     assert calls["batches"] == 1
-    assert len(calls["statements"]) == 2
-    statement = calls["statements"][0]
-    assert "CREATE TABLE IF NOT EXISTS ads" in statement
-    assert "client_id TEXT NOT NULL REFERENCES clients (client_id)" in statement
-    assert "row_hash TEXT NOT NULL" in statement
-    assert "sheet_hash TEXT NOT NULL" in statement
-    assert "row_number > 0" in statement
-    assert "ad_text IS NOT NULL" in statement
-    assert "headline IS NOT NULL" in statement
-    assert "batch_id TEXT NOT NULL REFERENCES batches (batch_id)" in statement
-    assert "ads_batch_id_fkey" in calls["statements"][1]
+    schema_sql = "\n".join(calls["statements"])
+    assert "CREATE TABLE IF NOT EXISTS ads" in schema_sql
+    assert "client_id TEXT NOT NULL REFERENCES clients (client_id)" in schema_sql
+    assert "row_hash TEXT NOT NULL" in schema_sql
+    assert "sheet_hash TEXT NOT NULL" in schema_sql
+    assert "row_number > 0" in schema_sql
+    assert "ad_text IS NOT NULL" in schema_sql
+    assert "headline IS NOT NULL" in schema_sql
+    assert "batch_id TEXT NOT NULL REFERENCES batches (batch_id)" in schema_sql
+    assert "hierarchy_data JSONB" in schema_sql
+    assert "uq_ads_batch_client_ad_key" in schema_sql
+    assert "ads_batch_id_fkey" in schema_sql
