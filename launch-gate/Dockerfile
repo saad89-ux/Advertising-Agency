@@ -30,4 +30,4 @@ RUN useradd --create-home --uid 1000 app && \
 USER app
 
 EXPOSE 8000
-CMD ["sh", "deploy/start.sh"]
+   CMD ["sh", "start.sh"]
